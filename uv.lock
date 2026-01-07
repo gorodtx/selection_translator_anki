@@ -541,6 +541,7 @@ dev = [
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "types-python-xlib" },
 ]
 
 [package.metadata]
@@ -552,6 +553,16 @@ dev = [
     { name = "pyright", specifier = ">=1.1.407" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "ruff", specifier = ">=0.14.10" },
+    { name = "types-python-xlib", specifier = ">=0.33.0.20250809" },
+]
+
+[[package]]
+name = "types-python-xlib"
+version = "0.33.0.20250809"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/68/87dccc8085d97c7fce9404e322868af5a600f0c56eee246ff2748d33be90/types_python_xlib-0.33.0.20250809.tar.gz", hash = "sha256:3f34af29dff65d898d3415c40046c3823d2f12cd4dc695060c8b1050f3904696", size = 54067, upload-time = "2025-08-09T03:15:25.753Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/32/35cb639db4300bce270b1d0d621c68ea9607cf3580ee8523e36414853913/types_python_xlib-0.33.0.20250809-py3-none-any.whl", hash = "sha256:021a2255b35166df730fd96fd282103b664db2b9857c9bae5ce699cdeb62373b", size = 67538, upload-time = "2025-08-09T03:15:24.924Z" },
 ]
 
 [[package]]

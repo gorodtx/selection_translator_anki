@@ -12,5 +12,3 @@ Behavior:
 - IPA/examples can be supplemented by DictionaryAPI/Tatoeba.
 - Input keeps punctuation, collapses whitespace, max 200 chars; >5 words skip Cambridge.
 - Async via aiohttp with an in-memory LRU+TTL cache; no audio.
-
-Quality gate: `make check`

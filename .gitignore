@@ -710,4 +710,4 @@ test.*
 # End of https://www.toptal.com/developers/gitignore/api/python,pycharm+all,vs,jupyternotebooks,c,c++
 
 *.docker-compose.local.yaml
-.uv-cachew
+.uv-cache
