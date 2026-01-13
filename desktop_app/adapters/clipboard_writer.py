@@ -4,17 +4,14 @@ import importlib
 import os
 import shutil
 import subprocess
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from desktop_app.gtk_types import Gdk, GLib
-else:
-    import gi
-
-    gi.require_version("Gdk", "4.0")
-    gi.require_version("GLib", "2.0")
-    Gdk = importlib.import_module("gi.repository.Gdk")
-    GLib = importlib.import_module("gi.repository.GLib")
+gi = importlib.import_module("gi")
+require_version = getattr(gi, "require_version", None)
+if callable(require_version):
+    require_version("Gdk", "4.0")
+    require_version("GLib", "2.0")
+Gdk = importlib.import_module("gi.repository.Gdk")
+GLib = importlib.import_module("gi.repository.GLib")
 
 
 class ClipboardWriter:

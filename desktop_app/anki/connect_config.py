@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import TypeGuard
 
 DEFAULT_CONFIG_PATH = Path.home() / ".local/share/Anki2/addons21/2055492159/config.json"
 FLATPAK_CONFIG_PATH = (
@@ -62,12 +63,8 @@ def _read_config(path: Path) -> dict[str, object] | None:
         payload: object = json.loads(raw)
     except (OSError, json.JSONDecodeError):
         return None
-    if isinstance(payload, dict):
-        output: dict[str, object] = {}
-        for key, item in payload.items():
-            if isinstance(key, str):
-                output[key] = item
-        return output
+    if _is_str_dict(payload):
+        return dict(payload)
     return None
 
 
@@ -86,3 +83,7 @@ def _coerce_int(value: object | None) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _is_str_dict(value: object | None) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)

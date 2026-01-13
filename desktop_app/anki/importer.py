@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import zipfile
+from typing import TypeGuard
 
 from desktop_app.anki.field_hints import score_field_match
 
@@ -147,17 +148,13 @@ def _load_json(data: str) -> object:
 
 
 def _coerce_dict(value: object) -> dict[str, object] | None:
-    if isinstance(value, dict):
-        output: dict[str, object] = {}
-        for raw_key, raw_item in value.items():
-            if isinstance(raw_key, str):
-                output[raw_key] = raw_item
-        return output
+    if _is_str_dict(value):
+        return dict(value)
     return None
 
 
 def _coerce_list(value: object) -> list[object] | None:
-    if isinstance(value, list):
+    if _is_object_list(value):
         return list(value)
     return None
 
@@ -183,6 +180,14 @@ def _coerce_int(value: object) -> int | None:
     return None
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _select_deck(decks: dict[str, object]) -> DeckInfo | None:
     candidates: list[DeckInfo] = []
     for raw_key, raw_item in decks.items():
@@ -202,15 +207,16 @@ def _select_deck(decks: dict[str, object]) -> DeckInfo | None:
 
 
 def _parse_deck_info(deck_id: int, value: object) -> DeckInfo | None:
-    if not isinstance(value, dict):
+    deck_dict = _coerce_dict(value)
+    if deck_dict is None:
         return None
-    name = _coerce_str(value.get("name"))
+    name = _coerce_str(deck_dict.get("name"))
     if name is None or not name.strip():
         return None
-    dyn = _coerce_int(value.get("dyn"))
+    dyn = _coerce_int(deck_dict.get("dyn"))
     if dyn == 1:
         return None
-    model_id = _coerce_int(value.get("mid"))
+    model_id = _coerce_int(deck_dict.get("mid"))
     return DeckInfo(deck_id=deck_id, name=name.strip(), model_id=model_id)
 
 
@@ -284,18 +290,20 @@ def _select_best_model(
 
 
 def _parse_model_info(value: object) -> ModelInfo | None:
-    if not isinstance(value, dict):
+    model_dict = _coerce_dict(value)
+    if model_dict is None:
         return None
-    model_id = _coerce_int(value.get("id"))
-    name = _coerce_str(value.get("name"))
-    raw_fields = _coerce_list(value.get("flds"))
+    model_id = _coerce_int(model_dict.get("id"))
+    name = _coerce_str(model_dict.get("name"))
+    raw_fields = _coerce_list(model_dict.get("flds"))
     if model_id is None or name is None or raw_fields is None:
         return None
     fields: list[str] = []
     for entry in raw_fields:
-        if not isinstance(entry, dict):
+        entry_dict = _coerce_dict(entry)
+        if entry_dict is None:
             continue
-        field_name = _coerce_str(entry.get("name"))
+        field_name = _coerce_str(entry_dict.get("name"))
         if field_name is None or not field_name.strip():
             continue
         fields.append(field_name.strip())

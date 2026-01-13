@@ -58,14 +58,14 @@ async def translate_google(
     except FetchError:
         return GoogleResult(translations=[])
     try:
-        translations = _parse_google_response(payload)
+        translations = parse_google_response(payload)
     except Exception as exc:
         logger.warning("Google parse failed: %s", exc)
         return GoogleResult(translations=[])
     return GoogleResult(translations=translations)
 
 
-def _parse_google_response(payload: str) -> list[str]:
+def parse_google_response(payload: str) -> list[str]:
     raw_payload: JsonValue = json.loads(payload)
     raw_data = _as_dict(raw_payload)
     if raw_data is None:

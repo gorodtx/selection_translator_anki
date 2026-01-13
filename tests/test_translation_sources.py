@@ -8,7 +8,7 @@ from translate_logic.providers.cambridge import (
     parse_cambridge_page,
     translate_cambridge,
 )
-from translate_logic.providers.google import _parse_google_response
+from translate_logic.providers.google import parse_google_response
 
 
 def test_google_variants_are_collected_in_order() -> None:
@@ -21,7 +21,7 @@ def test_google_variants_are_collected_in_order() -> None:
             ],
         }
     )
-    translations = _parse_google_response(payload)
+    translations = parse_google_response(payload)
     assert translations[:3] == ["вариант1", "вариант2", "вариант3"]
 
 

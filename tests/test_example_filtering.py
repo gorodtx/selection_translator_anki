@@ -9,6 +9,6 @@ def test_filter_examples_requires_two_words() -> None:
         Example(en="Hello", ru="Привет"),
         Example(en="Hello world", ru="Привет мир"),
     ]
-    assert translate_app._filter_examples(examples) == [
+    assert translate_app.filter_examples(examples) == [
         Example(en="Hello world", ru="Привет мир")
     ]

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import json
-from typing import Final
+from typing import Final, TypeGuard
 import aiohttp
 
 ANKI_CONNECT_URL: Final[str] = "http://127.0.0.1:8765"
@@ -224,20 +224,13 @@ def _coerce_int_list(value: object | None) -> list[int]:
 
 
 def _coerce_dict(value: object | None) -> dict[str, object] | None:
-    if not isinstance(value, dict):
+    if not _is_str_dict(value):
         return None
-    output: dict[str, object] = {}
-    value_dict: dict[object, object] = value
-    for raw_key, raw_item in value_dict.items():
-        if isinstance(raw_key, str):
-            key: str = raw_key
-            item: object = raw_item
-            output[key] = item
-    return output
+    return dict(value)
 
 
 def _coerce_list(value: object | None) -> list[object] | None:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         return None
     return list(value)
 
@@ -252,3 +245,11 @@ def _coerce_int(value: object | None) -> int | None:
     if isinstance(value, int):
         return value
     return None
+
+
+def _is_str_dict(value: object | None) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object | None) -> TypeGuard[list[object]]:
+    return isinstance(value, list)

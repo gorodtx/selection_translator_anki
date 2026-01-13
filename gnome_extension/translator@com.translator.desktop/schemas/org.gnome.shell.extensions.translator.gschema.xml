@@ -1,0 +1,9 @@
+<schemalist>
+  <schema id="org.gnome.shell.extensions.translator" path="/org/gnome/shell/extensions/translator/">
+    <key name="hotkey" type="as">
+      <default>["&lt;Shift&gt;q"]</default>
+      <summary>Hotkey</summary>
+      <description>Global hotkey to translate the primary selection.</description>
+    </key>
+  </schema>
+</schemalist>

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import OrderedDict
 from dataclasses import dataclass, field
 import time
 from typing import Final
@@ -12,37 +11,30 @@ DEFAULT_HISTORY_MAX_ENTRIES: Final[int] = 512
 DEFAULT_HISTORY_TTL_SECONDS: Final[float] = 3600.0
 
 
-def _default_items() -> OrderedDict[str, HistoryItem]:
-    return OrderedDict()
+def _default_items() -> list[HistoryItem]:
+    return []
 
 
 @dataclass(slots=True)
 class HistoryStore:
     max_entries: int = DEFAULT_HISTORY_MAX_ENTRIES
     ttl_seconds: float = DEFAULT_HISTORY_TTL_SECONDS
-    _items: OrderedDict[str, HistoryItem] = field(default_factory=_default_items)
+    _items: list[HistoryItem] = field(default_factory=_default_items)
 
     def add(self, text: str, result: TranslationResult) -> None:
         now = time.monotonic()
         expires_at = now + self.ttl_seconds
-        self._purge_expired(now)
-        self._items[text] = HistoryItem(
-            text=text,
-            result=result,
-            expires_at=expires_at,
+        if any(item.text == text for item in self._items):
+            return
+        self._items.append(
+            HistoryItem(
+                text=text,
+                result=result,
+                expires_at=expires_at,
+            )
         )
-        self._items.move_to_end(text)
         while len(self._items) > self.max_entries:
-            self._items.popitem(last=False)
+            self._items.pop(0)
 
     def snapshot(self) -> list[HistoryItem]:
-        now = time.monotonic()
-        self._purge_expired(now)
-        return list(reversed(self._items.values()))
-
-    def _purge_expired(self, now: float) -> None:
-        expired_keys = [
-            key for key, entry in self._items.items() if entry.expires_at <= now
-        ]
-        for key in expired_keys:
-            del self._items[key]
+        return list(reversed(self._items))

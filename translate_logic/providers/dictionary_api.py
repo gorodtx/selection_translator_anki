@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
+from typing import TypeGuard
 from urllib.parse import quote
 
 from translate_logic.http import AsyncFetcher, FetchError
@@ -83,7 +84,7 @@ def _select_phonetics(phonetics: list[dict[str, object]]) -> str | None:
 
 
 def _coerce_dict_list(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         return []
     results: list[dict[str, object]] = []
     for item in value:
@@ -94,14 +95,9 @@ def _coerce_dict_list(value: object) -> list[dict[str, object]]:
 
 
 def _coerce_dict(value: object) -> dict[str, object] | None:
-    if not isinstance(value, dict):
+    if not _is_str_dict(value):
         return None
-    output: dict[str, object] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            return None
-        output[key] = item
-    return output
+    return dict(value)
 
 
 def _get_str(value: object) -> str | None:
@@ -109,3 +105,11 @@ def _get_str(value: object) -> str | None:
         stripped = value.strip()
         return stripped or None
     return None
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)

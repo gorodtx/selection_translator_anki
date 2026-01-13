@@ -317,6 +317,7 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.mypy_cache_bak
 
 # Pyre type checker
 .pyre/
@@ -711,3 +712,5 @@ test.*
 
 *.docker-compose.local.yaml
 .uv-cache
+.uv_cache
+.config

@@ -9,11 +9,16 @@ import aiohttp
 
 from desktop_app.services.result_cache import ResultCache
 from desktop_app.services.runtime import AsyncRuntime
+from desktop_app import telemetry
 from translate_logic.cache import LruTtlCache
 from translate_logic.application.translate import translate_async
 from translate_logic.http import AsyncFetcher, build_async_fetcher
 from translate_logic.models import TranslationResult, TranslationStatus
 from translate_logic.text import normalize_text
+
+
+def _future_set() -> set[Future[TranslationResult]]:
+    return set()
 
 
 @dataclass(slots=True)
@@ -26,7 +31,7 @@ class TranslationService:
     _fetcher: AsyncFetcher | None = None
     _session_lock: asyncio.Lock | None = None
     _http_cache: LruTtlCache = field(default_factory=LruTtlCache)
-    _active: set[Future[TranslationResult]] = field(default_factory=set)
+    _active: set[Future[TranslationResult]] = field(default_factory=_future_set)
 
     def translate(
         self,
@@ -38,6 +43,7 @@ class TranslationService:
         cache_key = _cache_key(text, source_lang, target_lang)
         cached = self.result_cache.get(cache_key)
         if cached is not None:
+            telemetry.log_event("translation.cache_hit", **telemetry.text_meta(text))
             future: Future[TranslationResult] = Future()
             future.set_result(cached)
             return future

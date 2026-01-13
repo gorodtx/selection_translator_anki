@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 import json
 import os
 from pathlib import Path
@@ -11,14 +10,6 @@ CONFIG_DIR_NAME: Final[str] = "translator"
 CONFIG_FILE_NAME: Final[str] = "desktop_config.json"
 DEFAULT_SOURCE_LANG: Final[str] = "en"
 DEFAULT_TARGET_LANG: Final[str] = "ru"
-DEFAULT_HOTKEY_TRIGGER: Final[str] = "Ctrl+Alt+T"
-
-
-class HotkeyBackend(Enum):
-    SYSTEM = "system"
-    PORTAL = "portal"
-    X11 = "x11"
-    GNOME = "gnome"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,19 +35,9 @@ class AnkiConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class HotkeyConfig:
-    backend: HotkeyBackend
-    trigger: str
-
-
-@dataclass(frozen=True, slots=True)
 class AppConfig:
     languages: LanguageConfig
     anki: AnkiConfig
-    hotkey: HotkeyConfig
-    autostart_prompted: bool
-    autostart_enabled: bool
-    ready_notified: bool
 
 
 def config_path() -> Path:
@@ -83,13 +64,13 @@ def config_path() -> Path:
 def load_config() -> AppConfig:
     path = config_path()
     if not path.exists():
-        return _default_config()
+        return _apply_env_overrides(_default_config())
     try:
         raw_data = path.read_text(encoding="utf-8")
         payload: object = json.loads(raw_data)
     except (OSError, json.JSONDecodeError):
-        return _default_config()
-    return _parse_config(payload)
+        return _apply_env_overrides(_default_config())
+    return _apply_env_overrides(_parse_config(payload))
 
 
 def save_config(config: AppConfig) -> None:
@@ -117,13 +98,6 @@ def _default_config() -> AppConfig:
                 example_ru="",
             ),
         ),
-        hotkey=HotkeyConfig(
-            backend=_default_hotkey_backend(),
-            trigger=DEFAULT_HOTKEY_TRIGGER,
-        ),
-        autostart_prompted=False,
-        autostart_enabled=False,
-        ready_notified=False,
     )
 
 
@@ -133,7 +107,6 @@ def _parse_config(payload: object) -> AppConfig:
         return _default_config()
     language_data = _get_dict(payload_dict.get("languages"))
     anki_data = _get_dict(payload_dict.get("anki"))
-    hotkey_data = _get_dict(payload_dict.get("hotkey"))
     fields_data = _get_dict(anki_data.get("fields")) if anki_data else None
 
     languages = LanguageConfig(
@@ -156,24 +129,16 @@ def _parse_config(payload: object) -> AppConfig:
         model=_get_str(anki_data.get("model"), "") if anki_data else "",
         fields=fields,
     )
-    hotkey = HotkeyConfig(
-        backend=_get_hotkey_backend(
-            hotkey_data.get("backend") if hotkey_data else None,
-            _default_hotkey_backend(),
-        ),
-        trigger=_get_str(
-            hotkey_data.get("trigger") if hotkey_data else None,
-            DEFAULT_HOTKEY_TRIGGER,
-        ),
-    )
     return AppConfig(
         languages=languages,
         anki=anki,
-        hotkey=hotkey,
-        autostart_prompted=_get_bool(payload_dict.get("autostart_prompted"), False),
-        autostart_enabled=_get_bool(payload_dict.get("autostart_enabled"), False),
-        ready_notified=_get_bool(payload_dict.get("ready_notified"), False),
     )
+
+
+def _apply_env_overrides(config: AppConfig) -> AppConfig:
+    if os.environ.get("TRANSLATOR_RESET", "").strip() != "1":
+        return config
+    return _default_config()
 
 
 def _config_to_dict(config: AppConfig) -> dict[str, object]:
@@ -193,59 +158,20 @@ def _config_to_dict(config: AppConfig) -> dict[str, object]:
                 "example_ru": config.anki.fields.example_ru,
             },
         },
-        "hotkey": {
-            "backend": config.hotkey.backend.value,
-            "trigger": config.hotkey.trigger,
-        },
-        "autostart_prompted": config.autostart_prompted,
-        "autostart_enabled": config.autostart_enabled,
-        "ready_notified": config.ready_notified,
     }
 
 
 def _get_dict(value: object | None) -> dict[str, object] | None:
     if isinstance(value, dict):
-        output: dict[str, object] = {}
-        for raw_key, raw_item in value.items():
-            if isinstance(raw_key, str):
-                key: str = raw_key
-                item: object = raw_item
-                output[key] = item
-        return output
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            if isinstance(key, str):
+                result[key] = item
+        return result
     return None
 
 
 def _get_str(value: object | None, default: str) -> str:
     if isinstance(value, str):
         return value
-    return default
-
-
-def _get_bool(value: object | None, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    return default
-
-
-def _default_hotkey_backend() -> HotkeyBackend:
-    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").casefold()
-    if "gnome" in desktop:
-        return HotkeyBackend.GNOME
-    session = os.environ.get("XDG_SESSION_TYPE", "").lower()
-    if session == "wayland" or "WAYLAND_DISPLAY" in os.environ:
-        return HotkeyBackend.PORTAL
-    if os.environ.get("DISPLAY"):
-        return HotkeyBackend.X11
-    return HotkeyBackend.SYSTEM
-
-
-def detect_hotkey_backend() -> HotkeyBackend:
-    return _default_hotkey_backend()
-
-
-def _get_hotkey_backend(value: object | None, default: HotkeyBackend) -> HotkeyBackend:
-    if isinstance(value, str):
-        for backend in HotkeyBackend:
-            if backend.value == value:
-                return backend
     return default

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import Future
-from enum import Enum
 from typing import Protocol
 
 from desktop_app.application.history import HistoryItem
 from desktop_app.anki import AnkiAddResult, AnkiCreateModelResult, AnkiListResult
-from desktop_app.application.notifications import NotificationMessage
 from translate_logic.models import TranslationResult
 
 
@@ -25,28 +23,6 @@ class HistoryPort(Protocol):
     def add(self, text: str, result: TranslationResult) -> None: ...
 
     def snapshot(self) -> list[HistoryItem]: ...
-
-
-class ClipboardReadStatus(Enum):
-    STARTED = "started"
-    NO_DISPLAY = "no_display"
-    NO_CLIPBOARD = "no_clipboard"
-
-
-class ClipboardPort(Protocol):
-    def read_wayland_primary(self) -> str | None: ...
-
-    def read_wayland_primary_async(
-        self, callback: Callable[[str | None], None]
-    ) -> bool: ...
-
-    def read_primary(
-        self, callback: Callable[[str | None], None]
-    ) -> ClipboardReadStatus: ...
-
-
-class NotifierPort(Protocol):
-    def send(self, message: NotificationMessage) -> None: ...
 
 
 class AnkiPort(Protocol):

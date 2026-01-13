@@ -33,11 +33,23 @@ class Gtk:
         def do_activate(self) -> None:
             raise NotImplementedError
 
+        def get_active_window(self) -> Gtk.ApplicationWindow | None:
+            raise NotImplementedError
+
+        def get_dbus_connection(self) -> Gio.DBusConnection | None:
+            raise NotImplementedError
+
     @staticmethod
     def accelerator_name(keyval: int, modifier_mask: int) -> str:
         raise NotImplementedError
 
     class Widget:
+        def add_css_class(self, name: str) -> None:
+            raise NotImplementedError
+
+        def remove_css_class(self, name: str) -> None:
+            raise NotImplementedError
+
         def set_hexpand(self, expand: bool) -> None:
             raise NotImplementedError
 
@@ -54,6 +66,15 @@ class Gtk:
             raise NotImplementedError
 
         def add_controller(self, controller: object) -> None:
+            raise NotImplementedError
+
+        def set_cursor(self, cursor: Gdk.Cursor | None) -> None:
+            raise NotImplementedError
+
+        def pick(self, x: float, y: float, flags: int) -> Gtk.Widget | None:
+            raise NotImplementedError
+
+        def get_parent(self) -> Gtk.Widget | None:
             raise NotImplementedError
 
     class ApplicationWindow(Widget):
@@ -308,6 +329,9 @@ class Gtk:
         def set_reveal_child(self, reveal: bool) -> None:
             raise NotImplementedError
 
+        def set_transition_duration(self, duration: int) -> None:
+            raise NotImplementedError
+
     class Spinner(Widget):
         def __init__(self) -> None:
             raise NotImplementedError
@@ -363,6 +387,10 @@ class Gtk:
             display: object, provider: Gtk.CssProvider, priority: int
         ) -> None:
             raise NotImplementedError
+
+    class PickFlags:
+        INSENSITIVE: int
+        NON_TARGETABLE: int
 
     class DropDown(Widget):
         @staticmethod
@@ -437,6 +465,13 @@ class Gtk:
 
 
 class Gdk:
+    class Cursor:
+        @staticmethod
+        def new_from_name(
+            name: str, fallback: Gdk.Cursor | None = None
+        ) -> Gdk.Cursor | None:
+            raise NotImplementedError
+
     class Surface:
         def export_handle(
             self,
@@ -475,6 +510,9 @@ class Gdk:
             raise NotImplementedError
 
     class Clipboard:
+        def connect(self, name: str, callback: object) -> int:
+            raise NotImplementedError
+
         def read_text_async(
             self,
             cancellable: object | None,
@@ -486,7 +524,14 @@ class Gdk:
         def read_text_finish(self, result: object) -> str | None:
             raise NotImplementedError
 
+        def get_formats(self) -> Gdk.ContentFormats | None:
+            raise NotImplementedError
+
         def set_content(self, provider: Gdk.ContentProvider) -> None:
+            raise NotImplementedError
+
+    class ContentFormats:
+        def get_mime_types(self) -> list[str]:
             raise NotImplementedError
 
     class ModifierType:
@@ -511,6 +556,24 @@ class Gdk:
 
 
 class Gio:
+    class DBusConnection:
+        def register_object(
+            self,
+            object_path: str,
+            interface_info: object,
+            method_call_closure: object | None = None,
+            get_property_closure: object | None = None,
+            set_property_closure: object | None = None,
+        ) -> int:
+            raise NotImplementedError
+
+        def unregister_object(self, registration_id: int) -> None:
+            raise NotImplementedError
+
+    class DBusMethodInvocation:
+        def return_value(self, value: object) -> None:
+            raise NotImplementedError
+
     class BusType:
         SESSION: int
 
@@ -535,6 +598,13 @@ class Gio:
 
 
 class GLib:
+    class Variant:
+        def __init__(self, signature: str, value: object) -> None:
+            raise NotImplementedError
+
+        def unpack(self) -> object:
+            raise NotImplementedError
+
     class Bytes:
         @staticmethod
         def new(data: bytes) -> GLib.Bytes:
@@ -553,9 +623,82 @@ class GLib:
         raise NotImplementedError
 
     @staticmethod
+    def timeout_add(interval: int, function: Callable[..., bool], *args: object) -> int:
+        raise NotImplementedError
+
+    @staticmethod
+    def source_remove(tag: int) -> bool:
+        raise NotImplementedError
+
+    @staticmethod
     def set_application_name(name: str) -> None:
         raise NotImplementedError
 
     @staticmethod
     def set_prgname(name: str) -> None:
+        raise NotImplementedError
+
+
+class Gtk3:
+    class StatusIcon:
+        @staticmethod
+        def new_from_file(filename: str) -> Gtk3.StatusIcon:
+            raise NotImplementedError
+
+        @staticmethod
+        def position_menu(
+            menu: Gtk3.Menu,
+            x: int,
+            y: int,
+            push_in: bool,
+            user_data: object | None,
+        ) -> None:
+            raise NotImplementedError
+
+        def set_visible(self, visible: bool) -> None:
+            raise NotImplementedError
+
+        def set_tooltip_text(self, text: str) -> None:
+            raise NotImplementedError
+
+        def connect(self, name: str, callback: Callable[..., object]) -> None:
+            raise NotImplementedError
+
+    class Menu:
+        def __init__(self) -> None:
+            raise NotImplementedError
+
+        def append(self, child: Gtk3.MenuItem) -> None:
+            raise NotImplementedError
+
+        def show_all(self) -> None:
+            raise NotImplementedError
+
+        def popup_at_pointer(self, event: object | None) -> None:
+            raise NotImplementedError
+
+        def popup(
+            self,
+            parent_menu_shell: object | None,
+            parent_menu_item: object | None,
+            func: object | None,
+            data: object | None,
+            button: int,
+            activate_time: int,
+        ) -> None:
+            raise NotImplementedError
+
+    class MenuItem:
+        def __init__(self, label: str = "") -> None:
+            raise NotImplementedError
+
+        def connect(self, name: str, callback: Callable[..., object]) -> None:
+            raise NotImplementedError
+
+    @staticmethod
+    def main() -> None:
+        raise NotImplementedError
+
+    @staticmethod
+    def main_quit() -> None:
         raise NotImplementedError

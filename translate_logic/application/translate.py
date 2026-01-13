@@ -20,7 +20,7 @@ from translate_logic.providers.dictionary_api import (
     DictionaryApiResult,
     translate_dictionary_api,
 )
-from translate_logic.providers.google import translate_google
+from translate_logic.providers.google import GoogleResult, translate_google
 from translate_logic.providers.tatoeba import TatoebaResult, translate_tatoeba
 from translate_logic.text import count_words, normalize_text
 from translate_logic.translation import (
@@ -91,7 +91,7 @@ async def _translate_with_fetcher_async(
         if cambridge_non_meta:
             translation_ru = combine_translation_variants(cambridge_non_meta, [])
             _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
-            google_task: asyncio.Task | None = None
+            google_task: asyncio.Task[GoogleResult] | None = None
             if _needs_more_variants(cambridge_non_meta):
                 google_task = asyncio.create_task(
                     translate_google(normalized_text, source_lang, target_lang, fetcher)
@@ -108,7 +108,7 @@ async def _translate_with_fetcher_async(
             )
             if google_task is not None:
                 try:
-                    google_result = await google_task
+                    google_result: GoogleResult | None = await google_task
                 except Exception:
                     google_result = None
                 if google_result is not None:
@@ -154,9 +154,9 @@ async def _translate_with_google_fallback_async(
 ) -> tuple[str | None, str | None, Example | None]:
     base_ipa = cambridge_result.ipa_uk if cambridge_result.found else None
     base_examples = (
-        _filter_examples(cambridge_result.examples) if cambridge_result.found else []
+        filter_examples(cambridge_result.examples) if cambridge_result.found else []
     )
-    google_task = asyncio.create_task(
+    google_task: asyncio.Task[GoogleResult] = asyncio.create_task(
         translate_google(text, source_lang, target_lang, fetcher)
     )
     needs_dictionary = _POLICY.needs_dictionary(base_ipa, base_examples)
@@ -169,7 +169,7 @@ async def _translate_with_google_fallback_async(
         tatoeba_task = asyncio.create_task(translate_tatoeba(text, fetcher))
 
     try:
-        google_result = await google_task
+        google_result: GoogleResult | None = await google_task
     except Exception:
         google_result = None
     google_candidates = (
@@ -207,7 +207,7 @@ async def _supplement_pronunciation_and_examples_async(
     dictionary_result: DictionaryApiResult | None = None,
     tatoeba_result: TatoebaResult | None = None,
 ) -> tuple[str | None, Example | None]:
-    available_examples = _filter_examples(examples)
+    available_examples = filter_examples(examples)
     needs_dictionary = _POLICY.needs_dictionary(ipa_uk, available_examples)
     needs_tatoeba = _POLICY.needs_tatoeba(available_examples)
 
@@ -222,7 +222,7 @@ async def _supplement_pronunciation_and_examples_async(
         dictionary_result = await dictionary_task
     if dictionary_result is not None:
         if not available_examples:
-            available_examples = _filter_examples(dictionary_result.examples)
+            available_examples = filter_examples(dictionary_result.examples)
 
     if tatoeba_task is not None:
         tatoeba_result = await tatoeba_task
@@ -230,7 +230,7 @@ async def _supplement_pronunciation_and_examples_async(
     paired_example = _select_example_with_ru(available_examples)
     if paired_example is None and tatoeba_result is not None:
         paired_example = _select_example_with_ru(
-            _filter_examples(tatoeba_result.examples)
+            filter_examples(tatoeba_result.examples)
         )
 
     fallback_example = _select_any_example(available_examples)
@@ -295,5 +295,5 @@ def _build_result(
     )
 
 
-def _filter_examples(examples: list[Example]) -> list[Example]:
+def filter_examples(examples: list[Example]) -> list[Example]:
     return [example for example in examples if rules.is_example_candidate(example.en)]

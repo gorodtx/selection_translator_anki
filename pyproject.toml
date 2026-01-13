@@ -16,3 +16,21 @@ dev = [
     "ruff>=0.14.10",
     "types-python-xlib>=0.33.0.20250809",
 ]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+reportUnusedImport = "error"
+reportUnusedVariable = "error"
+venvPath = "."
+venv = ".venv"
+
+include = ["."]
+exclude = [
+  ".venv",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  "**/__pycache__",
+]
+

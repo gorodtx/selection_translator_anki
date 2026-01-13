@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import logging
+from typing import TypeGuard
 from urllib.parse import quote_plus
 
 from translate_logic.http import AsyncFetcher, FetchError
@@ -68,15 +69,17 @@ async def translate_tatoeba(text: str, fetcher: AsyncFetcher) -> TatoebaResult:
 
 def _parse_tatoeba_payload(payload: str) -> list[Example]:
     raw_data: object = json.loads(payload)
-    if not isinstance(raw_data, dict):
+    raw_dict = _coerce_dict(raw_data)
+    if raw_dict is None:
         return []
-    data_obj: object = raw_data.get("data")
-    if not isinstance(data_obj, list):
+    data_obj: object = raw_dict.get("data")
+    data_list = _coerce_list(data_obj)
+    if data_list is None:
         return []
 
     examples: list[Example] = []
     seen: set[tuple[str, str | None]] = set()
-    for item in data_obj:
+    for item in data_list:
         item_dict = _coerce_dict(item)
         if item_dict is None:
             continue
@@ -107,7 +110,7 @@ def _parse_tatoeba_payload(payload: str) -> list[Example]:
 
 
 def _coerce_dict_list(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         return []
     results: list[dict[str, object]] = []
     for item in value:
@@ -117,15 +120,16 @@ def _coerce_dict_list(value: object) -> list[dict[str, object]]:
     return results
 
 
-def _coerce_dict(value: object) -> dict[str, object] | None:
-    if not isinstance(value, dict):
+def _coerce_list(value: object) -> list[object] | None:
+    if not _is_object_list(value):
         return None
-    output: dict[str, object] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            return None
-        output[key] = item
-    return output
+    return list(value)
+
+
+def _coerce_dict(value: object) -> dict[str, object] | None:
+    if not _is_str_dict(value):
+        return None
+    return dict(value)
 
 
 def _get_str(value: object) -> str | None:
@@ -139,3 +143,11 @@ def _get_bool(value: object) -> bool | None:
     if isinstance(value, bool):
         return value
     return None
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
