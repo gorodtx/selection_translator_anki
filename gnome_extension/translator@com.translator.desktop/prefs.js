@@ -11,40 +11,45 @@ const BUS_NAME = "com.translator.desktop";
 const OBJECT_PATH = "/com/translator/desktop";
 const INTERFACE_NAME = "com.translator.desktop";
 const MESSAGE_TIMEOUT_SECONDS = 2;
+let cssApplied = false;
 
 export default class TranslatorPrefs extends ExtensionPreferences {
   fillPreferencesWindow(window) {
     const settings = this.getSettings();
 
-    const cssProvider = new Gtk.CssProvider();
-    cssProvider.load_from_data(`
-      .translator-anki-row {
-        padding-top: 0;
-        padding-bottom: 0;
-        margin-top: 0;
-        margin-bottom: 0;
-        min-height: 0;
-      }
-      .translator-anki-group list,
-      .translator-anki-group .list {
-        margin: 0;
-        padding: 0;
-        row-spacing: 0;
-      }
-      .translator-anki-group row,
-      .translator-anki-group .list-row,
-      .translator-anki-group .action-row {
-        margin: 0;
-        padding-top: 0;
-        padding-bottom: 0;
-        min-height: 0;
-      }
-    `);
-    Gtk.StyleContext.add_provider_for_display(
-      Gdk.Display.get_default(),
-      cssProvider,
-      Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    if (!cssApplied) {
+      const cssProvider = new Gtk.CssProvider();
+      const css = `
+        .translator-anki-row {
+          padding-top: 0;
+          padding-bottom: 0;
+          margin-top: 0;
+          margin-bottom: 0;
+          min-height: 0;
+        }
+        .translator-anki-group list,
+        .translator-anki-group .list {
+          margin: 0;
+          padding: 0;
+          row-spacing: 0;
+        }
+        .translator-anki-group row,
+        .translator-anki-group .list-row,
+        .translator-anki-group .action-row {
+          margin: 0;
+          padding-top: 0;
+          padding-bottom: 0;
+          min-height: 0;
+        }
+      `;
+      cssProvider.load_from_data(css, -1);
+      Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(),
+        cssProvider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+      );
+      cssApplied = true;
+    }
 
     window.set_default_size(520, 420);
     const page = new Adw.PreferencesPage();
@@ -138,6 +143,19 @@ export default class TranslatorPrefs extends ExtensionPreferences {
       capturing: false,
       pending: null,
     };
+    const activeCalls = new Set();
+
+    window.connect("close-request", () => {
+      for (const cancellable of activeCalls) {
+        try {
+          cancellable.cancel();
+        } catch (error) {
+          logError(error);
+        }
+      }
+      activeCalls.clear();
+      return false;
+    });
 
     const updateLabel = () => {
       const current = settings.get_strv(HOTKEY_KEY);
@@ -199,6 +217,8 @@ export default class TranslatorPrefs extends ExtensionPreferences {
     };
 
     const callDbus = (method, parameters, onSuccess, onError = null) => {
+      const cancellable = new Gio.Cancellable();
+      activeCalls.add(cancellable);
       Gio.DBus.session.call(
         BUS_NAME,
         OBJECT_PATH,
@@ -208,8 +228,9 @@ export default class TranslatorPrefs extends ExtensionPreferences {
         null,
         Gio.DBusCallFlags.NONE,
         -1,
-        null,
+        cancellable,
         (conn, res) => {
+          activeCalls.delete(cancellable);
           try {
             const value = conn.call_finish(res).deep_unpack();
             onSuccess(value);

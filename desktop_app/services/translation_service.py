@@ -52,6 +52,12 @@ class TranslationService:
         self._register_future(future)
         return future
 
+    def cached(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> TranslationResult | None:
+        cache_key = _cache_key(text, source_lang, target_lang)
+        return self.result_cache.get(cache_key)
+
     def warmup(self) -> None:
         try:
             future = asyncio.run_coroutine_threadsafe(

@@ -7,7 +7,6 @@ import sys
 
 from desktop_app.app import TranslatorApp
 from desktop_app.config import config_path
-from desktop_app.services.selection_cache import selection_cache_path
 from desktop_app import telemetry
 
 _lock_handle: io.TextIOWrapper | None = None
@@ -21,12 +20,6 @@ def _reset_if_requested() -> None:
         path = config_path()
         if path.exists():
             path.unlink()
-    except OSError:
-        pass
-    try:
-        sel_path = selection_cache_path()
-        if sel_path.exists():
-            sel_path.unlink()
     except OSError:
         pass
     try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 import importlib
 
 from desktop_app.application.history import HistoryItem
@@ -78,7 +79,7 @@ class HistoryWindow:
         self._window = window
         self._list_box = list_box
         self._items: list[HistoryItem] = []
-        self._row_gestures: list[object] = []
+        self._rows: list[_HistoryRow] = []
         telemetry.log_event("ui.history_window.created")
 
     @property
@@ -94,17 +95,31 @@ class HistoryWindow:
         self._window.hide()
 
     def refresh(self, items: Iterable[HistoryItem]) -> None:
+        filtered: list[HistoryItem] = []
+        for item in items:
+            if item.result.status is not TranslationStatus.SUCCESS:
+                continue
+            filtered.append(item)
+        if len(filtered) == len(self._rows):
+            self._items = filtered
+            for row_data, item in zip(self._rows, filtered, strict=True):
+                current = row_data.item
+                _set_label_text(row_data.original, current.text, item.text)
+                _set_label_text(
+                    row_data.translation,
+                    current.result.translation_ru.text,
+                    item.result.translation_ru.text,
+                )
+                row_data.item = item
+            return
         child = self._list_box.get_first_child()
         while child is not None:
             next_child = child.get_next_sibling()
             self._list_box.remove(child)
             child = next_child
-        self._items = []
-        self._row_gestures = []
-        for item in items:
-            if item.result.status is not TranslationStatus.SUCCESS:
-                continue
-            self._items.append(item)
+        self._items = filtered
+        self._rows = []
+        for item in filtered:
             row = Gtk.ListBoxRow()
             container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             original = Gtk.Label(label=item.text)
@@ -123,10 +138,16 @@ class HistoryWindow:
             container.append(original)
             container.append(translation)
             row.set_child(container)
+            row_data = _HistoryRow(
+                row=row,
+                original=original,
+                translation=translation,
+                item=item,
+            )
             gesture = Gtk.GestureClick()
-            gesture.connect("released", self._handle_row_click, item)
+            gesture.connect("released", self._handle_row_click, row_data)
             row.add_controller(gesture)
-            self._row_gestures.append(gesture)
+            self._rows.append(row_data)
             self._list_box.append(row)
 
     def _handle_close_request(self, _window: object) -> bool:
@@ -150,8 +171,21 @@ class HistoryWindow:
         _n_press: int,
         _x: float,
         _y: float,
-        item: HistoryItem,
+        row_data: "_HistoryRow",
     ) -> None:
-        self._on_select_cb(item)
+        self._on_select_cb(row_data.item)
         if hasattr(self._list_box, "unselect_all"):
             self._list_box.unselect_all()
+
+
+@dataclass(slots=True)
+class _HistoryRow:
+    row: gtk_types.Gtk.ListBoxRow
+    original: gtk_types.Gtk.Label
+    translation: gtk_types.Gtk.Label
+    item: HistoryItem
+
+
+def _set_label_text(label: gtk_types.Gtk.Label, current: str, value: str) -> None:
+    if current != value:
+        label.set_text(value)

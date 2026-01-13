@@ -18,7 +18,6 @@ from desktop_app.controllers.anki_controller import AnkiController
 from desktop_app.notifications import Notification
 from desktop_app.notifications.models import NotificationDuration
 from desktop_app.notifications import messages as notify_messages
-from desktop_app.services.selection_cache import SelectionCache
 from desktop_app.ui import HistoryWindow, TranslationWindow
 from desktop_app import gtk_types
 from desktop_app import telemetry
@@ -41,7 +40,6 @@ class TranslationController:
         config: AppConfig,
         clipboard_writer: ClipboardWriter,
         anki_controller: AnkiController,
-        selection_cache: SelectionCache,
         on_present_window: Callable[[gtk_types.Gtk.ApplicationWindow], None],
         on_open_settings: Callable[[], None],
     ) -> None:
@@ -51,7 +49,6 @@ class TranslationController:
         self._config = config
         self._clipboard_writer = clipboard_writer
         self._anki_controller = anki_controller
-        self._selection_cache = selection_cache
         self._on_present_window = on_present_window
         self._on_open_settings = on_open_settings
 
@@ -60,6 +57,7 @@ class TranslationController:
         self._history_open = False
         self._history_pending = False
         self._current_request_id = 0
+        self._presented_request_id: int | None = None
         self._translation_future: Future[TranslationResult] | None = None
         self._current_text = ""
         self._current_result: TranslationResult | None = None
@@ -132,8 +130,39 @@ class TranslationController:
             if hotkey:
                 telemetry.log_event("translation.no_text", hotkey=hotkey)
             return
+        if (
+            self._current_result is not None
+            and self._current_result.status is TranslationStatus.SUCCESS
+            and self._current_text.strip() == normalized
+            and not self._view_state.loading
+        ):
+            telemetry.log_event("translation.reuse", **telemetry.text_meta(text))
+            self._apply_view_state(self._presenter.reset_original(text))
+            self._apply_view_state(self._presenter.apply_final(self._current_result))
+            self._present_window()
+            return
+        outcome = self._translation_flow.prepare(
+            text, self._config.languages.source, self._config.languages.target
+        )
+        if outcome.error is not None:
+            return
+        if outcome.display_text is None or outcome.query_text is None:
+            return
+        cached = self._translation_flow.cached_result(
+            outcome.query_text,
+            self._config.languages.source,
+            self._config.languages.target,
+        )
+        if cached is not None:
+            telemetry.log_event("translation.cache_fast", **telemetry.text_meta(text))
+            self._current_text = outcome.display_text
+            self._current_result = cached
+            self._apply_view_state(self._presenter.reset_original(outcome.display_text))
+            self._apply_view_state(self._presenter.apply_final(cached))
+            self._present_window()
+            return
         telemetry.log_event("translation.text_ready", **telemetry.text_meta(text))
-        self._handle_text(request_id, text, silent)
+        self._handle_text(request_id, outcome.display_text, outcome.query_text)
 
     def set_anki_available(self, available: bool) -> None:
         self._apply_view_state(self._presenter.set_anki_available(available))
@@ -173,26 +202,18 @@ class TranslationController:
         self._history_view.refresh(self._translation_flow.snapshot_history())
 
     def _prepare_request(self) -> None:
-        self._present_window()
         self._current_text = ""
         self._current_result = None
         self._apply_view_state(self._presenter.begin(""))
 
-    def _handle_text(self, request_id: int, text: str, silent: bool) -> None:
+    def _handle_text(self, request_id: int, display_text: str, query_text: str) -> None:
         if request_id != self._current_request_id:
-            return
-        outcome = self._translation_flow.prepare(
-            text, self._config.languages.source, self._config.languages.target
-        )
-        if outcome.error is not None:
-            return
-        if outcome.display_text is None or outcome.query_text is None:
             return
         GLib.idle_add(
             self._start_translation_idle,
             request_id,
-            outcome.display_text,
-            outcome.query_text,
+            display_text,
+            query_text,
         )
 
     def _start_translation_idle(
@@ -217,7 +238,6 @@ class TranslationController:
         def on_start(display_text: str) -> None:
             if request_id != self._current_request_id:
                 return
-            self._present_window()
             self._current_text = display_text
             self._current_result = None
             self._apply_view_state(self._presenter.begin(display_text))
@@ -258,6 +278,7 @@ class TranslationController:
             return False
         self._current_result = result
         self._apply_view_state(self._presenter.apply_partial(result))
+        self._present_window()
         return False
 
     def _apply_translation_result(
@@ -270,8 +291,8 @@ class TranslationController:
         if result.status is TranslationStatus.SUCCESS:
             if self._history_open:
                 self._refresh_history()
-            self._selection_cache.write(self._current_text)
         self._apply_view_state(self._presenter.apply_final(result))
+        self._present_window()
         return False
 
     def _apply_translation_error(self, request_id: int) -> bool:
@@ -279,6 +300,7 @@ class TranslationController:
             return False
         self._apply_view_state(self._presenter.mark_error())
         self._notify(notify_messages.translation_error())
+        self._present_window()
         return False
 
     def _copy_text(self, text: str | None) -> None:
@@ -342,6 +364,7 @@ class TranslationController:
 
     def _next_request_id(self) -> int:
         self._current_request_id += 1
+        self._presented_request_id = None
         return self._current_request_id
 
     def _present_window(self) -> None:
@@ -349,7 +372,13 @@ class TranslationController:
             self.ensure_window()
         if self._translation_view is None:
             return
+        if (
+            self._presented_request_id == self._current_request_id
+            and self._translation_view.is_visible()
+        ):
+            return
         self._translation_view.present()
+        self._presented_request_id = self._current_request_id
         self._on_present_window(self._translation_view.window)
 
     def _notify(self, notification: Notification) -> None:

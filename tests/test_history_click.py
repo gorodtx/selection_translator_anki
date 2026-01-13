@@ -15,7 +15,6 @@ from desktop_app.application.translation_flow import TranslationFlow
 from desktop_app.config import AnkiConfig, AnkiFieldMap, AppConfig, LanguageConfig
 from desktop_app.controllers.anki_controller import AnkiController
 from desktop_app.controllers.translation_controller import TranslationController
-from desktop_app.services.selection_cache import SelectionCache
 from desktop_app.application.view_state import TranslationViewState
 from translate_logic.models import FieldValue, TranslationResult
 
@@ -62,6 +61,11 @@ class FakeTranslator:
         future: Future[TranslationResult] = Future()
         future.set_result(TranslationResult.empty())
         return future
+
+    def cached(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> TranslationResult | None:
+        return None
 
 
 class FakeHistory:
@@ -112,9 +116,6 @@ def controller(
     monkeypatch.setattr(controller_module, "TranslationWindow", DummyTranslationWindow)
 
     app = DummyApp()
-    cache_dir = tmp_path / "cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    selection_cache = SelectionCache(path=cache_dir / "last.txt")
     translation_flow = TranslationFlow(
         translator=FakeTranslator(),
         history=FakeHistory(),
@@ -143,7 +144,6 @@ def controller(
         config=config,
         clipboard_writer=clipboard_writer,
         anki_controller=anki_controller,
-        selection_cache=selection_cache,
         on_present_window=lambda _window: None,
         on_open_settings=lambda: None,
     )

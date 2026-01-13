@@ -16,7 +16,6 @@ from desktop_app.controllers import (
 from desktop_app.controllers.settings_controller import AnkiActionResult, AnkiStatus
 from desktop_app.gnome.dbus_service import DbusService
 from desktop_app.services.container import AppServices
-from desktop_app.settings import SettingsWindow
 from desktop_app import gtk_types
 from desktop_app import telemetry
 
@@ -41,7 +40,6 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._config = load_config()
         self._services = AppServices.create()
         self._clipboard_writer = ClipboardWriter()
-        self._settings_window: SettingsWindow | None = None
         self._dbus_service: DbusService | None = None
         self._anki_controller = AnkiController(anki_flow=self._services.anki_flow)
         self._settings_controller = SettingsController(
@@ -57,7 +55,6 @@ class TranslatorApp(gtk_types.Gtk.Application):
             config=self._config,
             clipboard_writer=self._clipboard_writer,
             anki_controller=self._anki_controller,
-            selection_cache=self._services.selection_cache,
             on_present_window=self._on_present_window,
             on_open_settings=self._open_settings,
         )
@@ -66,7 +63,6 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self.connect("shutdown", self._on_shutdown)
 
     def _on_startup(self, _app: gtk_types.Gtk.Application) -> None:
-        telemetry.setup(reset=True)
         telemetry.log_event("app.start", app_id=APP_ID)
         self.hold()
         self._services.start()
@@ -74,10 +70,6 @@ class TranslatorApp(gtk_types.Gtk.Application):
         GLib.set_application_name("Translator")
         GLib.set_prgname("translator")
         self._register_dbus_service()
-        self._anki_controller.refresh_decks(
-            update_availability=False,
-            set_anki_available=self._translation_controller.set_anki_available,
-        )
 
     def _on_activate(self, _app: gtk_types.Gtk.Application) -> None:
         telemetry.log_event("app.activate")
@@ -136,21 +128,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._translation_controller.show_history_window()
 
     def _open_settings(self) -> None:
-        if os.environ.get("TRANSLATOR_ENABLE_PY_SETTINGS", "").strip() != "1":
-            telemetry.log_event("settings.python.disabled")
-            return
-        if self._settings_window is None:
-            self._settings_window = SettingsWindow(
-                app=self,
-                config=self._config,
-                runtime=self._services.runtime,
-                anki_flow=self._services.anki_flow,
-                on_save=self._on_settings_saved,
-            )
-        else:
-            self._settings_window.update_config(self._config)
-        self._settings_window.present()
-        self._on_present_window(self._settings_window.window)
+        telemetry.log_event("settings.python.disabled")
 
     def _on_settings_saved(self, config: AppConfig) -> None:
         self._config = config
@@ -170,6 +148,5 @@ class TranslatorApp(gtk_types.Gtk.Application):
                 path.unlink()
         except OSError:
             pass
-        self._services.selection_cache.clear()
         self._config = load_config()
         self._translation_controller.update_config(self._config)

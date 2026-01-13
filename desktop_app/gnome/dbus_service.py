@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 import importlib
+import os
 
 from desktop_app import gtk_types
 from desktop_app import telemetry
@@ -20,6 +21,7 @@ VariantType: type[gtk_types.GLib.Variant] = getattr(GLib, "Variant")
 
 BUS_NAME = "com.translator.desktop"
 OBJECT_PATH = "/com/translator/desktop"
+DEFAULT_TRANSLATE_DEBOUNCE_MS = 120
 INTERFACE_XML = """
 <node>
   <interface name="com.translator.desktop">
@@ -61,6 +63,19 @@ INTERFACE_XML = """
 """
 
 
+def _debounce_ms() -> int:
+    value = os.environ.get("TRANSLATOR_DBUS_DEBOUNCE_MS", "").strip()
+    if not value:
+        return DEFAULT_TRANSLATE_DEBOUNCE_MS
+    try:
+        parsed = int(value)
+    except ValueError:
+        return DEFAULT_TRANSLATE_DEBOUNCE_MS
+    if parsed <= 0:
+        return DEFAULT_TRANSLATE_DEBOUNCE_MS
+    return parsed
+
+
 @dataclass(slots=True)
 class DbusService:
     connection: gtk_types.Gio.DBusConnection
@@ -73,6 +88,8 @@ class DbusService:
     on_list_decks: Callable[[Callable[[AnkiListResult], None]], None]
     on_select_deck: Callable[[str, Callable[[AnkiActionResult], None]], None]
     on_save_settings: Callable[[Callable[[AnkiActionResult], None]], None]
+    _pending_translate: str | None = None
+    _pending_translate_source_id: int = 0
 
     @classmethod
     def register(
@@ -119,6 +136,10 @@ class DbusService:
         return service
 
     def close(self) -> None:
+        if self._pending_translate_source_id != 0:
+            GLib.source_remove(self._pending_translate_source_id)
+            self._pending_translate_source_id = 0
+            self._pending_translate = None
         try:
             self.connection.unregister_object(self.registration_id)
         except Exception:
@@ -137,7 +158,7 @@ class DbusService:
         if method_name == "Translate":
             text = _extract_text(parameters)
             if text is not None:
-                GLib.idle_add(self._dispatch_translate, text)
+                self._schedule_translate(text)
             invocation.return_value(VariantType("()", ()))
             return
         if method_name == "ShowSettings":
@@ -180,7 +201,22 @@ class DbusService:
             return
         invocation.return_value(VariantType("()", ()))
 
-    def _dispatch_translate(self, text: str) -> bool:
+    def _schedule_translate(self, text: str) -> None:
+        self._pending_translate = text
+        if self._pending_translate_source_id != 0:
+            GLib.source_remove(self._pending_translate_source_id)
+            self._pending_translate_source_id = 0
+        self._pending_translate_source_id = GLib.timeout_add(
+            _debounce_ms(),
+            self._dispatch_pending_translate,
+        )
+
+    def _dispatch_pending_translate(self) -> bool:
+        text = self._pending_translate
+        self._pending_translate = None
+        self._pending_translate_source_id = 0
+        if text is None:
+            return False
         self.on_translate(text)
         return False
 

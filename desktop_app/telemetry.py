@@ -41,13 +41,18 @@ def setup(*, reset: bool) -> None:
     mode = "w" if reset else "a"
     file_handler = logging.FileHandler(path, mode=mode, encoding="utf-8")
     file_handler.setFormatter(logging.Formatter("%(message)s"))
+    file_handler.setLevel(logging.INFO)
     record_queue: queue.SimpleQueue[logging.LogRecord] = queue.SimpleQueue()
     queue_handler = logging.handlers.QueueHandler(record_queue)
     logger = logging.getLogger(_LOGGER_NAME)
     logger.setLevel(logging.INFO)
     logger.propagate = False
     logger.addHandler(queue_handler)
-    listener = logging.handlers.QueueListener(record_queue, file_handler)
+    listener = logging.handlers.QueueListener(
+        record_queue,
+        file_handler,
+        respect_handler_level=True,
+    )
     listener.start()
     _logger = logger
     _listener = listener
@@ -71,7 +76,7 @@ def shutdown() -> None:
 def log_event(event: str, **fields: object) -> None:
     _ensure_setup()
     logger = _logger
-    if logger is None:
+    if logger is None or not logger.isEnabledFor(logging.INFO):
         return
     payload = _base_payload(event)
     if fields:
@@ -82,7 +87,7 @@ def log_event(event: str, **fields: object) -> None:
 def log_error(event: str, exc: BaseException | None = None, **fields: object) -> None:
     _ensure_setup()
     logger = _logger
-    if logger is None:
+    if logger is None or not logger.isEnabledFor(logging.ERROR):
         return
     payload = _base_payload(event)
     if exc is not None:
