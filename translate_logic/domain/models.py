@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -47,19 +47,59 @@ class TranslationStatus(Enum):
     EMPTY = "empty"
 
 
+class ExampleSource(Enum):
+    LEGACY = "legacy"
+    REVERSO = "reverso"
+    OPUS_MT = "opus_mt"
+    MT0 = "mt0"
+    FALLBACK = "fallback"
+
+
+class VariantSource(Enum):
+    LEGACY = "legacy"
+    REVERSO = "reverso"
+    OPUS_MT = "opus_mt"
+
+
+@dataclass(frozen=True, slots=True)
+class ExamplePair:
+    en: str
+    ru: str
+    source: ExampleSource
+
+
+@dataclass(frozen=True, slots=True)
+class TranslationVariant:
+    ru: str
+    pos: str | None
+    synonyms: tuple[str, ...]
+    examples: tuple[ExamplePair, ...]
+    source: VariantSource
+
+
 @dataclass(frozen=True, slots=True)
 class TranslationResult:
-    translation_ru: FieldValue
-    example_en: FieldValue
-    example_ru: FieldValue
+    variants: tuple[TranslationVariant, ...]
+    translation_ru: FieldValue = field(init=False)
+    example_en: FieldValue = field(init=False)
+    example_ru: FieldValue = field(init=False)
+
+    def __post_init__(self) -> None:
+        translation: str | None = None
+        example_en: str | None = None
+        example_ru: str | None = None
+        if self.variants:
+            translation = self.variants[0].ru
+            if self.variants[0].examples:
+                example_en = self.variants[0].examples[0].en
+                example_ru = self.variants[0].examples[0].ru
+        object.__setattr__(self, "translation_ru", FieldValue.from_optional(translation))
+        object.__setattr__(self, "example_en", FieldValue.from_optional(example_en))
+        object.__setattr__(self, "example_ru", FieldValue.from_optional(example_ru))
 
     @classmethod
     def empty(cls) -> "TranslationResult":
-        return cls(
-            translation_ru=FieldValue.missing(),
-            example_en=FieldValue.missing(),
-            example_ru=FieldValue.missing(),
-        )
+        return cls(variants=())
 
     @property
     def status(self) -> TranslationStatus:

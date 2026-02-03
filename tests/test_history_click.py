@@ -17,7 +17,13 @@ from desktop_app.config import AnkiConfig, AnkiFieldMap, AppConfig, LanguageConf
 from desktop_app.controllers.anki_controller import AnkiController
 from desktop_app.controllers.translation_controller import TranslationController
 from desktop_app.application.view_state import TranslationViewState
-from translate_logic.models import FieldValue, TranslationResult
+from translate_logic.models import (
+    ExamplePair,
+    ExampleSource,
+    TranslationResult,
+    TranslationVariant,
+    VariantSource,
+)
 
 
 class DummyApp(gtk_types.Gtk.Application):
@@ -157,9 +163,21 @@ def test_history_item_click_opens_translation(
     controller: TranslationController,
 ) -> None:
     result = TranslationResult(
-        translation_ru=FieldValue.present("перевод"),
-        example_en=FieldValue.present("example en"),
-        example_ru=FieldValue.present("example ru"),
+        variants=(
+            TranslationVariant(
+                ru="перевод",
+                pos=None,
+                synonyms=(),
+                examples=(
+                    ExamplePair(
+                        en="example en",
+                        ru="example ru",
+                        source=ExampleSource.LEGACY,
+                    ),
+                ),
+                source=VariantSource.LEGACY,
+            ),
+        )
     )
     item = HistoryItem(text="hello", result=result, expires_at=0.0)
 

@@ -11,9 +11,12 @@ from translate_logic.domain.policies import SourcePolicy
 from translate_logic.http import AsyncFetcher, build_async_fetcher
 from translate_logic.models import (
     Example,
-    FieldValue,
+    ExamplePair,
+    ExampleSource,
     TranslationLimit,
     TranslationResult,
+    TranslationVariant,
+    VariantSource,
 )
 from translate_logic.providers.cambridge import CambridgeResult, translate_cambridge
 from translate_logic.providers.dictionary_api import (
@@ -89,7 +92,7 @@ async def _translate_with_fetcher_async(
         )
         if cambridge_non_meta:
             translation_ru = combine_translation_variants(cambridge_non_meta, [])
-            _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+            _emit_partial(on_partial, translation_ru)
             google_task: asyncio.Task[GoogleResult] | None = None
             if _needs_more_variants(cambridge_non_meta):
                 google_task = asyncio.create_task(
@@ -177,7 +180,7 @@ async def _translate_with_google_fallback_async(
     translation_ru = combine_translation_variants(
         google_candidates, secondary_translations or []
     )
-    _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+    _emit_partial(on_partial, translation_ru)
 
     dictionary_result = await dictionary_task if dictionary_task is not None else None
     tatoeba_result = await tatoeba_task if tatoeba_task is not None else None
@@ -246,17 +249,14 @@ async def _supplement_examples_async(
 
 def _emit_partial(
     on_partial: Callable[[TranslationResult], None] | None,
-    translation_ru: FieldValue,
+    translation_ru: str | None,
 ) -> None:
-    if on_partial is None or not translation_ru.is_present:
+    if on_partial is None:
         return
-    on_partial(
-        TranslationResult(
-            translation_ru=translation_ru,
-            example_en=FieldValue.missing(),
-            example_ru=FieldValue.missing(),
-        )
-    )
+    variants = _build_variants(translation_ru, None)
+    if not variants:
+        return
+    on_partial(TranslationResult(variants=variants))
 
 
 def _select_example_with_ru(examples: list[Example]) -> Example | None:
@@ -281,11 +281,34 @@ def _needs_more_variants(translations: list[str]) -> bool:
 def _build_result(
     translation_ru: str | None, example: Example | None
 ) -> TranslationResult:
-    return TranslationResult(
-        translation_ru=FieldValue.from_optional(translation_ru),
-        example_en=FieldValue.from_optional(example.en if example else None),
-        example_ru=FieldValue.from_optional(example.ru if example else None),
+    return TranslationResult(variants=_build_variants(translation_ru, example))
+
+
+def _build_variants(
+    translation_ru: str | None, example: Example | None
+) -> tuple[TranslationVariant, ...]:
+    if translation_ru is None:
+        return ()
+    normalized = translation_ru.strip()
+    if not normalized:
+        return ()
+    examples: tuple[ExamplePair, ...] = ()
+    if example is not None and example.ru:
+        examples = (
+            ExamplePair(
+                en=example.en,
+                ru=example.ru,
+                source=ExampleSource.LEGACY,
+            ),
+        )
+    variant = TranslationVariant(
+        ru=normalized,
+        pos=None,
+        synonyms=(),
+        examples=examples,
+        source=VariantSource.LEGACY,
     )
+    return (variant,)
 
 
 def filter_examples(examples: list[Example]) -> list[Example]:
