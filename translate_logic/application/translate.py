@@ -70,10 +70,9 @@ async def _translate_with_fetcher_async(
         cambridge_result = CambridgeResult(
             found=False,
             translations=[],
-            ipa_uk=None,
             examples=[],
         )
-        translation_ru, ipa_uk, example = await _translate_with_google_fallback_async(
+        translation_ru, example = await _translate_with_google_fallback_async(
             normalized_text,
             cambridge_result,
             source_lang,
@@ -81,7 +80,7 @@ async def _translate_with_fetcher_async(
             fetcher,
             on_partial,
         )
-        return _build_result(translation_ru, ipa_uk, example)
+        return _build_result(translation_ru, example)
 
     cambridge_result = await translate_cambridge(normalized_text, fetcher)
     if cambridge_result.found:
@@ -96,10 +95,9 @@ async def _translate_with_fetcher_async(
                 google_task = asyncio.create_task(
                     translate_google(normalized_text, source_lang, target_lang, fetcher)
                 )
-            ipa_task = asyncio.create_task(
-                _supplement_pronunciation_and_examples_async(
+            example_task = asyncio.create_task(
+                _supplement_examples_async(
                     normalized_text,
-                    cambridge_result.ipa_uk,
                     cambridge_result.examples,
                     source_lang,
                     target_lang,
@@ -119,9 +117,9 @@ async def _translate_with_fetcher_async(
                         translation_ru = combine_translation_variants(
                             cambridge_non_meta, google_candidates
                         )
-            ipa_uk, example = await ipa_task
-            return _build_result(translation_ru, ipa_uk, example)
-        translation_ru, ipa_uk, example = await _translate_with_google_fallback_async(
+            example = await example_task
+            return _build_result(translation_ru, example)
+        translation_ru, example = await _translate_with_google_fallback_async(
             normalized_text,
             cambridge_result,
             source_lang,
@@ -130,9 +128,9 @@ async def _translate_with_fetcher_async(
             on_partial,
             secondary_translations=cambridge_meta,
         )
-        return _build_result(translation_ru, ipa_uk, example)
+        return _build_result(translation_ru, example)
 
-    translation_ru, ipa_uk, example = await _translate_with_google_fallback_async(
+    translation_ru, example = await _translate_with_google_fallback_async(
         normalized_text,
         cambridge_result,
         source_lang,
@@ -140,7 +138,7 @@ async def _translate_with_fetcher_async(
         fetcher,
         on_partial,
     )
-    return _build_result(translation_ru, ipa_uk, example)
+    return _build_result(translation_ru, example)
 
 
 async def _translate_with_google_fallback_async(
@@ -151,15 +149,14 @@ async def _translate_with_google_fallback_async(
     fetcher: AsyncFetcher,
     on_partial: Callable[[TranslationResult], None] | None = None,
     secondary_translations: list[str] | None = None,
-) -> tuple[str | None, str | None, Example | None]:
-    base_ipa = cambridge_result.ipa_uk if cambridge_result.found else None
+) -> tuple[str | None, Example | None]:
     base_examples = (
         filter_examples(cambridge_result.examples) if cambridge_result.found else []
     )
     google_task: asyncio.Task[GoogleResult] = asyncio.create_task(
         translate_google(text, source_lang, target_lang, fetcher)
     )
-    needs_dictionary = _POLICY.needs_dictionary(base_ipa, base_examples)
+    needs_dictionary = _POLICY.needs_dictionary(base_examples)
     needs_tatoeba = _POLICY.needs_tatoeba(base_examples)
     dictionary_task: asyncio.Task[DictionaryApiResult] | None = None
     tatoeba_task: asyncio.Task[TatoebaResult] | None = None
@@ -184,9 +181,8 @@ async def _translate_with_google_fallback_async(
 
     dictionary_result = await dictionary_task if dictionary_task is not None else None
     tatoeba_result = await tatoeba_task if tatoeba_task is not None else None
-    ipa_uk, example = await _supplement_pronunciation_and_examples_async(
+    example = await _supplement_examples_async(
         text,
-        base_ipa,
         base_examples,
         source_lang,
         target_lang,
@@ -194,21 +190,20 @@ async def _translate_with_google_fallback_async(
         dictionary_result,
         tatoeba_result,
     )
-    return translation_ru, ipa_uk, example
+    return translation_ru, example
 
 
-async def _supplement_pronunciation_and_examples_async(
+async def _supplement_examples_async(
     text: str,
-    ipa_uk: str | None,
     examples: list[Example],
     source_lang: str,
     target_lang: str,
     fetcher: AsyncFetcher,
     dictionary_result: DictionaryApiResult | None = None,
     tatoeba_result: TatoebaResult | None = None,
-) -> tuple[str | None, Example | None]:
+) -> Example | None:
     available_examples = filter_examples(examples)
-    needs_dictionary = _POLICY.needs_dictionary(ipa_uk, available_examples)
+    needs_dictionary = _POLICY.needs_dictionary(available_examples)
     needs_tatoeba = _POLICY.needs_tatoeba(available_examples)
 
     dictionary_task: asyncio.Task[DictionaryApiResult] | None = None
@@ -236,7 +231,7 @@ async def _supplement_pronunciation_and_examples_async(
     fallback_example = _select_any_example(available_examples)
     final_example = paired_example or fallback_example
     if final_example is None:
-        return ipa_uk, None
+        return None
 
     if final_example.ru is None:
         translated = await translate_google(
@@ -246,7 +241,7 @@ async def _supplement_pronunciation_and_examples_async(
         if translation_ru:
             final_example = Example(en=final_example.en, ru=translation_ru)
 
-    return ipa_uk, final_example
+    return final_example
 
 
 def _emit_partial(
@@ -258,7 +253,6 @@ def _emit_partial(
     on_partial(
         TranslationResult(
             translation_ru=translation_ru,
-            ipa_uk=FieldValue.missing(),
             example_en=FieldValue.missing(),
             example_ru=FieldValue.missing(),
         )
@@ -285,11 +279,10 @@ def _needs_more_variants(translations: list[str]) -> bool:
 
 
 def _build_result(
-    translation_ru: str | None, ipa_uk: str | None, example: Example | None
+    translation_ru: str | None, example: Example | None
 ) -> TranslationResult:
     return TranslationResult(
         translation_ru=FieldValue.from_optional(translation_ru),
-        ipa_uk=FieldValue.from_optional(ipa_uk),
         example_en=FieldValue.from_optional(example.en if example else None),
         example_ru=FieldValue.from_optional(example.ru if example else None),
     )

@@ -50,7 +50,6 @@ class TranslationStatus(Enum):
 @dataclass(frozen=True, slots=True)
 class TranslationResult:
     translation_ru: FieldValue
-    ipa_uk: FieldValue
     example_en: FieldValue
     example_ru: FieldValue
 
@@ -58,7 +57,6 @@ class TranslationResult:
     def empty(cls) -> "TranslationResult":
         return cls(
             translation_ru=FieldValue.missing(),
-            ipa_uk=FieldValue.missing(),
             example_en=FieldValue.missing(),
             example_ru=FieldValue.missing(),
         )

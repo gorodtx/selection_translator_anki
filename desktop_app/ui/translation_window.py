@@ -67,13 +67,6 @@ class TranslationWindow:
         header.append(self._spinner)
         self._header_row = header
 
-        self._label_ipa = Gtk.Label(label="")
-        self._label_ipa.set_xalign(0.0)
-        self._label_ipa.set_wrap(True)
-        self._label_ipa.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._label_ipa.set_max_width_chars(max_label_chars)
-        self._label_ipa.add_css_class("ipa")
-
         self._label_translation = Gtk.Label(label="")
         self._label_translation.set_xalign(0.0)
         self._label_translation.set_wrap(True)
@@ -110,8 +103,6 @@ class TranslationWindow:
         actions.append(self._copy_all_button)
         actions.append(self._add_button)
 
-        self._row_ipa = self._field_row(self._label_ipa)
-        self._sep_after_ipa = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         self._row_translation = self._field_row(self._label_translation)
         self._sep_after_translation = Gtk.Separator(
             orientation=Gtk.Orientation.HORIZONTAL
@@ -121,8 +112,6 @@ class TranslationWindow:
         self._sep_before_actions = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
 
         root.append(header)
-        root.append(self._row_ipa)
-        root.append(self._sep_after_ipa)
         root.append(self._row_translation)
         root.append(self._sep_after_translation)
         root.append(self._row_example_en)
@@ -164,6 +153,7 @@ class TranslationWindow:
         self._banner.notify(notification)
 
     def _apply_state(self, state: TranslationViewState) -> None:
+<<<<<<< Updated upstream
         if self._last_state == state:
             return
         self._last_state = state
@@ -172,6 +162,12 @@ class TranslationWindow:
         self._set_label_text(self._label_translation, state.translation)
         self._set_label_text(self._label_example_en, state.example_en)
         self._set_label_text(self._label_example_ru, state.example_ru)
+=======
+        self._label_original.set_text(state.original)
+        self._label_translation.set_text(state.translation)
+        self._label_example_en.set_text(state.example_en)
+        self._label_example_ru.set_text(state.example_ru)
+>>>>>>> Stashed changes
         if state.loading:
             if not self._spinner_visible:
                 self._spinner.set_visible(True)
@@ -185,11 +181,11 @@ class TranslationWindow:
         header_visible = bool(state.original.strip()) or state.loading
         self._set_visible(self._header_row, header_visible)
 
-        ipa_visible = bool(state.ipa.strip())
         translation_visible = bool(state.translation.strip())
         example_en_visible = bool(state.example_en.strip())
         example_ru_visible = bool(state.example_ru.strip())
 
+<<<<<<< Updated upstream
         self._set_visible(self._row_ipa, ipa_visible)
         self._set_visible(self._row_translation, translation_visible)
         self._set_visible(self._row_example_en, example_en_visible)
@@ -206,6 +202,17 @@ class TranslationWindow:
             or translation_visible
             or example_en_visible
             or example_ru_visible,
+=======
+        self._row_translation.set_visible(translation_visible)
+        self._row_example_en.set_visible(example_en_visible)
+        self._row_example_ru.set_visible(example_ru_visible)
+
+        self._sep_after_translation.set_visible(
+            translation_visible and (example_en_visible or example_ru_visible)
+        )
+        self._sep_before_actions.set_visible(
+            translation_visible or example_en_visible or example_ru_visible
+>>>>>>> Stashed changes
         )
 
         if self._add_button.get_sensitive() != state.can_add_anki:

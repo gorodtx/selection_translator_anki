@@ -243,8 +243,6 @@ class TranslationController:
         original = self._state.memory.text.strip()
         if original:
             lines.append(f"Original: {original}")
-        if result.ipa_uk.is_present:
-            lines.append(f"IPA: {result.ipa_uk.text}")
         if result.translation_ru.is_present:
             lines.append(f"Translation: {result.translation_ru.text}")
         if result.example_en.is_present:

@@ -12,8 +12,8 @@ class SourcePolicy:
     def use_cambridge(self, word_count: int) -> bool:
         return word_count <= self.max_cambridge_words
 
-    def needs_dictionary(self, ipa_uk: str | None, examples: list[Example]) -> bool:
-        return ipa_uk is None or not examples
+    def needs_dictionary(self, examples: list[Example]) -> bool:
+        return not examples
 
     def needs_tatoeba(self, examples: list[Example]) -> bool:
         return not any(example.ru for example in examples)

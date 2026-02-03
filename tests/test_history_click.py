@@ -124,7 +124,6 @@ def controller(
             model="",
             fields=AnkiFieldMap(
                 word="",
-                ipa="",
                 translation="",
                 example_en="",
                 example_ru="",
@@ -159,7 +158,6 @@ def test_history_item_click_opens_translation(
 ) -> None:
     result = TranslationResult(
         translation_ru=FieldValue.present("перевод"),
-        ipa_uk=FieldValue.present("ipa"),
         example_en=FieldValue.present("example en"),
         example_ru=FieldValue.present("example ru"),
     )

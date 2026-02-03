@@ -26,7 +26,6 @@ class TranslationSession:
             self.on_partial(
                 TranslationResult(
                     translation_ru=result.translation_ru,
-                    ipa_uk=FieldValue.missing(),
                     example_en=FieldValue.missing(),
                     example_ru=FieldValue.missing(),
                 )

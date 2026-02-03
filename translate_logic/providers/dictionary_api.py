@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class DictionaryApiResult:
-    ipa_uk: str | None
     examples: list[Example]
 
 
@@ -29,10 +28,11 @@ async def translate_dictionary_api(
     text: str, fetcher: AsyncFetcher
 ) -> DictionaryApiResult:
     if not text:
-        return DictionaryApiResult(ipa_uk=None, examples=[])
+        return DictionaryApiResult(examples=[])
     url = build_dictionary_api_url(text)
     try:
         payload = await fetcher(url)
+<<<<<<< Updated upstream
     except FetchError as exc:
         logger.debug("Dictionary API fetch failed: %s", exc)
         return DictionaryApiResult(ipa_uk=None, examples=[])
@@ -42,18 +42,23 @@ async def translate_dictionary_api(
         logger.warning("Dictionary API parse failed: %s", exc)
         return DictionaryApiResult(ipa_uk=None, examples=[])
     return DictionaryApiResult(ipa_uk=ipa_uk, examples=examples)
+=======
+    except FetchError:
+        return DictionaryApiResult(examples=[])
+    try:
+        examples = _parse_dictionary_api_payload(payload)
+    except Exception:
+        return DictionaryApiResult(examples=[])
+    return DictionaryApiResult(examples=examples)
+>>>>>>> Stashed changes
 
 
-def _parse_dictionary_api_payload(
-    payload: str,
-) -> tuple[str | None, list[Example]]:
+def _parse_dictionary_api_payload(payload: str) -> list[Example]:
     raw_data: object = json.loads(payload)
     entries = _coerce_dict_list(raw_data)
-    phonetics: list[dict[str, object]] = []
     examples: list[Example] = []
     example_texts: set[str] = set()
     for entry in entries:
-        phonetics.extend(_coerce_dict_list(entry.get("phonetics")))
         meanings = _coerce_dict_list(entry.get("meanings"))
         for meaning in meanings:
             definitions = _coerce_dict_list(meaning.get("definitions"))
@@ -65,22 +70,7 @@ def _parse_dictionary_api_payload(
                 if normalized and normalized not in example_texts:
                     examples.append(Example(en=normalized, ru=None))
                     example_texts.add(normalized)
-    ipa_uk = _select_phonetics(phonetics)
-    return ipa_uk, examples
-
-
-def _select_phonetics(phonetics: list[dict[str, object]]) -> str | None:
-    candidates: list[str] = []
-    for entry in phonetics:
-        text = _get_str(entry.get("text"))
-        if text:
-            candidates.append(text)
-    if not candidates:
-        return None
-    for text in candidates:
-        if "əʊ" in text or "ɒ" in text:
-            return text
-    return candidates[0]
+    return examples
 
 
 def _coerce_dict_list(value: object) -> list[dict[str, object]]:

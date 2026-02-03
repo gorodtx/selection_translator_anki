@@ -7,7 +7,6 @@ from translate_logic.models import FieldValue, TranslationResult
 def _result(text: str) -> TranslationResult:
     return TranslationResult(
         translation_ru=FieldValue.present(text),
-        ipa_uk=FieldValue.missing(),
         example_en=FieldValue.missing(),
         example_ru=FieldValue.missing(),
     )
