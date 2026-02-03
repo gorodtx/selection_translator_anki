@@ -9,32 +9,39 @@ dependencies = [
     "huggingface-hub>=1.3.7",
     "reverso-context-api>=0.5",
     "sentencepiece>=0.2.1",
+    "torch>=2.2",
     "transformers>=5.0.0",
 ]
 
 [dependency-groups]
 dev = [
-    "mypy>=1.19.1",
-    "pyright>=1.1.407",
     "pytest>=9.0.2",
     "ruff>=0.14.10",
+    "ty>=0.0.14",
     "types-python-xlib>=0.33.0.20250809",
 ]
 
-[tool.pyright]
-pythonVersion = "3.13"
-typeCheckingMode = "strict"
-reportUnusedImport = "error"
-reportUnusedVariable = "error"
-venvPath = "."
-venv = ".venv"
+[tool.ty.environment]
+python-version = "3.13"
+python-platform = "linux"
+root = ["."]
 
-include = ["."]
+[tool.ty.src]
+include = ["translate_logic", "desktop_app", "tests"]
 exclude = [
-  ".venv",
-  ".mypy_cache",
-  ".pytest_cache",
-  ".ruff_cache",
-  "**/__pycache__",
+  "**/node_modules/**",
+  "**/__pycache__/**",
+  "**/.venv/**",
+  "**/.git/**",
+  "**/.idea/**",
+  ".mypy_cache/**",
+  ".pytest_cache/**",
+  ".ruff_cache/**",
 ]
 
+[tool.ty.rules]
+possibly-missing-import = "error"
+possibly-missing-attribute = "error"
+
+[tool.ty.analysis]
+respect-type-ignore-comments = true

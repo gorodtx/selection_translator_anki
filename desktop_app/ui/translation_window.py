@@ -128,6 +128,7 @@ class TranslationWindow:
         self._label_cache: dict[int, str] = {}
         self._visible_cache: dict[int, bool] = {}
         self._spinner_visible = False
+        self.presented: bool = False
         self._apply_state(TranslationViewState.empty())
         telemetry.log_event("ui.translation_window.created")
 
@@ -137,10 +138,12 @@ class TranslationWindow:
 
     def present(self) -> None:
         telemetry.log_event("ui.translation_window.present")
+        self.presented = True
         self._window.present()
 
     def hide(self) -> None:
         telemetry.log_event("ui.translation_window.hide")
+        self.presented = False
         self._window.hide()
 
     def is_visible(self) -> bool:
@@ -153,21 +156,13 @@ class TranslationWindow:
         self._banner.notify(notification)
 
     def _apply_state(self, state: TranslationViewState) -> None:
-<<<<<<< Updated upstream
         if self._last_state == state:
             return
         self._last_state = state
         self._set_label_text(self._label_original, state.original)
-        self._set_label_text(self._label_ipa, state.ipa)
         self._set_label_text(self._label_translation, state.translation)
         self._set_label_text(self._label_example_en, state.example_en)
         self._set_label_text(self._label_example_ru, state.example_ru)
-=======
-        self._label_original.set_text(state.original)
-        self._label_translation.set_text(state.translation)
-        self._label_example_en.set_text(state.example_en)
-        self._label_example_ru.set_text(state.example_ru)
->>>>>>> Stashed changes
         if state.loading:
             if not self._spinner_visible:
                 self._spinner.set_visible(True)
@@ -185,34 +180,17 @@ class TranslationWindow:
         example_en_visible = bool(state.example_en.strip())
         example_ru_visible = bool(state.example_ru.strip())
 
-<<<<<<< Updated upstream
-        self._set_visible(self._row_ipa, ipa_visible)
         self._set_visible(self._row_translation, translation_visible)
         self._set_visible(self._row_example_en, example_en_visible)
         self._set_visible(self._row_example_ru, example_ru_visible)
 
-        self._set_visible(self._sep_after_ipa, ipa_visible and translation_visible)
         self._set_visible(
             self._sep_after_translation,
             translation_visible and (example_en_visible or example_ru_visible),
         )
         self._set_visible(
             self._sep_before_actions,
-            ipa_visible
-            or translation_visible
-            or example_en_visible
-            or example_ru_visible,
-=======
-        self._row_translation.set_visible(translation_visible)
-        self._row_example_en.set_visible(example_en_visible)
-        self._row_example_ru.set_visible(example_ru_visible)
-
-        self._sep_after_translation.set_visible(
-            translation_visible and (example_en_visible or example_ru_visible)
-        )
-        self._sep_before_actions.set_visible(
-            translation_visible or example_en_visible or example_ru_visible
->>>>>>> Stashed changes
+            translation_visible or example_en_visible or example_ru_visible,
         )
 
         if self._add_button.get_sensitive() != state.can_add_anki:

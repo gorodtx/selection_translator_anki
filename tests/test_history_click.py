@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("gi")
+
 from desktop_app import gtk_types
 from desktop_app.adapters.clipboard_writer import ClipboardWriter
 from desktop_app.anki import AnkiAddResult, AnkiCreateModelResult, AnkiListResult

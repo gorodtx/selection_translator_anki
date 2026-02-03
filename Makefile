@@ -1,4 +1,4 @@
-.PHONY: bootstrap fmt fmt-check lint lint-check mypy pyright pylance typecheck \
+.PHONY: bootstrap fmt fmt-check lint lint-check ty typecheck \
         problems verify check clean
 
 bootstrap:
@@ -16,15 +16,10 @@ fmt-check:
 lint-check:
 	uv run ruff check .
 
-mypy:
-	uv run mypy
+ty:
+	uv run ty check
 
-pyright:
-	uv run pyright
-
-pylance: pyright
-
-typecheck: mypy pyright
+typecheck: ty
 
 problems:
 	uv run python tools/problems.py

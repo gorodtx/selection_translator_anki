@@ -23,11 +23,3 @@ def normalize_text(value: str) -> str:
 
 def normalize_whitespace(value: str) -> str:
     return _normalize_whitespace_cached(value)
-
-
-def count_words(value: str) -> int:
-    return rules.count_words(value)
-
-
-def to_cambridge_slug(value: str) -> str:
-    return rules.to_cambridge_slug(value)

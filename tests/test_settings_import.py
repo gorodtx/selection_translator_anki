@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("gi")
+
 from desktop_app.settings import missing_required_fields
 
 

@@ -1,315 +1,148 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+from collections.abc import Callable
+from typing import Final
 
-import aiohttp
-
-from translate_logic.cache import LruTtlCache
-from translate_logic.domain import rules
-from translate_logic.domain.policies import SourcePolicy
-from translate_logic.http import AsyncFetcher, build_async_fetcher
 from translate_logic.models import (
-    Example,
     ExamplePair,
-    ExampleSource,
-    TranslationLimit,
     TranslationResult,
     TranslationVariant,
     VariantSource,
 )
-from translate_logic.providers.cambridge import CambridgeResult, translate_cambridge
-from translate_logic.providers.dictionary_api import (
-    DictionaryApiResult,
-    translate_dictionary_api,
-)
-from translate_logic.providers.google import GoogleResult, translate_google
-from translate_logic.providers.tatoeba import TatoebaResult, translate_tatoeba
-from translate_logic.text import count_words, normalize_text
-from translate_logic.translation import (
-    combine_translation_variants,
-    limit_translations,
-    merge_translations,
-    partition_translations,
-    select_primary_translation,
-    select_translation_candidates,
-)
+from translate_logic.providers.example_generator import ExampleGeneratorService
+from translate_logic.providers.opus_mt import OpusMtProvider
+from translate_logic.providers.reverso import translate_reverso
+from translate_logic.text import normalize_text
 
-DEFAULT_CACHE = LruTtlCache()
-_POLICY = SourcePolicy()
+DEFAULT_MIN_EXAMPLES: Final[int] = 2
 
 
 async def translate_async(
     text: str,
     source_lang: str = "en",
     target_lang: str = "ru",
-    fetcher: AsyncFetcher | None = None,
-    on_partial: Callable[[TranslationResult], None] | None = None,
-) -> TranslationResult:
-    if fetcher is not None:
-        return await _translate_with_fetcher_async(
-            text, source_lang, target_lang, fetcher, on_partial
-        )
-    async with aiohttp.ClientSession() as session:
-        async_fetcher = build_async_fetcher(session, cache=DEFAULT_CACHE)
-        return await _translate_with_fetcher_async(
-            text, source_lang, target_lang, async_fetcher, on_partial
-        )
-
-
-async def _translate_with_fetcher_async(
-    text: str,
-    source_lang: str,
-    target_lang: str,
-    fetcher: AsyncFetcher,
+    *,
+    opus_provider: OpusMtProvider | None = None,
+    example_service: ExampleGeneratorService | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     normalized_text = normalize_text(text)
     if not normalized_text:
         return TranslationResult.empty()
 
-    word_count = count_words(normalized_text)
-    if not _POLICY.use_cambridge(word_count):
-        cambridge_result = CambridgeResult(
-            found=False,
-            translations=[],
-            examples=[],
-        )
-        translation_ru, example = await _translate_with_google_fallback_async(
-            normalized_text,
-            cambridge_result,
-            source_lang,
-            target_lang,
-            fetcher,
-            on_partial,
-        )
-        return _build_result(translation_ru, example)
-
-    cambridge_result = await translate_cambridge(normalized_text, fetcher)
-    if cambridge_result.found:
-        cambridge_non_meta, cambridge_meta = partition_translations(
-            cambridge_result.translations
-        )
-        if cambridge_non_meta:
-            translation_ru = combine_translation_variants(cambridge_non_meta, [])
-            _emit_partial(on_partial, translation_ru)
-            google_task: asyncio.Task[GoogleResult] | None = None
-            if _needs_more_variants(cambridge_non_meta):
-                google_task = asyncio.create_task(
-                    translate_google(normalized_text, source_lang, target_lang, fetcher)
-                )
-            example_task = asyncio.create_task(
-                _supplement_examples_async(
-                    normalized_text,
-                    cambridge_result.examples,
-                    source_lang,
-                    target_lang,
-                    fetcher,
-                )
-            )
-            if google_task is not None:
-                try:
-                    google_result: GoogleResult | None = await google_task
-                except Exception:
-                    google_result = None
-                if google_result is not None:
-                    google_candidates = select_translation_candidates(
-                        google_result.translations
-                    )
-                    if google_candidates:
-                        translation_ru = combine_translation_variants(
-                            cambridge_non_meta, google_candidates
-                        )
-            example = await example_task
-            return _build_result(translation_ru, example)
-        translation_ru, example = await _translate_with_google_fallback_async(
-            normalized_text,
-            cambridge_result,
-            source_lang,
-            target_lang,
-            fetcher,
-            on_partial,
-            secondary_translations=cambridge_meta,
-        )
-        return _build_result(translation_ru, example)
-
-    translation_ru, example = await _translate_with_google_fallback_async(
+    reverso_result = await translate_reverso(
         normalized_text,
-        cambridge_result,
         source_lang,
         target_lang,
-        fetcher,
-        on_partial,
     )
-    return _build_result(translation_ru, example)
-
-
-async def _translate_with_google_fallback_async(
-    text: str,
-    cambridge_result: CambridgeResult,
-    source_lang: str,
-    target_lang: str,
-    fetcher: AsyncFetcher,
-    on_partial: Callable[[TranslationResult], None] | None = None,
-    secondary_translations: list[str] | None = None,
-) -> tuple[str | None, Example | None]:
-    base_examples = (
-        filter_examples(cambridge_result.examples) if cambridge_result.found else []
-    )
-    google_task: asyncio.Task[GoogleResult] = asyncio.create_task(
-        translate_google(text, source_lang, target_lang, fetcher)
-    )
-    needs_dictionary = _POLICY.needs_dictionary(base_examples)
-    needs_tatoeba = _POLICY.needs_tatoeba(base_examples)
-    dictionary_task: asyncio.Task[DictionaryApiResult] | None = None
-    tatoeba_task: asyncio.Task[TatoebaResult] | None = None
-    if needs_dictionary:
-        dictionary_task = asyncio.create_task(translate_dictionary_api(text, fetcher))
-    if needs_tatoeba:
-        tatoeba_task = asyncio.create_task(translate_tatoeba(text, fetcher))
-
-    try:
-        google_result: GoogleResult | None = await google_task
-    except Exception:
-        google_result = None
-    google_candidates = (
-        select_translation_candidates(google_result.translations)
-        if google_result is not None
-        else []
-    )
-    translation_ru = combine_translation_variants(
-        google_candidates, secondary_translations or []
-    )
-    _emit_partial(on_partial, translation_ru)
-
-    dictionary_result = await dictionary_task if dictionary_task is not None else None
-    tatoeba_result = await tatoeba_task if tatoeba_task is not None else None
-    example = await _supplement_examples_async(
-        text,
-        base_examples,
-        source_lang,
-        target_lang,
-        fetcher,
-        dictionary_result,
-        tatoeba_result,
-    )
-    return translation_ru, example
-
-
-async def _supplement_examples_async(
-    text: str,
-    examples: list[Example],
-    source_lang: str,
-    target_lang: str,
-    fetcher: AsyncFetcher,
-    dictionary_result: DictionaryApiResult | None = None,
-    tatoeba_result: TatoebaResult | None = None,
-) -> Example | None:
-    available_examples = filter_examples(examples)
-    needs_dictionary = _POLICY.needs_dictionary(available_examples)
-    needs_tatoeba = _POLICY.needs_tatoeba(available_examples)
-
-    dictionary_task: asyncio.Task[DictionaryApiResult] | None = None
-    tatoeba_task: asyncio.Task[TatoebaResult] | None = None
-    if dictionary_result is None and needs_dictionary:
-        dictionary_task = asyncio.create_task(translate_dictionary_api(text, fetcher))
-    if tatoeba_result is None and needs_tatoeba:
-        tatoeba_task = asyncio.create_task(translate_tatoeba(text, fetcher))
-
-    if dictionary_task is not None:
-        dictionary_result = await dictionary_task
-    if dictionary_result is not None:
-        if not available_examples:
-            available_examples = filter_examples(dictionary_result.examples)
-
-    if tatoeba_task is not None:
-        tatoeba_result = await tatoeba_task
-
-    paired_example = _select_example_with_ru(available_examples)
-    if paired_example is None and tatoeba_result is not None:
-        paired_example = _select_example_with_ru(
-            filter_examples(tatoeba_result.examples)
-        )
-
-    fallback_example = _select_any_example(available_examples)
-    final_example = paired_example or fallback_example
-    if final_example is None:
-        return None
-
-    if final_example.ru is None:
-        translated = await translate_google(
-            final_example.en, source_lang, target_lang, fetcher
-        )
-        translation_ru = select_primary_translation(translated.translations)
-        if translation_ru:
-            final_example = Example(en=final_example.en, ru=translation_ru)
-
-    return final_example
-
-
-def _emit_partial(
-    on_partial: Callable[[TranslationResult], None] | None,
-    translation_ru: str | None,
-) -> None:
-    if on_partial is None:
-        return
-    variants = _build_variants(translation_ru, None)
+    variants = reverso_result.variants
     if not variants:
-        return
-    on_partial(TranslationResult(variants=variants))
-
-
-def _select_example_with_ru(examples: list[Example]) -> Example | None:
-    for example in examples:
-        if example.ru:
-            return example
-    return None
-
-
-def _select_any_example(examples: list[Example]) -> Example | None:
-    if examples:
-        return examples[0]
-    return None
-
-
-def _needs_more_variants(translations: list[str]) -> bool:
-    unique = merge_translations(translations, [])
-    limited = limit_translations(unique, TranslationLimit.PRIMARY.value)
-    return len(limited) < TranslationLimit.PRIMARY.value
-
-
-def _build_result(
-    translation_ru: str | None, example: Example | None
-) -> TranslationResult:
-    return TranslationResult(variants=_build_variants(translation_ru, example))
-
-
-def _build_variants(
-    translation_ru: str | None, example: Example | None
-) -> tuple[TranslationVariant, ...]:
-    if translation_ru is None:
-        return ()
-    normalized = translation_ru.strip()
-    if not normalized:
-        return ()
-    examples: tuple[ExamplePair, ...] = ()
-    if example is not None and example.ru:
-        examples = (
-            ExamplePair(
-                en=example.en,
-                ru=example.ru,
-                source=ExampleSource.LEGACY,
-            ),
+        variants = _fallback_opus_variant(
+            normalized_text, source_lang, target_lang, opus_provider
         )
+
+    if variants:
+        _emit_partial(on_partial, variants)
+    if not variants:
+        return TranslationResult.empty()
+
+    filled_variants = await _fill_examples_async(
+        normalized_text,
+        variants,
+        example_service,
+    )
+    return TranslationResult(variants=filled_variants)
+
+
+def _fallback_opus_variant(
+    text: str,
+    source_lang: str,
+    target_lang: str,
+    opus_provider: OpusMtProvider | None,
+) -> tuple[TranslationVariant, ...]:
+    if opus_provider is None:
+        return ()
+    translation = opus_provider.translate(text, source_lang, target_lang)
+    if translation is None:
+        return ()
     variant = TranslationVariant(
-        ru=normalized,
+        ru=translation,
         pos=None,
         synonyms=(),
-        examples=examples,
-        source=VariantSource.LEGACY,
+        examples=(),
+        source=VariantSource.OPUS_MT,
     )
     return (variant,)
 
 
-def filter_examples(examples: list[Example]) -> list[Example]:
-    return [example for example in examples if rules.is_example_candidate(example.en)]
+def _emit_partial(
+    on_partial: Callable[[TranslationResult], None] | None,
+    variants: tuple[TranslationVariant, ...],
+) -> None:
+    if on_partial is None:
+        return
+    stripped = tuple(_strip_examples(variant) for variant in variants)
+    on_partial(TranslationResult(variants=stripped))
+
+
+def _strip_examples(variant: TranslationVariant) -> TranslationVariant:
+    return TranslationVariant(
+        ru=variant.ru,
+        pos=variant.pos,
+        synonyms=variant.synonyms,
+        examples=(),
+        source=variant.source,
+    )
+
+
+def _merge_examples(
+    existing: tuple[ExamplePair, ...],
+    generated: tuple[ExamplePair, ...],
+    limit: int,
+) -> tuple[ExamplePair, ...]:
+    if len(existing) >= limit:
+        return existing[:limit]
+    needed = limit - len(existing)
+    return existing + generated[:needed]
+
+
+def _fill_variant_examples(
+    variant: TranslationVariant,
+    generation: ExampleGeneratorService | None,
+    text: str,
+) -> TranslationVariant:
+    if len(variant.examples) >= DEFAULT_MIN_EXAMPLES:
+        return variant
+    if generation is None:
+        return variant
+    result = generation.generate(text, variant.ru)
+    merged = _merge_examples(variant.examples, result.examples, DEFAULT_MIN_EXAMPLES)
+    return TranslationVariant(
+        ru=variant.ru,
+        pos=variant.pos,
+        synonyms=variant.synonyms,
+        examples=merged,
+        source=variant.source,
+    )
+
+
+async def _fill_examples_async(
+    text: str,
+    variants: tuple[TranslationVariant, ...],
+    example_service: ExampleGeneratorService | None,
+) -> tuple[TranslationVariant, ...]:
+    if not variants:
+        return ()
+    if example_service is None:
+        return variants
+    filled: list[TranslationVariant] = []
+    for variant in variants:
+        updated = await asyncio.to_thread(
+            _fill_variant_examples,
+            variant,
+            example_service,
+            text,
+        )
+        filled.append(updated)
+    return tuple(filled)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from translate_logic.domain.models import (
-    Example,
     ExamplePair,
-    ExampleLimit,
     ExampleSource,
     FieldStatus,
     FieldValue,
@@ -16,9 +14,7 @@ from translate_logic.domain.models import (
 )
 
 __all__ = [
-    "Example",
     "ExamplePair",
-    "ExampleLimit",
     "ExampleSource",
     "FieldStatus",
     "FieldValue",

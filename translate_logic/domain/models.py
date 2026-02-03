@@ -4,12 +4,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
-@dataclass(frozen=True, slots=True)
-class Example:
-    en: str
-    ru: str | None
-
-
 class FieldStatus(Enum):
     MISSING = "missing"
     PRESENT = "present"
@@ -93,7 +87,9 @@ class TranslationResult:
             if self.variants[0].examples:
                 example_en = self.variants[0].examples[0].en
                 example_ru = self.variants[0].examples[0].ru
-        object.__setattr__(self, "translation_ru", FieldValue.from_optional(translation))
+        object.__setattr__(
+            self, "translation_ru", FieldValue.from_optional(translation)
+        )
         object.__setattr__(self, "example_en", FieldValue.from_optional(example_en))
         object.__setattr__(self, "example_ru", FieldValue.from_optional(example_ru))
 
@@ -114,8 +110,3 @@ class TranslationLimit(Enum):
 
 class QueryLimit(Enum):
     MAX_CHARS = 200
-    MAX_CAMBRIDGE_WORDS = 5
-
-
-class ExampleLimit(Enum):
-    MIN_WORDS = 2
