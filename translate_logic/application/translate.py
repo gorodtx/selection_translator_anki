@@ -10,12 +10,13 @@ from translate_logic.models import (
     TranslationVariant,
     VariantSource,
 )
-from translate_logic.providers.example_generator import ExampleGeneratorService
+from translate_logic.providers.fallback_examples import build_fallback_examples
+from translate_logic.language_base.provider import LanguageBaseProvider
 from translate_logic.providers.opus_mt import OpusMtProvider
-from translate_logic.providers.reverso import translate_reverso
 from translate_logic.text import normalize_text
 
 DEFAULT_MIN_EXAMPLES: Final[int] = 2
+DEFAULT_VARIANTS: Final[int] = 3
 
 
 async def translate_async(
@@ -24,35 +25,53 @@ async def translate_async(
     target_lang: str = "ru",
     *,
     opus_provider: OpusMtProvider | None = None,
-    example_service: ExampleGeneratorService | None = None,
+    language_base: LanguageBaseProvider | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     normalized_text = normalize_text(text)
     if not normalized_text:
         return TranslationResult.empty()
 
-    reverso_result = await translate_reverso(
-        normalized_text,
-        source_lang,
-        target_lang,
-    )
-    variants = reverso_result.variants
+    variants = _variants_from_language_base(normalized_text, language_base)
     if not variants:
         variants = _fallback_opus_variant(
             normalized_text, source_lang, target_lang, opus_provider
         )
-
-    if variants:
-        _emit_partial(on_partial, variants)
     if not variants:
         return TranslationResult.empty()
 
+    _emit_partial(on_partial, variants)
     filled_variants = await _fill_examples_async(
         normalized_text,
         variants,
-        example_service,
+        language_base,
     )
     return TranslationResult(variants=filled_variants)
+
+
+def _variants_from_language_base(
+    text: str, language_base: LanguageBaseProvider | None
+) -> tuple[TranslationVariant, ...]:
+    if language_base is None:
+        return ()
+    # Variants make sense mostly for word/short phrase lookup.
+    if len(text) > 64:
+        return ()
+    if text.count(" ") > 3:
+        return ()
+    ru_variants = language_base.get_variants(word=text, limit=DEFAULT_VARIANTS)
+    if not ru_variants:
+        return ()
+    return tuple(
+        TranslationVariant(
+            ru=item,
+            pos=None,
+            synonyms=(),
+            examples=(),
+            source=VariantSource.OPUS_OPEN_SUBTITLES,
+        )
+        for item in ru_variants
+    )
 
 
 def _fallback_opus_variant(
@@ -63,17 +82,21 @@ def _fallback_opus_variant(
 ) -> tuple[TranslationVariant, ...]:
     if opus_provider is None:
         return ()
-    translation = opus_provider.translate(text, source_lang, target_lang)
-    if translation is None:
+    translations = opus_provider.translate_variants(text, source_lang, target_lang)
+    if not translations:
         return ()
-    variant = TranslationVariant(
-        ru=translation,
-        pos=None,
-        synonyms=(),
-        examples=(),
-        source=VariantSource.OPUS_MT,
-    )
-    return (variant,)
+    variants: list[TranslationVariant] = []
+    for translation in translations:
+        variants.append(
+            TranslationVariant(
+                ru=translation,
+                pos=None,
+                synonyms=(),
+                examples=(),
+                source=VariantSource.OPUS_MT,
+            )
+        )
+    return tuple(variants)
 
 
 def _emit_partial(
@@ -109,15 +132,35 @@ def _merge_examples(
 
 def _fill_variant_examples(
     variant: TranslationVariant,
-    generation: ExampleGeneratorService | None,
+    language_base: LanguageBaseProvider | None,
     text: str,
 ) -> TranslationVariant:
     if len(variant.examples) >= DEFAULT_MIN_EXAMPLES:
         return variant
-    if generation is None:
-        return variant
-    result = generation.generate(text, variant.ru)
-    merged = _merge_examples(variant.examples, result.examples, DEFAULT_MIN_EXAMPLES)
+    base = language_base
+    language_base_available = base is not None and base.db_path.exists()
+    from_db: tuple[ExamplePair, ...] = ()
+    if language_base_available:
+        assert base is not None
+        from_db = base.get_examples(
+            word=text,
+            translation=variant.ru,
+            limit=DEFAULT_MIN_EXAMPLES,
+        )
+    merged = _merge_examples(
+        variant.examples,
+        from_db,
+        DEFAULT_MIN_EXAMPLES,
+    )
+    # Template examples exist only as a last resort when we don't have a local
+    # language base yet. If the DB exists but has no matches, return fewer
+    # examples instead of emitting unnatural templates.
+    if len(merged) < DEFAULT_MIN_EXAMPLES and not language_base_available:
+        merged = _merge_examples(
+            merged,
+            build_fallback_examples(text, variant.ru),
+            DEFAULT_MIN_EXAMPLES,
+        )
     return TranslationVariant(
         ru=variant.ru,
         pos=variant.pos,
@@ -130,18 +173,16 @@ def _fill_variant_examples(
 async def _fill_examples_async(
     text: str,
     variants: tuple[TranslationVariant, ...],
-    example_service: ExampleGeneratorService | None,
+    language_base: LanguageBaseProvider | None,
 ) -> tuple[TranslationVariant, ...]:
     if not variants:
         return ()
-    if example_service is None:
-        return variants
     filled: list[TranslationVariant] = []
     for variant in variants:
         updated = await asyncio.to_thread(
             _fill_variant_examples,
             variant,
-            example_service,
+            language_base,
             text,
         )
         filled.append(updated)

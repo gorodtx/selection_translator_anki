@@ -43,16 +43,21 @@ class TranslationStatus(Enum):
 
 class ExampleSource(Enum):
     LEGACY = "legacy"
-    REVERSO = "reverso"
     OPUS_MT = "opus_mt"
-    MT0 = "mt0"
+    OPUS_OPEN_SUBTITLES = "opus_open_subtitles"
+    OPUS_QED = "opus_qed"
+    OPUS_BOOKS = "opus_books"
+    OPUS_TATOEBA = "opus_tatoeba"
+    WIKTIONARY = "wiktionary"
+    TEMPLATE = "template"
     FALLBACK = "fallback"
 
 
 class VariantSource(Enum):
     LEGACY = "legacy"
-    REVERSO = "reverso"
     OPUS_MT = "opus_mt"
+    OPUS_OPEN_SUBTITLES = "opus_open_subtitles"
+    WIKTIONARY = "wiktionary"
 
 
 @dataclass(frozen=True, slots=True)

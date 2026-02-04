@@ -6,11 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiohttp>=3.13.2",
-    "huggingface-hub>=1.3.7",
-    "reverso-context-api>=0.5",
+    "ctranslate2>=4.7.1",
     "sentencepiece>=0.2.1",
-    "torch>=2.2",
-    "transformers>=5.0.0",
 ]
 
 [dependency-groups]
@@ -25,9 +22,10 @@ dev = [
 python-version = "3.13"
 python-platform = "linux"
 root = ["."]
+extra-paths = ["./typings"]
 
 [tool.ty.src]
-include = ["translate_logic", "desktop_app", "tests"]
+include = ["translate_logic", "desktop_app", "tests", "typings"]
 exclude = [
   "**/node_modules/**",
   "**/__pycache__/**",
