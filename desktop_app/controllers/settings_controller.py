@@ -245,7 +245,6 @@ class SettingsController:
         if self._model_ready:
             fields = AnkiFieldMap(
                 word="word",
-                ipa="ipa",
                 translation="translation",
                 example_en="example_en",
                 example_ru="example_ru",
@@ -254,7 +253,6 @@ class SettingsController:
         else:
             fields = AnkiFieldMap(
                 word="",
-                ipa="",
                 translation="",
                 example_en="",
                 example_ru="",
@@ -398,7 +396,6 @@ class SettingsController:
         target_deck = deck or self._current_deck()
         fields = AnkiFieldMap(
             word="word",
-            ipa="ipa",
             translation="translation",
             example_en="example_en",
             example_ru="example_ru",

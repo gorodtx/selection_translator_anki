@@ -11,7 +11,7 @@ A GNOME-first desktop translator that works on the **primary selection** and sho
 - GNOME Shell hotkey (no busy cursor, no extra processes)
 - Primary selection only (no clipboard writes)
 - Two-stage UI update: fast partial → full
-- Cambridge → Google ordering, strict deduplication
+- Offline-first translation (local language base → OPUS-MT fallback)
 - Cache-aware repeat translations
 - Clean GNOME integration via D-Bus activation
 
@@ -20,12 +20,12 @@ A GNOME-first desktop translator that works on the **primary selection** and sho
 **Flow**
 1) GNOME Shell Extension → reads PRIMARY selection
 2) D-Bus call → Python backend (`com.translator.desktop`)
-3) Translation pipeline → UI window + history
+3) Translation pipeline → UI window + history + Anki integration
 
 **Layers**
 - **GNOME Extension (JS):** hotkey, selection read, D-Bus IPC
 - **Backend (Python):** translation orchestration, caching, history, UI
-- **Providers:** Cambridge / Google / DictionaryAPI / Tatoeba
+- **Translation engine:** local language base (SQLite FTS) + OPUS-MT (CTranslate2)
 
 ## Tech stack
 
@@ -33,7 +33,8 @@ A GNOME-first desktop translator that works on the **primary selection** and sho
 - D-Bus activation (session bus)
 - GTK4 (Python GI)
 - Python 3.13
-- aiohttp (async HTTP)
+- CTranslate2 + SentencePiece (offline OPUS-MT)
+- SQLite language base (optional but recommended)
 
 ## Installation (GNOME)
 
@@ -63,6 +64,29 @@ Notes:
 
 - Select text anywhere → press the hotkey
 - Settings live in **GNOME Extensions** → Translator
+
+## CLI (debug / headless)
+
+Run:
+`uv run python -m translator.cli "text"`
+
+Output (default, human-readable):
+- Variants (2–3 when available).
+- Examples (EN/RU pairs) for each variant when present.
+
+Use `--format json` for structured output.
+
+## Offline assets (important)
+
+- The directory `offline_assets/` contains everything required for fast offline translation.
+- Models (required for translation):
+  - `offline_assets/ct2/opus_mt/en-ru/`
+- Optional (recommended) language base with examples:
+  - `offline_language_base/language_base.sqlite3`
+
+This repository is designed to work offline from a fresh clone:
+- No model downloads.
+- No fallback paths outside the repository checkout.
 
 ---
 

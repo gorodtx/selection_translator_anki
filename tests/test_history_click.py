@@ -5,6 +5,8 @@ from concurrent.futures import Future
 
 import pytest
 
+pytest.importorskip("gi")
+
 from desktop_app import gtk_types
 from desktop_app.adapters.clipboard_writer import ClipboardWriter
 from desktop_app.anki import AnkiAddResult, AnkiCreateModelResult, AnkiListResult
@@ -16,7 +18,13 @@ from desktop_app.application.view_state import TranslationViewState
 from desktop_app.config import AnkiConfig, AnkiFieldMap, AppConfig, LanguageConfig
 from desktop_app.controllers.anki_controller import AnkiController
 from desktop_app.controllers.translation_controller import TranslationController
-from translate_logic.models import FieldValue, TranslationResult
+from translate_logic.models import (
+    ExamplePair,
+    ExampleSource,
+    TranslationResult,
+    TranslationVariant,
+    VariantSource,
+)
 
 
 class DummyApp(gtk_types.Gtk.Application):
@@ -88,6 +96,11 @@ class FakeTranslator:
         future: Future[TranslationResult] = Future()
         future.set_result(TranslationResult.empty())
         return future
+
+    def cached(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> TranslationResult | None:
+        return None
 
 
 class FakeHistory:
@@ -166,7 +179,6 @@ def controller(monkeypatch: pytest.MonkeyPatch) -> TranslationController:
             model="",
             fields=AnkiFieldMap(
                 word="",
-                ipa="",
                 translation="",
                 example_en="",
                 example_ru="",
@@ -197,10 +209,21 @@ def test_history_item_click_opens_translation(
     controller: TranslationController,
 ) -> None:
     result = TranslationResult(
-        translation_ru=FieldValue.present("перевод"),
-        ipa_uk=FieldValue.present("ipa"),
-        example_en=FieldValue.present("example en"),
-        example_ru=FieldValue.present("example ru"),
+        variants=(
+            TranslationVariant(
+                ru="перевод",
+                pos=None,
+                synonyms=(),
+                examples=(
+                    ExamplePair(
+                        en="example en",
+                        ru="example ru",
+                        source=ExampleSource.LEGACY,
+                    ),
+                ),
+                source=VariantSource.LEGACY,
+            ),
+        )
     )
     item = HistoryItem(text="hello", result=result, expires_at=0.0)
 

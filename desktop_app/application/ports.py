@@ -18,6 +18,10 @@ class TranslatorPort(Protocol):
         on_partial: Callable[[TranslationResult], None] | None = None,
     ) -> Future[TranslationResult]: ...
 
+    def cached(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> TranslationResult | None: ...
+
 
 class HistoryPort(Protocol):
     def add(self, text: str, result: TranslationResult) -> None: ...

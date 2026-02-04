@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from desktop_app.services.history import HistoryStore
-from translate_logic.models import FieldValue, TranslationResult
+from translate_logic.models import TranslationResult, TranslationVariant, VariantSource
 
 
 def _result(text: str) -> TranslationResult:
     return TranslationResult(
-        translation_ru=FieldValue.present(text),
-        ipa_uk=FieldValue.missing(),
-        example_en=FieldValue.missing(),
-        example_ru=FieldValue.missing(),
+        variants=(
+            TranslationVariant(
+                ru=text,
+                pos=None,
+                synonyms=(),
+                examples=(),
+                source=VariantSource.LEGACY,
+            ),
+        )
     )
 
 

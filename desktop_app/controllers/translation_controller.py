@@ -6,13 +6,13 @@ import importlib
 
 from desktop_app.adapters.clipboard_writer import ClipboardWriter
 from desktop_app.application.history import HistoryItem
-from ..application.translation_executor import TranslationExecutor
+from desktop_app.application.translation_executor import TranslationExecutor
 from desktop_app.anki.templates import DEFAULT_MODEL_NAME
 from desktop_app.config import AppConfig
 from desktop_app.controllers.anki_controller import AnkiController
-from .history_view import HistoryViewCoordinator
-from .translation_state import TranslationState
-from .translation_view import TranslationViewCoordinator
+from desktop_app.controllers.history_view import HistoryViewCoordinator
+from desktop_app.controllers.translation_state import TranslationState
+from desktop_app.controllers.translation_view import TranslationViewCoordinator
 from desktop_app.notifications import Notification
 from desktop_app.notifications.models import NotificationDuration
 from desktop_app.notifications import messages as notify_messages
@@ -222,8 +222,6 @@ class TranslationController:
         original = self._state.memory.text.strip()
         if original:
             lines.append(f"Original: {original}")
-        if result.ipa_uk.is_present:
-            lines.append(f"IPA: {result.ipa_uk.text}")
         if result.translation_ru.is_present:
             lines.append(f"Translation: {result.translation_ru.text}")
         if result.example_en.is_present:

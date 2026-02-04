@@ -66,13 +66,6 @@ class TranslationWindow:
         header.append(self._spinner)
         self._header_row = header
 
-        self._label_ipa = Gtk.Label(label="")
-        self._label_ipa.set_xalign(0.0)
-        self._label_ipa.set_wrap(True)
-        self._label_ipa.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._label_ipa.set_max_width_chars(max_label_chars)
-        self._label_ipa.add_css_class("ipa")
-
         self._label_translation = Gtk.Label(label="")
         self._label_translation.set_xalign(0.0)
         self._label_translation.set_wrap(True)
@@ -109,8 +102,6 @@ class TranslationWindow:
         actions.append(self._copy_all_button)
         actions.append(self._add_button)
 
-        self._row_ipa = self._field_row(self._label_ipa)
-        self._sep_after_ipa = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         self._row_translation = self._field_row(self._label_translation)
         self._sep_after_translation = Gtk.Separator(
             orientation=Gtk.Orientation.HORIZONTAL
@@ -120,8 +111,6 @@ class TranslationWindow:
         self._sep_before_actions = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
 
         root.append(header)
-        root.append(self._row_ipa)
-        root.append(self._sep_after_ipa)
         root.append(self._row_translation)
         root.append(self._sep_after_translation)
         root.append(self._row_example_en)
@@ -134,6 +123,11 @@ class TranslationWindow:
         apply_theme()
 
         self._window = window
+        self._last_state: TranslationViewState | None = None
+        self._label_cache: dict[int, str] = {}
+        self._visible_cache: dict[int, bool] = {}
+        self._spinner_visible = False
+        self.presented: bool = False
         self._apply_state(TranslationViewState.empty())
 
     @property
@@ -141,10 +135,15 @@ class TranslationWindow:
         return self._window
 
     def present(self) -> None:
+        self.presented = True
         self._window.present()
 
     def hide(self) -> None:
+        self.presented = False
         self._window.hide()
+
+    def is_visible(self) -> bool:
+        return bool(self._window.get_visible())
 
     def apply_state(self, state: TranslationViewState) -> None:
         self._apply_state(state)
@@ -153,44 +152,61 @@ class TranslationWindow:
         self._banner.notify(notification)
 
     def _apply_state(self, state: TranslationViewState) -> None:
-        self._label_original.set_text(state.original)
-        self._label_ipa.set_text(state.ipa)
-        self._label_translation.set_text(state.translation)
-        self._label_example_en.set_text(state.example_en)
-        self._label_example_ru.set_text(state.example_ru)
+        if self._last_state == state:
+            return
+        self._last_state = state
+        self._set_label_text(self._label_original, state.original)
+        self._set_label_text(self._label_translation, state.translation)
+        self._set_label_text(self._label_example_en, state.example_en)
+        self._set_label_text(self._label_example_ru, state.example_ru)
         if state.loading:
-            self._spinner.set_visible(True)
+            if not self._spinner_visible:
+                self._spinner.set_visible(True)
+                self._spinner_visible = True
             self._spinner.start()
         else:
             self._spinner.stop()
-            self._spinner.set_visible(False)
+            if self._spinner_visible:
+                self._spinner.set_visible(False)
+                self._spinner_visible = False
         header_visible = bool(state.original.strip()) or state.loading
-        self._header_row.set_visible(header_visible)
+        self._set_visible(self._header_row, header_visible)
 
-        ipa_visible = bool(state.ipa.strip())
         translation_visible = bool(state.translation.strip())
         example_en_visible = bool(state.example_en.strip())
         example_ru_visible = bool(state.example_ru.strip())
 
-        self._row_ipa.set_visible(ipa_visible)
-        self._row_translation.set_visible(translation_visible)
-        self._row_example_en.set_visible(example_en_visible)
-        self._row_example_ru.set_visible(example_ru_visible)
+        self._set_visible(self._row_translation, translation_visible)
+        self._set_visible(self._row_example_en, example_en_visible)
+        self._set_visible(self._row_example_ru, example_ru_visible)
 
-        self._sep_after_ipa.set_visible(ipa_visible and translation_visible)
-        self._sep_after_translation.set_visible(
-            translation_visible and (example_en_visible or example_ru_visible)
+        self._set_visible(
+            self._sep_after_translation,
+            translation_visible and (example_en_visible or example_ru_visible),
         )
-        self._sep_before_actions.set_visible(
-            ipa_visible
-            or translation_visible
-            or example_en_visible
-            or example_ru_visible
+        self._set_visible(
+            self._sep_before_actions,
+            translation_visible or example_en_visible or example_ru_visible,
         )
 
-        self._add_button.set_sensitive(state.can_add_anki)
-        self._copy_all_button.set_sensitive(bool(state.translation.strip()))
+        if self._add_button.get_sensitive() != state.can_add_anki:
+            self._add_button.set_sensitive(state.can_add_anki)
+        copy_sensitive = bool(state.translation.strip())
+        if self._copy_all_button.get_sensitive() != copy_sensitive:
+            self._copy_all_button.set_sensitive(copy_sensitive)
         self._window.set_cursor(None)
+
+    def _set_label_text(self, label: gtk_types.Gtk.Label, value: str) -> None:
+        key = id(label)
+        if self._label_cache.get(key) != value:
+            label.set_text(value)
+            self._label_cache[key] = value
+
+    def _set_visible(self, widget: gtk_types.Gtk.Widget, visible: bool) -> None:
+        key = id(widget)
+        if self._visible_cache.get(key) != visible:
+            widget.set_visible(visible)
+            self._visible_cache[key] = visible
 
     def _field_row(self, label: gtk_types.Gtk.Label) -> gtk_types.Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)

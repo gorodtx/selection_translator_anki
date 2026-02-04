@@ -1,13 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-
-
-@dataclass(frozen=True, slots=True)
-class Example:
-    en: str
-    ru: str | None
 
 
 class FieldStatus(Enum):
@@ -47,21 +41,66 @@ class TranslationStatus(Enum):
     EMPTY = "empty"
 
 
+class ExampleSource(Enum):
+    LEGACY = "legacy"
+    OPUS_MT = "opus_mt"
+    OPUS_OPEN_SUBTITLES = "opus_open_subtitles"
+    OPUS_QED = "opus_qed"
+    OPUS_BOOKS = "opus_books"
+    OPUS_TATOEBA = "opus_tatoeba"
+    WIKTIONARY = "wiktionary"
+    TEMPLATE = "template"
+    FALLBACK = "fallback"
+
+
+class VariantSource(Enum):
+    LEGACY = "legacy"
+    OPUS_MT = "opus_mt"
+    OPUS_OPEN_SUBTITLES = "opus_open_subtitles"
+    WIKTIONARY = "wiktionary"
+
+
+@dataclass(frozen=True, slots=True)
+class ExamplePair:
+    en: str
+    ru: str
+    source: ExampleSource
+
+
+@dataclass(frozen=True, slots=True)
+class TranslationVariant:
+    ru: str
+    pos: str | None
+    synonyms: tuple[str, ...]
+    examples: tuple[ExamplePair, ...]
+    source: VariantSource
+
+
 @dataclass(frozen=True, slots=True)
 class TranslationResult:
-    translation_ru: FieldValue
-    ipa_uk: FieldValue
-    example_en: FieldValue
-    example_ru: FieldValue
+    variants: tuple[TranslationVariant, ...]
+    translation_ru: FieldValue = field(init=False)
+    example_en: FieldValue = field(init=False)
+    example_ru: FieldValue = field(init=False)
+
+    def __post_init__(self) -> None:
+        translation: str | None = None
+        example_en: str | None = None
+        example_ru: str | None = None
+        if self.variants:
+            translation = self.variants[0].ru
+            if self.variants[0].examples:
+                example_en = self.variants[0].examples[0].en
+                example_ru = self.variants[0].examples[0].ru
+        object.__setattr__(
+            self, "translation_ru", FieldValue.from_optional(translation)
+        )
+        object.__setattr__(self, "example_en", FieldValue.from_optional(example_en))
+        object.__setattr__(self, "example_ru", FieldValue.from_optional(example_ru))
 
     @classmethod
     def empty(cls) -> "TranslationResult":
-        return cls(
-            translation_ru=FieldValue.missing(),
-            ipa_uk=FieldValue.missing(),
-            example_en=FieldValue.missing(),
-            example_ru=FieldValue.missing(),
-        )
+        return cls(variants=())
 
     @property
     def status(self) -> TranslationStatus:
@@ -76,8 +115,3 @@ class TranslationLimit(Enum):
 
 class QueryLimit(Enum):
     MAX_CHARS = 200
-    MAX_CAMBRIDGE_WORDS = 5
-
-
-class ExampleLimit(Enum):
-    MIN_WORDS = 2

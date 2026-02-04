@@ -31,6 +31,11 @@ class TranslationFlow:
             query_text, source_lang, target_lang, on_partial=on_partial
         )
 
+    def cached_result(
+        self, query_text: str, source_lang: str, target_lang: str
+    ) -> TranslationResult | None:
+        return self.translator.cached(query_text, source_lang, target_lang)
+
     def register_result(self, display_text: str, result: TranslationResult) -> None:
         if result.status is not TranslationStatus.SUCCESS:
             return
