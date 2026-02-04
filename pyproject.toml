@@ -13,6 +13,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mcp-server-fetch>=2025.4.7",
+    "mcp-server-sqlite>=2025.4.25",
     "pytest>=9.0.2",
     "ruff>=0.14.10",
     "ty>=0.0.14",

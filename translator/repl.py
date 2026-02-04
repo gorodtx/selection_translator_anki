@@ -7,8 +7,10 @@ from pathlib import Path
 from translate_logic.application.translate import translate_async
 from translate_logic.language_base.provider import (
     LanguageBaseProvider,
+    default_fallback_language_base_path,
     default_language_base_path,
 )
+from translate_logic.language_base.multi_provider import MultiLanguageBaseProvider
 from translate_logic.models import TranslationResult
 from translate_logic.providers.opus_mt import OpusMtProvider, default_opus_mt_model_dir
 
@@ -22,9 +24,9 @@ def _print_lines(result: TranslationResult) -> None:
         return
     print("variants:")
     for idx, variant in enumerate(result.variants, start=1):
-        print(f"{idx}. {variant.ru} [{variant.source.value}]")
+        print(f"{idx}. {variant.ru}")
         for example_index, example in enumerate(variant.examples, start=1):
-            print(f"  en{example_index}: {example.en} ({example.source.value})")
+            print(f"  en{example_index}: {example.en}")
             print(f"  ru{example_index}: {example.ru}")
 
 
@@ -38,7 +40,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--language-db",
         type=Path,
         default=default_language_base_path(),
-        help="SQLite language base (examples) path.",
+        help="Primary SQLite language base (examples) path.",
+    )
+    parser.add_argument(
+        "--fallback-language-db",
+        type=Path,
+        default=default_fallback_language_base_path(),
+        help="Fallback SQLite language base (examples) path.",
     )
     return parser
 
@@ -48,7 +56,7 @@ async def _translate_once(
     source: str,
     target: str,
     opus_provider: OpusMtProvider,
-    language_base: LanguageBaseProvider,
+    language_base: MultiLanguageBaseProvider,
 ) -> TranslationResult:
     return await translate_async(
         text,
@@ -63,7 +71,10 @@ def main() -> int:
     args = _build_parser().parse_args()
 
     opus_provider = OpusMtProvider(model_dir=default_opus_mt_model_dir())
-    language_base = LanguageBaseProvider(db_path=args.language_db)
+    language_base = MultiLanguageBaseProvider(
+        primary=LanguageBaseProvider(db_path=args.language_db),
+        fallback=LanguageBaseProvider(db_path=args.fallback_language_db),
+    )
 
     print("translator repl: enter text to translate, or 'quit' to exit.")
     while True:

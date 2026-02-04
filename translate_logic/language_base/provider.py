@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections import Counter
 import re
 import sqlite3
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
+from urllib.parse import quote
 
 from translate_logic.language_base.validation import (
     MIN_EXAMPLE_WORDS,
@@ -14,9 +16,9 @@ from translate_logic.language_base.validation import (
     normalize_spaces,
     word_count,
 )
-from translate_logic.language_base.morphology_ru import ru_lemma
+from translate_logic.language_base.morphology_ru import ru_lemma_and_pos
 from translate_logic.translation import clean_translations
-from translate_logic.models import ExamplePair, ExampleSource
+from translate_logic.models import ExamplePair
 
 
 def default_language_base_path() -> Path:
@@ -95,6 +97,7 @@ _RU_STOPWORDS: Final[set[str]] = {
     "ваш",
     "ваша",
     "ваше",
+    "свой",
     "этот",
     "эта",
     "эти",
@@ -109,6 +112,14 @@ _RU_STOPWORDS: Final[set[str]] = {
     "ещё",
     "еще",
     "ну",
+}
+
+_RU_VARIANT_POS: Final[set[str]] = {
+    # Prefer content words for "translation variants" from aligned corpora.
+    # This avoids returning frequent verbs like "быть"/"положить" for "table".
+    "NOUN",
+    "ADJF",
+    "ADJS",
 }
 
 
@@ -127,10 +138,27 @@ def _fts_query(text: str) -> str | None:
 class LanguageBaseProvider:
     db_path: Path = default_language_base_path()
     fts_limit: int = 200
+    _local: threading.local = field(
+        default_factory=threading.local, init=False, repr=False
+    )
 
     @property
     def is_available(self) -> bool:
         return self.db_path.exists()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if isinstance(conn, sqlite3.Connection):
+            return conn
+
+        # Use immutable read-only mode: the DB is shipped as a static asset.
+        # Quote the path for URI safety, but keep slashes intact.
+        encoded = quote(self.db_path.as_posix(), safe="/")
+        uri = f"file:{encoded}?mode=ro&immutable=1"
+        conn = sqlite3.connect(uri, uri=True)
+        conn.row_factory = sqlite3.Row
+        setattr(self._local, "conn", conn)
+        return conn
 
     def get_examples(
         self, *, word: str, translation: str, limit: int
@@ -143,8 +171,9 @@ class LanguageBaseProvider:
         if not self.db_path.exists():
             return ()
         try:
+            conn = self._connect()
             return _fetch_examples(
-                db_path=self.db_path,
+                conn=conn,
                 fts_query=query,
                 word=word,
                 translation=translation,
@@ -168,8 +197,9 @@ class LanguageBaseProvider:
         if not self.db_path.exists():
             return ()
         try:
+            conn = self._connect()
             return _fetch_variants(
-                db_path=self.db_path,
+                conn=conn,
                 fts_query=query,
                 limit=limit,
                 fts_limit=self.fts_limit,
@@ -183,24 +213,23 @@ LanguageBaseExampleProvider = LanguageBaseProvider
 
 def _fetch_examples(
     *,
-    db_path: Path,
+    conn: sqlite3.Connection,
     fts_query: str,
     word: str,
     translation: str,
     limit: int,
     fts_limit: int,
 ) -> tuple[ExamplePair, ...]:
-    # We use a separate connection per call to keep things simple and avoid
-    # cross-thread issues (UI thread vs worker threads).
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT en, ru, source FROM examples_fts WHERE examples_fts MATCH ? LIMIT ?",
-            (fts_query, fts_limit),
+    def fetch_rows(row_limit: int) -> list[sqlite3.Row]:
+        return conn.execute(
+            "SELECT en, ru FROM examples_fts WHERE examples_fts MATCH ? LIMIT ?",
+            (fts_query, row_limit),
         ).fetchall()
-    finally:
-        conn.close()
+
+    # Adaptive fetch: many queries resolve quickly; avoid pulling the full
+    # fts_limit into Python unless needed.
+    initial = min(50, fts_limit)
+    rows = fetch_rows(initial)
 
     # 1) Prefer examples whose RU contains the requested translation.
     selected = _select_examples(
@@ -212,6 +241,20 @@ def _fetch_examples(
     )
     if len(selected) >= limit:
         return selected
+
+    if initial < fts_limit:
+        rows = fetch_rows(fts_limit)
+        selected = _select_examples(
+            rows,
+            word=word,
+            translation=translation,
+            limit=limit,
+            require_translation_match=True,
+            existing=selected,
+        )
+        if len(selected) >= limit:
+            return selected
+
     # 2) If still missing, allow RU to not contain the exact variant.
     relaxed = _select_examples(
         rows,
@@ -239,7 +282,6 @@ def _select_examples(
             break
         en = str(row["en"]).strip()
         ru = str(row["ru"]).strip()
-        raw_source = str(row["source"]).strip()
         if not en or not ru:
             continue
         if word_count(en) < MIN_EXAMPLE_WORDS:
@@ -249,11 +291,7 @@ def _select_examples(
         if require_translation_match and not matches_translation(ru, translation):
             continue
 
-        try:
-            source = ExampleSource(raw_source)
-        except ValueError:
-            source = ExampleSource.LEGACY
-        pair = ExamplePair(en=en, ru=ru, source=source)
+        pair = ExamplePair(en=en, ru=ru)
         if pair in items:
             continue
         items.append(pair)
@@ -262,46 +300,59 @@ def _select_examples(
 
 def _fetch_variants(
     *,
-    db_path: Path,
+    conn: sqlite3.Connection,
     fts_query: str,
     limit: int,
     fts_limit: int,
 ) -> tuple[str, ...]:
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT ru FROM examples_fts WHERE examples_fts MATCH ? LIMIT ?",
-            (fts_query, fts_limit),
-        ).fetchall()
-    finally:
-        conn.close()
+    rows = conn.execute(
+        "SELECT ru FROM examples_fts WHERE examples_fts MATCH ? LIMIT ?",
+        (fts_query, fts_limit),
+    ).fetchall()
 
+    counter = _count_variants(rows, content_only=True)
+    if not counter:
+        # Some queries (e.g., modals like "might") don't have stable
+        # noun/adj translations; fall back to a broader token set.
+        counter = _count_variants(rows, content_only=False)
+
+    if not counter:
+        return ()
+    most_common = counter.most_common()
+    top_count = most_common[0][1]
+    # Drop low-signal co-occurrences (e.g., "son" for "mother") while keeping
+    # secondary senses ("table" -> "таблица") when they are frequent enough.
+    min_count = max(2, int(top_count * 0.10))
+    ranked = [candidate for candidate, count in most_common if count >= min_count]
+    cleaned = clean_translations(ranked)
+    return tuple(cleaned[:limit])
+
+
+def _count_variants(rows: list[sqlite3.Row], *, content_only: bool) -> Counter[str]:
     counter: Counter[str] = Counter()
     for row in rows:
         ru = str(row["ru"]).strip()
         if not ru:
             continue
-        tokens = _tokenize_ru(ru)
+        tokens = _tokenize_ru(ru, content_only=content_only)
         if not tokens:
             continue
         counter.update(tokens)
         counter.update(_bigrams(tokens))
-
-    if not counter:
-        return ()
-    ranked = [candidate for candidate, _ in counter.most_common()]
-    cleaned = clean_translations(ranked)
-    return tuple(cleaned[:limit])
+    return counter
 
 
-def _tokenize_ru(text: str) -> list[str]:
+def _tokenize_ru(text: str, *, content_only: bool) -> list[str]:
     raw_tokens = [t.casefold() for t in _RU_WORD_RE.findall(text)]
     tokens: list[str] = []
     for token in raw_tokens:
         if not _is_variant_token(token):
             continue
-        lemma = ru_lemma(token)
+        lemma, pos = ru_lemma_and_pos(token)
+        if lemma is not None and lemma in _RU_STOPWORDS:
+            continue
+        if content_only and pos is not None and pos not in _RU_VARIANT_POS:
+            continue
         tokens.append(lemma or token)
     return tokens
 

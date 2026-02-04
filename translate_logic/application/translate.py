@@ -8,9 +8,7 @@ from translate_logic.models import (
     ExamplePair,
     TranslationResult,
     TranslationVariant,
-    VariantSource,
 )
-from translate_logic.providers.fallback_examples import build_fallback_examples
 from translate_logic.language_base.base import LanguageBase
 from translate_logic.providers.opus_mt import OpusMtProvider
 from translate_logic.text import normalize_text
@@ -68,7 +66,6 @@ def _variants_from_language_base(
             pos=None,
             synonyms=(),
             examples=(),
-            source=VariantSource.OPUS_OPEN_SUBTITLES,
         )
         for item in ru_variants
     )
@@ -93,7 +90,6 @@ def _fallback_opus_variant(
                 pos=None,
                 synonyms=(),
                 examples=(),
-                source=VariantSource.OPUS_MT,
             )
         )
     return tuple(variants)
@@ -115,7 +111,6 @@ def _strip_examples(variant: TranslationVariant) -> TranslationVariant:
         pos=variant.pos,
         synonyms=variant.synonyms,
         examples=(),
-        source=variant.source,
     )
 
 
@@ -144,29 +139,16 @@ def _fill_variant_examples(
             translation=variant.ru,
             limit=DEFAULT_MIN_EXAMPLES,
         )
-        language_base_available = True
-    else:
-        language_base_available = False
     merged = _merge_examples(
         variant.examples,
         from_db,
         DEFAULT_MIN_EXAMPLES,
     )
-    # Template examples exist only as a last resort when we don't have a local
-    # language base yet. If the DB exists but has no matches, return fewer
-    # examples instead of emitting unnatural templates.
-    if len(merged) < DEFAULT_MIN_EXAMPLES and not language_base_available:
-        merged = _merge_examples(
-            merged,
-            build_fallback_examples(text, variant.ru),
-            DEFAULT_MIN_EXAMPLES,
-        )
     return TranslationVariant(
         ru=variant.ru,
         pos=variant.pos,
         synonyms=variant.synonyms,
         examples=merged,
-        source=variant.source,
     )
 
 

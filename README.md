@@ -81,8 +81,12 @@ Use `--format json` for structured output.
 - The directory `offline_assets/` contains everything required for fast offline translation.
 - Models (required for translation):
   - `offline_assets/ct2/opus_mt/en-ru/`
-- Optional (recommended) language base with examples:
-  - `offline_language_base/language_base.sqlite3`
+- Optional (recommended) language bases with examples (primary + fallback):
+  - `offline_language_base/opensubtitles_lite.sqlite3` (primary, target <= 1.7GB)
+  - `offline_language_base/fallback.sqlite3` (fallback, small)
+
+The language bases are shipped as SQLite files in this repository.
+No extra downloads are required for offline usage.
 
 This repository is designed to work offline from a fresh clone:
 - No model downloads.

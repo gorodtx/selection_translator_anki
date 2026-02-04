@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from desktop_app.services.history import HistoryStore
-from translate_logic.models import TranslationResult, TranslationVariant, VariantSource
+from translate_logic.models import TranslationResult, TranslationVariant
 
 
 def _result(text: str) -> TranslationResult:
@@ -12,7 +12,6 @@ def _result(text: str) -> TranslationResult:
                 pos=None,
                 synonyms=(),
                 examples=(),
-                source=VariantSource.LEGACY,
             ),
         )
     )

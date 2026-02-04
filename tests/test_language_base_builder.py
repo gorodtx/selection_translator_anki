@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from translator.language_base.builder import build_language_base
-from translate_logic.models import ExampleSource
 
 
 def _write_lines(path: Path, lines: list[str]) -> None:
@@ -36,7 +35,6 @@ def test_builder_applies_max_words_and_cyrillic_filters(tmp_path: Path) -> None:
         en_path=en_path,
         ru_path=ru_path,
         out_path=out_path,
-        source=ExampleSource.OPUS_OPEN_SUBTITLES,
         min_words=4,
         max_words=9,
         max_per_anchor=100,
@@ -63,7 +61,6 @@ def test_builder_stops_by_max_db_bytes(tmp_path: Path) -> None:
         en_path=en_path,
         ru_path=ru_path,
         out_path=out_path,
-        source=ExampleSource.OPUS_OPEN_SUBTITLES,
         min_words=4,
         max_words=9,
         max_per_anchor=10_000_000,

@@ -33,7 +33,6 @@ class TranslationSession:
                     pos=variant.pos,
                     synonyms=variant.synonyms,
                     examples=(),
-                    source=variant.source,
                 )
                 for variant in result.variants
             )

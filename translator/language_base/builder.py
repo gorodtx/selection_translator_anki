@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
-import gzip
-import io
 import re
 import sqlite3
-import zipfile
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+from urllib.parse import quote
 
 from translate_logic.language_base.provider import default_language_base_path
 from translate_logic.language_base.validation import (
@@ -19,7 +17,6 @@ from translate_logic.language_base.validation import (
     normalize_spaces,
     word_count,
 )
-from translate_logic.models import ExampleSource
 
 _STOPWORDS: Final[set[str]] = {
     "a",
@@ -58,42 +55,15 @@ _TAG_RE: Final[re.Pattern[str]] = re.compile(r"<[^>]+>")
 _SSA_RE: Final[re.Pattern[str]] = re.compile(r"{\\\\[^}]+}")
 
 
-@dataclass(frozen=True, slots=True)
-class OpusDownload:
-    corpus: str
-    url: str
-    version: str
+def _iter_lines(path: Path) -> Iterator[str]:
+    """Iterate aligned corpus lines.
 
-
-def _iter_lines(path: Path, *, zip_member_suffix: str | None) -> Iterator[str]:
-    if path.suffix == ".gz":
-        with gzip.open(path, "rt", encoding="utf-8", errors="ignore") as f:
-            yield from f
-        return
-    if path.suffix == ".zip":
-        if zip_member_suffix is None:
-            raise ValueError("zip_member_suffix is required for .zip inputs")
-        with zipfile.ZipFile(path) as zf:
-            member = next(
-                (
-                    name
-                    for name in zf.namelist()
-                    if name.endswith(zip_member_suffix) and not name.endswith("/")
-                ),
-                None,
-            )
-            if member is None:
-                raise FileNotFoundError(
-                    f"Zip does not contain a member ending with {zip_member_suffix!r}: {path}"
-                )
-            with zf.open(member, "r") as raw:
-                wrapper = io.TextIOWrapper(raw, encoding="utf-8", errors="ignore")
-                yield from wrapper
-        return
-    else:
-        with path.open("r", encoding="utf-8", errors="ignore") as f:
-            yield from f
-        return
+    We intentionally support only plain text files here: distribution uses the
+    pre-built SQLite language bases, and we don't want archive formats (zip/gz)
+    in the code path.
+    """
+    with path.open("r", encoding="utf-8", errors="ignore") as f:
+        yield from f
 
 
 def _cleanup_subtitle_text(text: str) -> str:
@@ -115,7 +85,7 @@ def _anchor_word(text: str, counts: Counter[str]) -> str | None:
 def _create_db(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE VIRTUAL TABLE IF NOT EXISTS examples_fts "
-        "USING fts5(en, ru UNINDEXED, source UNINDEXED, tokenize='unicode61')"
+        "USING fts5(en, ru UNINDEXED, tokenize='unicode61')"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
@@ -155,12 +125,17 @@ def _write_meta(
     )
 
 
+def _sqlite_file_uri_ro_immutable(path: Path) -> str:
+    # file: URIs allow query params like mode=ro and immutable=1.
+    quoted = quote(str(path.resolve()), safe="/")
+    return f"file:{quoted}?mode=ro&immutable=1"
+
+
 def build_language_base(
     *,
     en_path: Path,
     ru_path: Path,
     out_path: Path,
-    source: ExampleSource,
     min_words: int = MIN_EXAMPLE_WORDS,
     max_words: int = 24,
     max_per_anchor: int = 40,
@@ -187,21 +162,19 @@ def build_language_base(
         conn.execute("PRAGMA synchronous=NORMAL")
         _create_db(conn)
 
-        batch: list[tuple[str, str, str]] = []
+        batch: list[tuple[str, str]] = []
 
         def flush_batch() -> None:
             nonlocal batch
             if not batch:
                 return
-            conn.executemany(
-                "INSERT INTO examples_fts(en, ru, source) VALUES(?, ?, ?)", batch
-            )
+            conn.executemany("INSERT INTO examples_fts(en, ru) VALUES(?, ?)", batch)
             conn.commit()
             batch = []
 
         for raw_en, raw_ru in zip(
-            _iter_lines(en_path, zip_member_suffix=".en"),
-            _iter_lines(ru_path, zip_member_suffix=".ru"),
+            _iter_lines(en_path),
+            _iter_lines(ru_path),
             strict=False,
         ):
             read_rows += 1
@@ -234,7 +207,7 @@ def build_language_base(
                 skipped_rows += 1
                 continue
 
-            batch.append((en, ru, source.value))
+            batch.append((en, ru))
             inserted_rows += 1
             counts[anchor] += 1
             if len(batch) >= commit_every:
@@ -248,7 +221,6 @@ def build_language_base(
         flush_batch()
 
         if write_meta:
-            _write_meta(conn, key="source", value=source.value)
             _write_meta(conn, key="min_words", value=min_words)
             _write_meta(conn, key="max_words", value=max_words)
             _write_meta(conn, key="max_per_anchor", value=max_per_anchor)
@@ -285,11 +257,17 @@ def build_opensubtitles_lite(
     max_db_bytes: int = 1_700_000_000,
     safety_margin_bytes: int = 50_000_000,
 ) -> BuildStats:
+    # Re-create to ensure the schema stays deterministic (and compact).
+    if out_path.exists():
+        out_path.unlink()
+    for ext in ("-wal", "-shm"):
+        side = out_path.with_name(out_path.name + ext)
+        if side.exists():
+            side.unlink()
     return build_language_base(
         en_path=en_path,
         ru_path=ru_path,
         out_path=out_path,
-        source=ExampleSource.OPUS_OPEN_SUBTITLES,
         min_words=MIN_EXAMPLE_WORDS,
         max_words=9,
         max_per_anchor=800,
@@ -302,17 +280,95 @@ def build_opensubtitles_lite(
     )
 
 
+def migrate_drop_source_column(*, in_path: Path, out_path: Path) -> BuildStats:
+    """Create a copy of an existing DB without the legacy `source` column.
+
+    This is a one-time migration helper: early versions of our FTS schema stored a
+    redundant `source` column on every row. It has no functional value and makes
+    the DB larger. This function rewrites the DB into the compact schema
+    (en, ru UNINDEXED) and copies meta excluding the `source` key.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build into a temp file and then atomically replace the target DB. This keeps
+    # `out_path` usable even if the migration fails midway.
+    tmp_out = out_path.with_name(out_path.name + ".tmp")
+    if tmp_out.exists():
+        tmp_out.unlink()
+    for ext in ("-wal", "-shm"):
+        side = tmp_out.with_name(tmp_out.name + ext)
+        if side.exists():
+            side.unlink()
+
+    conn = sqlite3.connect(tmp_out, uri=True)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        _create_db(conn)
+        conn.execute(
+            "ATTACH DATABASE ? AS old",
+            (_sqlite_file_uri_ro_immutable(in_path),),
+        )
+        conn.execute(
+            "INSERT INTO examples_fts(en, ru) SELECT en, ru FROM old.examples_fts"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) "
+            "SELECT key, value FROM old.meta WHERE key != 'source'"
+        )
+        conn.commit()
+        conn.execute("DETACH DATABASE old")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+
+    # Ensure no temp sidecar files are left behind (distribution expects a single file).
+    for ext in ("-wal", "-shm"):
+        side = tmp_out.with_name(tmp_out.name + ext)
+        if side.exists():
+            side.unlink()
+
+    tmp_out.replace(out_path)
+    for ext in ("-wal", "-shm"):
+        side = out_path.with_name(out_path.name + ext)
+        if side.exists():
+            side.unlink()
+
+    # Prefer meta counters from the input DB if present (count(*) on large FTS is costly).
+    read_rows = 0
+    inserted_rows = 0
+    skipped_rows = 0
+    src = sqlite3.connect(_sqlite_file_uri_ro_immutable(in_path), uri=True)
+    try:
+        for key, value in src.execute("SELECT key, value FROM meta"):
+            if key == "read_rows":
+                read_rows = int(value)
+            elif key == "inserted_rows":
+                inserted_rows = int(value)
+            elif key == "skipped_rows":
+                skipped_rows = int(value)
+    except sqlite3.OperationalError:
+        # No meta table in older/hand-crafted DBs.
+        pass
+    finally:
+        src.close()
+
+    return BuildStats(
+        read_rows=read_rows, inserted_rows=inserted_rows, skipped_rows=skipped_rows
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Build a local SQLite language base from aligned subtitle corpora.\n\n"
             "Recommended source for 'human' examples: OPUS OpenSubtitles (en-ru).\n"
-            "Download the aligned text files (or .gz) and pass them via --en/--ru."
+            "Download and unpack aligned text files and pass them via --en/--ru."
         )
     )
     parser.add_argument(
         "--preset",
-        choices=("generic", "opensubtitles_lite"),
+        choices=("generic", "opensubtitles_lite", "migrate_drop_source"),
         default="generic",
         help=(
             "Build preset. 'opensubtitles_lite' applies strict filters and a byte cap "
@@ -322,11 +378,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--en",
         type=Path,
-        required=True,
+        required=False,
         help="English text file (one sentence per line).",
     )
     parser.add_argument(
-        "--ru", type=Path, required=True, help="Russian text file (aligned to --en)."
+        "--ru", type=Path, required=False, help="Russian text file (aligned to --en)."
     )
     parser.add_argument(
         "--out",
@@ -335,11 +391,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output SQLite path.",
     )
     parser.add_argument(
-        "--source",
-        choices=[e.value for e in ExampleSource],
-        default=ExampleSource.OPUS_OPEN_SUBTITLES.value,
-        help="Example source tag saved in DB.",
+        "--in-db",
+        type=Path,
+        default=None,
+        help="Input SQLite DB (migrate_drop_source preset).",
     )
+    # No corpus downloads here; the repo ships only SQLite bases.
     parser.add_argument("--min-words", type=int, default=MIN_EXAMPLE_WORDS)
     parser.add_argument("--max-words", type=int, default=24)
     parser.add_argument("--max-per-anchor", type=int, default=40)
@@ -382,117 +439,15 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_opus_moses_url(*, corpus: str) -> OpusDownload:
-    import json
-    import urllib.request
-
-    url = (
-        f"https://opus.nlpl.eu/opusapi/?corpus={corpus}"
-        "&source=en&target=ru&preprocessing=moses&version=latest&format=json"
-    )
-    with urllib.request.urlopen(url) as r:  # noqa: S310 (trusted host, read-only)
-        payload = json.loads(r.read().decode("utf-8"))
-    corpora = payload.get("corpora", [])
-    if not corpora:
-        raise ValueError(f"OPUS API returned no entries for corpus={corpus!r}")
-    first = corpora[0]
-    download_url = str(first.get("url", "")).strip()
-    version = str(first.get("version", "")).strip()
-    if not download_url:
-        raise ValueError(f"OPUS API entry has no url for corpus={corpus!r}")
-    return OpusDownload(corpus=corpus, url=download_url, version=version)
-
-
-def download_to(*, url: str, out_path: Path) -> None:
-    import urllib.request
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out_path.with_suffix(out_path.suffix + ".part")
-    with urllib.request.urlopen(url) as r, tmp.open("wb") as f:  # noqa: S310
-        f.write(r.read())
-    tmp.replace(out_path)
-
-
-def build_fallback_language_base(
-    *,
-    out_path: Path,
-    tmp_dir: Path,
-    max_rows: int | None = None,
-) -> BuildStats:
-    """Build a small fallback DB from OPUS (QED + Tatoeba).
-
-    This DB is intended to be distributed with the repo and provide examples
-    when the primary OpenSubtitles lite DB misses.
-    """
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    total_read = 0
-    total_inserted = 0
-    total_skipped = 0
-
-    # Re-create to keep it deterministic.
-    if out_path.exists():
-        out_path.unlink()
-    for ext in ("-wal", "-shm"):
-        side = out_path.with_name(out_path.name + ext)
-        if side.exists():
-            side.unlink()
-
-    sources: list[tuple[str, ExampleSource]] = [
-        ("QED", ExampleSource.OPUS_QED),
-        ("Tatoeba", ExampleSource.OPUS_TATOEBA),
-    ]
-    for corpus, source in sources:
-        zip_path = tmp_dir / f"{corpus}.en-ru.txt.zip"
-        if not zip_path.exists():
-            download = resolve_opus_moses_url(corpus=corpus)
-            download_to(url=download.url, out_path=zip_path)
-
-        stats = build_language_base(
-            en_path=zip_path,
-            ru_path=zip_path,
-            out_path=out_path,
-            source=source,
-            min_words=MIN_EXAMPLE_WORDS,
-            max_words=9,
-            max_per_anchor=200,
-            max_rows=max_rows,
-            require_ru_cyrillic=True,
-            ratio_min=0.5,
-            ratio_max=2.5,
-            commit_every=5_000,
-            write_meta=False,
-        )
-        total_read += stats.read_rows
-        total_inserted += stats.inserted_rows
-        total_skipped += stats.skipped_rows
-
-    conn = sqlite3.connect(out_path)
-    try:
-        _write_meta(conn, key="source", value="fallback")
-        _write_meta(conn, key="corpora", value="QED,Tatoeba")
-        _write_meta(conn, key="read_rows", value=total_read)
-        _write_meta(conn, key="inserted_rows", value=total_inserted)
-        _write_meta(conn, key="skipped_rows", value=total_skipped)
-        _write_meta(
-            conn,
-            key="built_at_utc",
-            value=_dt.datetime.now(tz=_dt.UTC).isoformat(timespec="seconds"),
-        )
-        conn.commit()
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    finally:
-        conn.close()
-
-    return BuildStats(
-        read_rows=total_read,
-        inserted_rows=total_inserted,
-        skipped_rows=total_skipped,
-    )
-
-
 def main() -> int:
     args = _build_parser().parse_args()
-    if args.preset == "opensubtitles_lite":
+    if args.preset == "migrate_drop_source":
+        if args.in_db is None:
+            raise SystemExit("--in-db is required for migrate_drop_source preset")
+        stats = migrate_drop_source_column(in_path=args.in_db, out_path=args.out)
+    elif args.preset == "opensubtitles_lite":
+        if args.en is None or args.ru is None:
+            raise SystemExit("--en and --ru are required for opensubtitles_lite preset")
         stats = build_opensubtitles_lite(
             en_path=args.en,
             ru_path=args.ru,
@@ -502,11 +457,12 @@ def main() -> int:
             safety_margin_bytes=args.safety_margin_bytes,
         )
     else:
+        if args.en is None or args.ru is None:
+            raise SystemExit("--en and --ru are required for generic preset")
         stats = build_language_base(
             en_path=args.en,
             ru_path=args.ru,
             out_path=args.out,
-            source=ExampleSource(args.source),
             min_words=args.min_words,
             max_words=args.max_words,
             max_per_anchor=args.max_per_anchor,

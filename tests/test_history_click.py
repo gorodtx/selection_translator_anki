@@ -20,10 +20,8 @@ from desktop_app.controllers.anki_controller import AnkiController
 from desktop_app.controllers.translation_controller import TranslationController
 from translate_logic.models import (
     ExamplePair,
-    ExampleSource,
     TranslationResult,
     TranslationVariant,
-    VariantSource,
 )
 
 
@@ -218,10 +216,8 @@ def test_history_item_click_opens_translation(
                     ExamplePair(
                         en="example en",
                         ru="example ru",
-                        source=ExampleSource.LEGACY,
                     ),
                 ),
-                source=VariantSource.LEGACY,
             ),
         )
     )

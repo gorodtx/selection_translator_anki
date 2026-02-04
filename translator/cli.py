@@ -12,7 +12,7 @@ from translate_logic.language_base.provider import (
     default_language_base_path,
 )
 from translate_logic.language_base.multi_provider import MultiLanguageBaseProvider
-from translate_logic.models import TranslationResult, TranslationVariant, VariantSource
+from translate_logic.models import TranslationResult, TranslationVariant
 from translate_logic.providers.opus_mt import OpusMtProvider, default_opus_mt_model_dir
 
 DEFAULT_SOURCE = "en"
@@ -58,11 +58,7 @@ def _variant_payload(variant: TranslationVariant) -> dict[str, object]:
         "ru": variant.ru,
         "pos": variant.pos,
         "synonyms": list(variant.synonyms),
-        "source": variant.source.value,
-        "examples": [
-            {"en": item.en, "ru": item.ru, "source": item.source.value}
-            for item in variant.examples
-        ],
+        "examples": [{"en": item.en, "ru": item.ru} for item in variant.examples],
     }
 
 
@@ -83,13 +79,13 @@ def _print_lines(result: TranslationResult) -> None:
         return
     print("variants:")
     for idx, variant in enumerate(result.variants, start=1):
-        print(f"{idx}. {variant.ru} [{variant.source.value}]")
+        print(f"{idx}. {variant.ru}")
         if variant.pos:
             print(f"  pos: {variant.pos}")
         if variant.synonyms:
             print(f"  synonyms: {', '.join(variant.synonyms)}")
         for example_index, example in enumerate(variant.examples, start=1):
-            print(f"  en{example_index}: {example.en} ({example.source.value})")
+            print(f"  en{example_index}: {example.en}")
             print(f"  ru{example_index}: {example.ru}")
 
 
@@ -125,7 +121,6 @@ def _run_opus(text: str, source: str, target: str) -> TranslationResult:
             pos=None,
             synonyms=(),
             examples=(),
-            source=VariantSource.OPUS_MT,
         )
         for item in translations
     )

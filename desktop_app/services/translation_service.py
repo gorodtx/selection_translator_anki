@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from desktop_app.services.result_cache import ResultCache
 from desktop_app.services.runtime import AsyncRuntime
 from translate_logic.application.translate import translate_async
-from translate_logic.language_base.provider import LanguageBaseProvider
+from translate_logic.language_base.multi_provider import MultiLanguageBaseProvider
+from translate_logic.language_base.provider import (
+    LanguageBaseProvider,
+    default_fallback_language_base_path,
+)
+from translate_logic.language_base.base import LanguageBase
 from translate_logic.models import TranslationResult, TranslationStatus
 from translate_logic.providers.opus_mt import OpusMtProvider, default_opus_mt_model_dir
 from translate_logic.text import normalize_text
@@ -27,11 +32,16 @@ class TranslationService:
 
     _active: set[Future[TranslationResult]] = field(default_factory=_future_set)
     _opus_provider: OpusMtProvider = field(init=False)
-    _language_base: LanguageBaseProvider = field(init=False)
+    _language_base: LanguageBase = field(init=False)
 
     def __post_init__(self) -> None:
         self._opus_provider = OpusMtProvider(model_dir=MODEL_DIR)
-        self._language_base = LanguageBaseProvider()
+        self._language_base = MultiLanguageBaseProvider(
+            primary=LanguageBaseProvider(),
+            fallback=LanguageBaseProvider(
+                db_path=default_fallback_language_base_path()
+            ),
+        )
 
     def translate(
         self,
