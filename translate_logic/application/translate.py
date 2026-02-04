@@ -11,7 +11,7 @@ from translate_logic.models import (
     VariantSource,
 )
 from translate_logic.providers.fallback_examples import build_fallback_examples
-from translate_logic.language_base.provider import LanguageBaseProvider
+from translate_logic.language_base.base import LanguageBase
 from translate_logic.providers.opus_mt import OpusMtProvider
 from translate_logic.text import normalize_text
 
@@ -25,7 +25,7 @@ async def translate_async(
     target_lang: str = "ru",
     *,
     opus_provider: OpusMtProvider | None = None,
-    language_base: LanguageBaseProvider | None = None,
+    language_base: LanguageBase | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     normalized_text = normalize_text(text)
@@ -50,7 +50,7 @@ async def translate_async(
 
 
 def _variants_from_language_base(
-    text: str, language_base: LanguageBaseProvider | None
+    text: str, language_base: LanguageBase | None
 ) -> tuple[TranslationVariant, ...]:
     if language_base is None:
         return ()
@@ -132,21 +132,21 @@ def _merge_examples(
 
 def _fill_variant_examples(
     variant: TranslationVariant,
-    language_base: LanguageBaseProvider | None,
+    language_base: LanguageBase | None,
     text: str,
 ) -> TranslationVariant:
     if len(variant.examples) >= DEFAULT_MIN_EXAMPLES:
         return variant
-    base = language_base
-    language_base_available = base is not None and base.db_path.exists()
     from_db: tuple[ExamplePair, ...] = ()
-    if language_base_available:
-        assert base is not None
-        from_db = base.get_examples(
+    if language_base is not None and language_base.is_available:
+        from_db = language_base.get_examples(
             word=text,
             translation=variant.ru,
             limit=DEFAULT_MIN_EXAMPLES,
         )
+        language_base_available = True
+    else:
+        language_base_available = False
     merged = _merge_examples(
         variant.examples,
         from_db,
@@ -173,7 +173,7 @@ def _fill_variant_examples(
 async def _fill_examples_async(
     text: str,
     variants: tuple[TranslationVariant, ...],
-    language_base: LanguageBaseProvider | None,
+    language_base: LanguageBase | None,
 ) -> tuple[TranslationVariant, ...]:
     if not variants:
         return ()

@@ -8,8 +8,10 @@ from pathlib import Path
 from translate_logic.application.translate import translate_async
 from translate_logic.language_base.provider import (
     LanguageBaseProvider,
+    default_fallback_language_base_path,
     default_language_base_path,
 )
+from translate_logic.language_base.multi_provider import MultiLanguageBaseProvider
 from translate_logic.models import TranslationResult, TranslationVariant, VariantSource
 from translate_logic.providers.opus_mt import OpusMtProvider, default_opus_mt_model_dir
 
@@ -40,7 +42,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--language-db",
         type=Path,
         default=default_language_base_path(),
-        help="SQLite language base (examples) path.",
+        help="Primary SQLite language base (examples) path.",
+    )
+    parser.add_argument(
+        "--fallback-language-db",
+        type=Path,
+        default=default_fallback_language_base_path(),
+        help="Fallback SQLite language base (examples) path.",
     )
     return parser
 
@@ -90,9 +98,13 @@ async def _run_pipeline(
     source: str,
     target: str,
     language_db: Path,
+    fallback_language_db: Path,
 ) -> TranslationResult:
     opus_provider = OpusMtProvider(model_dir=default_opus_mt_model_dir())
-    language_base = LanguageBaseProvider(db_path=language_db)
+    language_base = MultiLanguageBaseProvider(
+        primary=LanguageBaseProvider(db_path=language_db),
+        fallback=LanguageBaseProvider(db_path=fallback_language_db),
+    )
     return await translate_async(
         text,
         source,
@@ -130,6 +142,7 @@ def main() -> int:
                 args.source,
                 args.target,
                 args.language_db,
+                args.fallback_language_db,
             )
         )
     else:

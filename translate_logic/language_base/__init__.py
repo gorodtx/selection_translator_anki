@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from translate_logic.language_base.provider import (
     LanguageBaseProvider as LanguageBaseProvider,
+    default_fallback_language_base_path as default_fallback_language_base_path,
     default_language_base_path as default_language_base_path,
+)
+from translate_logic.language_base.multi_provider import (
+    MultiLanguageBaseProvider as MultiLanguageBaseProvider,
 )
 from translate_logic.language_base.validation import (
     MIN_EXAMPLE_WORDS as MIN_EXAMPLE_WORDS,

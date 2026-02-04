@@ -75,6 +75,7 @@ def test_language_base_provider_prefers_translation_match(tmp_path: Path) -> Non
     assert all("dress" in item.en.casefold() for item in examples)
     assert all("плать" in item.ru.casefold() for item in examples)
     assert all(item.source is ExampleSource.OPUS_OPEN_SUBTITLES for item in examples)
+    assert provider.is_available
 
 
 def test_language_base_provider_extracts_variants_from_ru_side(tmp_path: Path) -> None:
@@ -97,6 +98,14 @@ def test_language_base_provider_extracts_variants_from_ru_side(tmp_path: Path) -
             (
                 "The table is in the kitchen.",
                 "Стол на кухне.",
+                ExampleSource.OPUS_OPEN_SUBTITLES.value,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO examples_fts(en, ru, source) VALUES(?, ?, ?)",
+            (
+                "The keys are on the table.",
+                "Ключи на столе.",
                 ExampleSource.OPUS_OPEN_SUBTITLES.value,
             ),
         )

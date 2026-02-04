@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "aiohttp>=3.13.2",
     "ctranslate2>=4.7.1",
+    "pymorphy3>=2.0.6",
     "sentencepiece>=0.2.1",
 ]
 

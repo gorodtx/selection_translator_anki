@@ -14,6 +14,7 @@ from translate_logic.language_base.validation import (
     normalize_spaces,
     word_count,
 )
+from translate_logic.language_base.morphology_ru import ru_lemma
 from translate_logic.translation import clean_translations
 from translate_logic.models import ExamplePair, ExampleSource
 
@@ -21,7 +22,12 @@ from translate_logic.models import ExamplePair, ExampleSource
 def default_language_base_path() -> Path:
     repo_root = Path(__file__).resolve().parents[2]
     # Single source of truth: repository directory `offline_language_base/`.
-    return repo_root / "offline_language_base" / "language_base.sqlite3"
+    return repo_root / "offline_language_base" / "opensubtitles_lite.sqlite3"
+
+
+def default_fallback_language_base_path() -> Path:
+    repo_root = Path(__file__).resolve().parents[2]
+    return repo_root / "offline_language_base" / "fallback.sqlite3"
 
 
 _RU_WORD_RE: Final[re.Pattern[str]] = re.compile(
@@ -121,6 +127,10 @@ def _fts_query(text: str) -> str | None:
 class LanguageBaseProvider:
     db_path: Path = default_language_base_path()
     fts_limit: int = 200
+
+    @property
+    def is_available(self) -> bool:
+        return self.db_path.exists()
 
     def get_examples(
         self, *, word: str, translation: str, limit: int
@@ -286,8 +296,14 @@ def _fetch_variants(
 
 
 def _tokenize_ru(text: str) -> list[str]:
-    tokens = [t.casefold() for t in _RU_WORD_RE.findall(text)]
-    return [t for t in tokens if _is_variant_token(t)]
+    raw_tokens = [t.casefold() for t in _RU_WORD_RE.findall(text)]
+    tokens: list[str] = []
+    for token in raw_tokens:
+        if not _is_variant_token(token):
+            continue
+        lemma = ru_lemma(token)
+        tokens.append(lemma or token)
+    return tokens
 
 
 def _bigrams(tokens: list[str]) -> list[str]:

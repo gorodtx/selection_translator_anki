@@ -3,7 +3,13 @@ from __future__ import annotations
 import re
 from typing import Final
 
+from translate_logic.language_base.morphology_ru import ru_lemma
+
 MIN_EXAMPLE_WORDS: Final[int] = 4
+
+_RU_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"[A-Za-zА-Яа-яЁё]+(?:[-'’][A-Za-zА-Яа-яЁё]+)?"
+)
 
 
 def word_count(value: str) -> int:
@@ -23,7 +29,19 @@ def contains_word(example: str, word: str) -> bool:
     # Treat phrases and common punctuation as a substring match.
     if " " in normalized_word or "-" in normalized_word or "'" in normalized_word:
         return normalized_word in normalized_example
-    pattern = re.compile(rf"\b{re.escape(normalized_word)}(\b|['’])")
+    # Single-word match with light morphology for English:
+    # tables, table's, tabling, tabled, etc.
+    base = re.escape(normalized_word)
+    variants = [
+        base,
+        base + r"(?:s|es)",
+        base + r"(?:['’]s)",
+        base + r"(?:ed|ing)",
+    ]
+    if normalized_word.endswith("e") and len(normalized_word) > 1:
+        no_e = re.escape(normalized_word[:-1])
+        variants.append(no_e + r"(?:ed|ing)")
+    pattern = re.compile(rf"\b(?:{'|'.join(variants)})\b")
     return bool(pattern.search(normalized_example))
 
 
@@ -45,11 +63,10 @@ def matches_translation(ru: str, translation: str) -> bool:
         return normalized_translation in normalized_ru
     if normalized_translation in normalized_ru:
         return True
-    # Allow basic inflection match for Russian words.
-    if len(normalized_translation) < 5:
+    lemma = ru_lemma(normalized_translation)
+    if lemma is None:
         return False
-    for cut in (1, 2):
-        stem = normalized_translation[:-cut]
-        if len(stem) >= 4 and stem in normalized_ru:
+    for token in _RU_TOKEN_RE.findall(normalized_ru):
+        if ru_lemma(token) == lemma:
             return True
     return False
