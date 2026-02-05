@@ -58,8 +58,15 @@ def _variant_payload(variant: TranslationVariant) -> dict[str, object]:
         "ru": variant.ru,
         "pos": variant.pos,
         "synonyms": list(variant.synonyms),
-        "examples": [{"en": item.en, "ru": item.ru} for item in variant.examples],
+        # Examples are returned as a shared pool per request; see top-level payload.
+        "examples": [],
     }
+
+
+def _shared_examples(result: TranslationResult) -> tuple[dict[str, str], ...]:
+    if not result.variants:
+        return ()
+    return tuple({"en": item.en, "ru": item.ru} for item in result.variants[0].examples)
 
 
 def _print_json(result: TranslationResult) -> None:
@@ -69,6 +76,7 @@ def _print_json(result: TranslationResult) -> None:
         "example_en": result.example_en.text,
         "example_ru": result.example_ru.text,
         "variants": [_variant_payload(variant) for variant in result.variants],
+        "examples": list(_shared_examples(result)),
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
@@ -84,9 +92,13 @@ def _print_lines(result: TranslationResult) -> None:
             print(f"  pos: {variant.pos}")
         if variant.synonyms:
             print(f"  synonyms: {', '.join(variant.synonyms)}")
-        for example_index, example in enumerate(variant.examples, start=1):
-            print(f"  en{example_index}: {example.en}")
-            print(f"  ru{example_index}: {example.ru}")
+    shared = result.variants[0].examples
+    if not shared:
+        return
+    print("examples:")
+    for example_index, example in enumerate(shared, start=1):
+        print(f"  en{example_index}: {example.en}")
+        print(f"  ru{example_index}: {example.ru}")
 
 
 async def _run_pipeline(

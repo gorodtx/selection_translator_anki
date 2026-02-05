@@ -16,20 +16,14 @@ class MultiLanguageBaseProvider(LanguageBase):
     def is_available(self) -> bool:
         return self.primary.is_available or self.fallback.is_available
 
-    def get_examples(
-        self, *, word: str, translation: str, limit: int
-    ) -> tuple[ExamplePair, ...]:
+    def get_examples(self, *, word: str, limit: int) -> tuple[ExamplePair, ...]:
         if limit <= 0:
             return ()
-        primary = self.primary.get_examples(
-            word=word, translation=translation, limit=limit
-        )
+        primary = self.primary.get_examples(word=word, limit=limit)
         if len(primary) >= limit:
             return primary[:limit]
         needed = limit - len(primary)
-        extra = self.fallback.get_examples(
-            word=word, translation=translation, limit=limit * 2
-        )
+        extra = self.fallback.get_examples(word=word, limit=limit * 2)
         merged: list[ExamplePair] = list(primary)
         for pair in extra:
             if len(merged) >= limit:
@@ -45,17 +39,9 @@ class MultiLanguageBaseProvider(LanguageBase):
         if limit <= 0:
             return ()
         primary = self.primary.get_variants(word=word, limit=limit)
-        if len(primary) >= limit:
+        # For variants, prefer the primary base exclusively. The fallback base
+        # is meant for coverage when primary has no data, not to mix in noisy
+        # co-occurrences once primary already produced meaningful options.
+        if primary:
             return primary[:limit]
-        extra = self.fallback.get_variants(word=word, limit=limit * 2)
-        merged: list[str] = list(primary)
-        seen = {item.casefold() for item in merged}
-        for item in extra:
-            if len(merged) >= limit:
-                break
-            folded = item.casefold()
-            if folded in seen:
-                continue
-            seen.add(folded)
-            merged.append(item)
-        return tuple(merged[:limit])
+        return self.fallback.get_variants(word=word, limit=limit)[:limit]

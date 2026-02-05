@@ -13,8 +13,8 @@ from translate_logic.language_base.base import LanguageBase
 from translate_logic.providers.opus_mt import OpusMtProvider
 from translate_logic.text import normalize_text
 
-DEFAULT_MIN_EXAMPLES: Final[int] = 2
-DEFAULT_VARIANTS: Final[int] = 3
+DEFAULT_MIN_EXAMPLES: Final[int] = 3
+DEFAULT_VARIANTS: Final[int] = 7
 
 
 async def translate_async(
@@ -39,12 +39,13 @@ async def translate_async(
         return TranslationResult.empty()
 
     _emit_partial(on_partial, variants)
-    filled_variants = await _fill_examples_async(
+    shared_examples = await _fetch_examples_async(
         normalized_text,
-        variants,
         language_base,
     )
-    return TranslationResult(variants=filled_variants)
+    return TranslationResult(
+        variants=_attach_shared_examples(variants, shared_examples)
+    )
 
 
 def _variants_from_language_base(
@@ -125,47 +126,34 @@ def _merge_examples(
     return existing + generated[:needed]
 
 
-def _fill_variant_examples(
-    variant: TranslationVariant,
-    language_base: LanguageBase | None,
-    text: str,
-) -> TranslationVariant:
-    if len(variant.examples) >= DEFAULT_MIN_EXAMPLES:
-        return variant
-    from_db: tuple[ExamplePair, ...] = ()
-    if language_base is not None and language_base.is_available:
-        from_db = language_base.get_examples(
-            word=text,
-            translation=variant.ru,
-            limit=DEFAULT_MIN_EXAMPLES,
-        )
-    merged = _merge_examples(
-        variant.examples,
-        from_db,
-        DEFAULT_MIN_EXAMPLES,
-    )
-    return TranslationVariant(
-        ru=variant.ru,
-        pos=variant.pos,
-        synonyms=variant.synonyms,
-        examples=merged,
-    )
-
-
-async def _fill_examples_async(
-    text: str,
+def _attach_shared_examples(
     variants: tuple[TranslationVariant, ...],
-    language_base: LanguageBase | None,
+    examples: tuple[ExamplePair, ...],
 ) -> tuple[TranslationVariant, ...]:
-    if not variants:
+    """Attach examples as a shared pool for the whole request.
+
+    We intentionally do NOT try to pick different examples per RU variant.
+    """
+    if not variants or not examples:
+        return variants
+    first = variants[0]
+    updated_first = TranslationVariant(
+        ru=first.ru,
+        pos=first.pos,
+        synonyms=first.synonyms,
+        examples=examples,
+    )
+    return (updated_first,) + variants[1:]
+
+
+async def _fetch_examples_async(
+    text: str,
+    language_base: LanguageBase | None,
+) -> tuple[ExamplePair, ...]:
+    if language_base is None or not language_base.is_available:
         return ()
-    filled: list[TranslationVariant] = []
-    for variant in variants:
-        updated = await asyncio.to_thread(
-            _fill_variant_examples,
-            variant,
-            language_base,
-            text,
-        )
-        filled.append(updated)
-    return tuple(filled)
+    return await asyncio.to_thread(
+        language_base.get_examples,
+        word=text,
+        limit=DEFAULT_MIN_EXAMPLES,
+    )

@@ -6,6 +6,7 @@ import re
 _CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 
 _POS_NONE = None
+_GRAMMEMES_NONE: frozenset[str] = frozenset()
 
 
 def has_cyrillic(text: str) -> bool:
@@ -58,3 +59,30 @@ def ru_lemma_and_pos(token: str) -> tuple[str | None, str | None]:
     best = parses[0]
     pos = getattr(best.tag, "POS", None)
     return str(best.normal_form), str(pos) if pos is not None else _POS_NONE
+
+
+@lru_cache(maxsize=8_192)
+def ru_lemma_pos_grammemes(token: str) -> tuple[str | None, str | None, frozenset[str]]:
+    """Return (lemma, POS, grammemes) for a Russian token.
+
+    Grammemes are pymorphy tags like Name/Geox/Surn/etc. We use them to
+    filter proper names and geography out of translation-variant candidates.
+    """
+    normalized = token.strip().casefold()
+    if not normalized:
+        return None, _POS_NONE, _GRAMMEMES_NONE
+    if not has_cyrillic(normalized):
+        return None, _POS_NONE, _GRAMMEMES_NONE
+    analyzer = _analyzer()
+    parses = analyzer.parse(normalized)
+    if not parses:
+        return None, _POS_NONE, _GRAMMEMES_NONE
+    best = parses[0]
+    pos = getattr(best.tag, "POS", None)
+    grammemes = getattr(best.tag, "grammemes", None)
+    gram_set = frozenset(grammemes) if grammemes is not None else _GRAMMEMES_NONE
+    return (
+        str(best.normal_form),
+        str(pos) if pos is not None else _POS_NONE,
+        gram_set,
+    )

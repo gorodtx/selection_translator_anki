@@ -71,8 +71,8 @@ Run:
 `uv run python -m translator.cli "text"`
 
 Output (default, human-readable):
-- Variants (2–3 when available).
-- Examples (EN/RU pairs) for each variant when present.
+- Variants (3–7 when available).
+- Examples (EN/RU pairs) as a **shared pool per request** (not per RU variant).
 
 Use `--format json` for structured output.
 
@@ -82,7 +82,7 @@ Use `--format json` for structured output.
 - Models (required for translation):
   - `offline_assets/ct2/opus_mt/en-ru/`
 - Optional (recommended) language bases with examples (primary + fallback):
-  - `offline_language_base/opensubtitles_lite.sqlite3` (primary, target <= 1.7GB)
+  - `offline_language_base/primary.sqlite3` (primary, target <= 1.8GB)
   - `offline_language_base/fallback.sqlite3` (fallback, small)
 
 The language bases are shipped as SQLite files in this repository.
