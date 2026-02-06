@@ -85,12 +85,20 @@ Use `--format json` for structured output.
   - `offline_language_base/primary.sqlite3` (primary, target <= 1.8GB)
   - `offline_language_base/fallback.sqlite3` (fallback, small)
 
-The language bases are shipped as SQLite files in this repository.
-No extra downloads are required for offline usage.
+The language bases are **not** stored in git (too large for GitHub's 100MB limit).
+They are distributed as **GitHub Release assets** and downloaded locally.
+
+Download (latest release):
+
+```bash
+uv run python scripts/download_language_bases.py
+```
+
+After the download finishes, the app works fully offline (no further network calls).
 
 This repository is designed to work offline from a fresh clone:
 - No model downloads.
-- No fallback paths outside the repository checkout.
+- Language bases are one-time download from Releases (then fully offline).
 
 ---
 
