@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections import Counter
 import json
+import random
 import re
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -346,6 +348,12 @@ class LanguageBaseProvider:
         uri = f"file:{encoded}?mode=ro&immutable=1"
         conn = sqlite3.connect(uri, uri=True)
         conn.row_factory = sqlite3.Row
+        # Read-only performance knobs. These are best-effort: on some systems
+        # SQLite may ignore them (or cap them), but it's still safe.
+        conn.execute("PRAGMA temp_store=MEMORY")
+        # Negative cache_size means KiB; keep it moderate to avoid OOM.
+        conn.execute("PRAGMA cache_size=-100000")  # ~100MB
+        conn.execute("PRAGMA mmap_size=268435456")  # 256MB
         setattr(self._local, "conn", conn)
         return conn
 
@@ -460,7 +468,10 @@ def _fetch_examples(
 ) -> tuple[ExamplePair, ...]:
     def fetch_rows(row_limit: int) -> list[sqlite3.Row]:
         return conn.execute(
-            "SELECT en, ru FROM examples_fts WHERE examples_fts MATCH ? LIMIT ?",
+            "SELECT en, ru FROM examples_fts "
+            "WHERE examples_fts MATCH ? "
+            "ORDER BY bm25(examples_fts) "
+            "LIMIT ?",
             (fts_query, row_limit),
         ).fetchall()
 
@@ -532,12 +543,20 @@ def _select_examples(
         candidates.append((_sentence_score(en), pair))
 
     candidates.sort(key=lambda item: item[0], reverse=True)
-    out: list[ExamplePair] = []
-    for _, pair in candidates:
-        if len(out) >= limit:
-            break
-        out.append(pair)
-    return tuple(out)
+    ranked = [pair for _, pair in candidates]
+    if len(ranked) <= limit:
+        return tuple(ranked)
+
+    # Cheap diversity: always include the top-scored example, then sample the
+    # remaining from the next best pool. This avoids showing the exact same
+    # top-N on every query when there are many good matches.
+    top = ranked[0]
+    pool_size = min(len(ranked), max(30, limit * 20))
+    pool = ranked[1:pool_size]
+
+    rng = random.Random(time.time_ns())
+    rest = rng.sample(pool, k=min(limit - 1, len(pool)))
+    return tuple([top, *rest])
 
 
 def _fetch_variants(
@@ -548,7 +567,10 @@ def _fetch_variants(
     fts_limit: int,
 ) -> tuple[str, ...]:
     rows = conn.execute(
-        "SELECT ru FROM examples_fts WHERE examples_fts MATCH ? LIMIT ?",
+        "SELECT ru FROM examples_fts "
+        "WHERE examples_fts MATCH ? "
+        "ORDER BY bm25(examples_fts) "
+        "LIMIT ?",
         (fts_query, fts_limit),
     ).fetchall()
 
