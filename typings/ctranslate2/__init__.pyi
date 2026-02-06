@@ -11,7 +11,15 @@ class Translator:
         self,
         model_path: str,
         device: str = ...,
-        compute_type: str = ...,
+        *,
+        device_index: int | list[int] = ...,
+        compute_type: str | dict[str, str] = ...,
+        inter_threads: int = ...,
+        intra_threads: int = ...,
+        max_queued_batches: int = ...,
+        flash_attention: bool = ...,
+        tensor_parallel: bool = ...,
+        files: object = ...,
     ) -> None: ...
     def translate_batch(
         self,

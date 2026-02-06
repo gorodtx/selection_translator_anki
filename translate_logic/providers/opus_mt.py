@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 from pathlib import Path
 from typing import Protocol
 
@@ -94,6 +95,31 @@ class OpusMtProvider:
     max_decoding_length: int = 24
     _pairs: dict[OpusMtPairKey, OpusMtPair] = field(default_factory=_default_pairs)
 
+    def warmup(self) -> None:
+        """Best-effort warmup to avoid first-translation latency.
+
+        This method is intentionally synchronous. Call it from a background
+        thread/event loop (e.g. AsyncRuntime) to avoid blocking UI startup.
+        """
+        pair_key = OpusMtPairKey.EN_RU
+        if pair_key in self._pairs:
+            return
+        try:
+            pair = self.loader(pair_key, self.model_dir)
+        except FileNotFoundError:
+            return
+        self._pairs[pair_key] = pair
+
+        # Trigger one small translation to initialize runtime caches.
+        source_tokens = pair.source_sp.encode("hello", out_type=str)
+        pair.translator.translate_batch(
+            [source_tokens],
+            beam_size=1,
+            num_hypotheses=1,
+            max_decoding_length=8,
+            return_scores=False,
+        )
+
     def translate(self, text: str, source_lang: str, target_lang: str) -> str | None:
         variants = self.translate_variants(text, source_lang, target_lang, limit=1)
         if not variants:
@@ -124,12 +150,21 @@ class OpusMtProvider:
             self._pairs[pair_key] = pair
 
         source_tokens = pair.source_sp.encode(normalized, out_type=str)
+        num_hypotheses = (
+            limit
+            if limit is not None
+            else _adaptive_num_hypotheses(normalized, default=self.num_hypotheses)
+        )
+        max_decoding_length = _adaptive_max_decoding_length(
+            source_length=len(source_tokens),
+            base=self.max_decoding_length,
+        )
         # CTranslate2 expects a batch of token lists.
         results = pair.translator.translate_batch(
             [source_tokens],
             beam_size=self.beam_size,
-            num_hypotheses=limit or self.num_hypotheses,
-            max_decoding_length=self.max_decoding_length,
+            num_hypotheses=num_hypotheses,
+            max_decoding_length=max_decoding_length,
             return_scores=False,
         )
         if not results:
@@ -138,8 +173,7 @@ class OpusMtProvider:
         decoded = [_decode_hypothesis(pair.target_sp, hyp) for hyp in hypotheses]
         cleaned = clean_translations(decoded)
         filtered = [item for item in cleaned if _is_reasonable_variant(item)]
-        effective_limit = limit or self.num_hypotheses
-        return tuple(filtered[:effective_limit])
+        return tuple(filtered[:num_hypotheses])
 
 
 def _decode_hypothesis(sp: SentencePiece, hyp: Sequence[str]) -> str:
@@ -175,6 +209,8 @@ def _load_pair(pair: OpusMtPairKey, model_dir: Path) -> OpusMtPair:
         str(pair_dir),
         device="cpu",
         compute_type="int8",
+        inter_threads=_default_inter_threads(),
+        intra_threads=_default_intra_threads(),
     )
     return OpusMtPair(source_sp=source_sp, target_sp=target_sp, translator=translator)
 
@@ -186,3 +222,56 @@ def _is_reasonable_variant(variant: str) -> bool:
     if len(variant) > 80:
         return False
     return True
+
+
+def _adaptive_num_hypotheses(text: str, *, default: int) -> int:
+    """Select a fast default number of hypotheses based on input length.
+
+    - For longer phrases/sentences we prefer 1 hypothesis (latency).
+    - For word/short phrase lookups we keep multiple hypotheses (variants).
+    """
+    if _is_sentence_like(text):
+        return 1
+    return default
+
+
+def _is_sentence_like(text: str) -> bool:
+    # Keep consistent with language-base heuristic (word/short phrase).
+    if len(text) > 64:
+        return True
+    if text.count(" ") > 3:
+        return True
+    return False
+
+
+def _adaptive_max_decoding_length(*, source_length: int, base: int) -> int:
+    # "base" is tuned for word lookups. For longer inputs allow a longer output
+    # without paying that cost for the common short-lookup case.
+    return max(base, min(256, source_length * 2))
+
+
+def _env_int(name: str) -> int | None:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _default_inter_threads() -> int:
+    value = _env_int("TRANSLATOR_OPUS_MT_INTER_THREADS")
+    if value is None:
+        return 1
+    return max(1, value)
+
+
+def _default_intra_threads() -> int:
+    value = _env_int("TRANSLATOR_OPUS_MT_INTRA_THREADS")
+    if value is not None:
+        return max(0, value)
+    cpu_count = os.cpu_count() or 1
+    # The default in CTranslate2 is conservative; we allow scaling up to a
+    # reasonable cap to improve latency on bigger CPUs.
+    return max(1, min(8, cpu_count))

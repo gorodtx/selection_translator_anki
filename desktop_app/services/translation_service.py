@@ -31,6 +31,7 @@ class TranslationService:
     result_cache: ResultCache
 
     _active: set[Future[TranslationResult]] = field(default_factory=_future_set)
+    _warmup_future: Future[None] | None = field(default=None, init=False)
     _opus_provider: OpusMtProvider = field(init=False)
     _language_base: LanguageBase = field(init=False)
 
@@ -68,7 +69,21 @@ class TranslationService:
         return self.result_cache.get(cache_key)
 
     def warmup(self) -> None:
-        return
+        if self._warmup_future is not None:
+            return
+
+        async def _warmup() -> None:
+            # Best-effort: if offline assets are missing, provider.warmup()
+            # becomes a no-op.
+            self._opus_provider.warmup()
+
+        try:
+            self._warmup_future = asyncio.run_coroutine_threadsafe(
+                _warmup(), self.runtime.loop
+            )
+        except RuntimeError:
+            # Runtime is not started.
+            self._warmup_future = None
 
     def cancel_active(self) -> None:
         for future in list(self._active):

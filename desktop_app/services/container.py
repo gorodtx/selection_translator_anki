@@ -51,6 +51,8 @@ class AppServices:
 
     def start(self) -> None:
         self.runtime.start()
+        # Warm up the offline model in background to avoid first-request latency.
+        self.translator.warmup()
 
     def stop(self) -> None:
         close_translator = asyncio.run_coroutine_threadsafe(
