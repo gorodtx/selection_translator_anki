@@ -172,7 +172,12 @@ class OpusMtProvider:
         hypotheses = list(results[0].hypotheses)
         decoded = [_decode_hypothesis(pair.target_sp, hyp) for hyp in hypotheses]
         cleaned = clean_translations(decoded)
-        filtered = [item for item in cleaned if _is_reasonable_variant(item)]
+        sentence_like = _is_sentence_like(normalized)
+        filtered = [
+            item
+            for item in cleaned
+            if _is_reasonable_variant(item, sentence_like=sentence_like)
+        ]
         return tuple(filtered[:num_hypotheses])
 
 
@@ -215,12 +220,18 @@ def _load_pair(pair: OpusMtPairKey, model_dir: Path) -> OpusMtPair:
     return OpusMtPair(source_sp=source_sp, target_sp=target_sp, translator=translator)
 
 
-def _is_reasonable_variant(variant: str) -> bool:
+def _is_reasonable_variant(variant: str, *, sentence_like: bool) -> bool:
     if not variant:
         return False
-    # For word/short phrase lookup we expect compact outputs.
-    if len(variant) > 80:
-        return False
+    if not sentence_like:
+        # For word/short phrase lookup we expect compact outputs.
+        if len(variant) > 80:
+            return False
+    else:
+        # For sentence translation we allow longer outputs, but still keep an
+        # upper bound to guard against runaway decoding settings.
+        if len(variant) > 2000:
+            return False
     return True
 
 
