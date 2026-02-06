@@ -78,17 +78,14 @@ Use `--format json` for structured output.
 
 ## Offline assets (important)
 
-- The directory `offline_assets/` contains everything required for fast offline translation.
 - Models (required for translation):
   - `offline_assets/ct2/opus_mt/en-ru/`
 - Optional (recommended) language bases with examples (primary + fallback):
   - `offline_language_base/primary.sqlite3` (primary, target <= 1.8GB)
   - `offline_language_base/fallback.sqlite3` (fallback, small)
 
-The language bases are **not** stored in git (too large for GitHub's 100MB limit).
-They are distributed as **GitHub Release assets** and downloaded locally.
-
-Download (latest release):
+Offline assets are distributed as **GitHub Release assets** (git has a 100MB file
+limit). Download everything (models + language bases) in one command:
 
 ```bash
 uv run python scripts/download_language_bases.py
@@ -96,9 +93,7 @@ uv run python scripts/download_language_bases.py
 
 After the download finishes, the app works fully offline (no further network calls).
 
-This repository is designed to work offline from a fresh clone:
-- No model downloads.
-- Language bases are one-time download from Releases (then fully offline).
+This repository is designed to work offline after a one-time download from Releases.
 
 ---
 

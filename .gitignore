@@ -728,3 +728,10 @@ offline_language_base/*.sqlite3-wal
 offline_language_base/*.sqlite3-shm
 offline_language_base/*.sqlite3-journal
 offline_language_base/*.sqlite3.part
+
+# Offline translation models are distributed via GitHub Releases and downloaded
+# locally into this directory. They are intentionally not committed to git.
+offline_assets/*
+!offline_assets/.gitkeep
+offline_assets.zip
+offline_assets.zip.part

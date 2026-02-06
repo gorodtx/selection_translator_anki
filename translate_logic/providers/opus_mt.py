@@ -19,8 +19,8 @@ def default_opus_mt_model_dir() -> Path:
 
     Single source of truth: repository directory `offline_assets/`.
 
-    This directory must be present in the repository checkout and contain the
-    converted CTranslate2 models.
+    This directory is expected to exist after downloading the offline assets from
+    GitHub Releases (see README). It contains the converted CTranslate2 models.
     """
     repo_root = Path(__file__).resolve().parents[2]
     return repo_root / "offline_assets"
@@ -162,7 +162,8 @@ def _load_pair(pair: OpusMtPairKey, model_dir: Path) -> OpusMtPair:
         msg = (
             "OPUS-MT model files are missing. Expected sentencepiece files at: "
             f"{source_spm} and {target_spm}. "
-            "Build and install the CT2 models first."
+            "Download offline assets first: "
+            "`uv run python scripts/download_language_bases.py`."
         )
         raise FileNotFoundError(msg)
 
