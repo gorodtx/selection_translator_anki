@@ -41,6 +41,7 @@ class AnkiFlow:
                 config.deck,
                 config.model,
                 fields.word,
+                fields.ipa,
                 fields.translation,
                 fields.example_en,
                 fields.example_ru,
@@ -53,6 +54,7 @@ class AnkiFlow:
         fields = config.fields
         return {
             fields.word: original_text,
+            fields.ipa: result.ipa_uk.text,
             fields.translation: result.translation_ru.text,
             fields.example_en: result.example_en.text,
             fields.example_ru: result.example_ru.text,

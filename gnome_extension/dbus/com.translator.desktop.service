@@ -1,3 +1,3 @@
 [D-BUS Service]
 Name=com.translator.desktop
-Exec=/bin/sh -lc 'TRANSLATOR_LOG_DIR="$HOME/.translator/logs" python3 -m desktop_app.main'
+Exec=python3 -m desktop_app.main

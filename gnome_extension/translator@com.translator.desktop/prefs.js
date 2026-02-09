@@ -149,9 +149,7 @@ export default class TranslatorPrefs extends ExtensionPreferences {
       for (const cancellable of activeCalls) {
         try {
           cancellable.cancel();
-        } catch (error) {
-          logError(error);
-        }
+        } catch (error) {}
       }
       activeCalls.clear();
       return false;

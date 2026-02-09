@@ -10,6 +10,7 @@ WRAP_LIMIT = 85
 @dataclass(frozen=True, slots=True)
 class TranslationViewState:
     original: str
+    ipa: str
     translation: str
     example_en: str
     example_ru: str
@@ -20,6 +21,7 @@ class TranslationViewState:
     def empty(cls) -> "TranslationViewState":
         return cls(
             original="",
+            ipa="",
             translation="",
             example_en="",
             example_ru="",
@@ -40,6 +42,7 @@ class TranslationPresenter:
     def begin(self, original: str) -> TranslationViewState:
         self._state = TranslationViewState(
             original=_wrap_text(original),
+            ipa="",
             translation="",
             example_en="",
             example_ru="",
@@ -56,6 +59,7 @@ class TranslationPresenter:
         translation = _wrap_text(result.translation_ru.text)
         self._state = TranslationViewState(
             original=self._state.original,
+            ipa="",
             translation=translation,
             example_en="",
             example_ru="",
@@ -70,6 +74,7 @@ class TranslationPresenter:
         can_add = self._can_add(translation=translation, loading=loading)
         self._state = TranslationViewState(
             original=self._state.original,
+            ipa=_wrap_text(result.ipa_uk.text),
             translation=translation,
             example_en=_wrap_text(result.example_en.text),
             example_ru=_wrap_text(result.example_ru.text),
@@ -83,6 +88,7 @@ class TranslationPresenter:
         loading = False
         self._state = TranslationViewState(
             original=self._state.original,
+            ipa=self._state.ipa,
             translation=translation,
             example_en=self._state.example_en,
             example_ru=self._state.example_ru,
@@ -96,6 +102,7 @@ class TranslationPresenter:
         translation = self._state.translation
         self._state = TranslationViewState(
             original=self._state.original,
+            ipa=self._state.ipa,
             translation=translation,
             example_en=self._state.example_en,
             example_ru=self._state.example_ru,
@@ -109,6 +116,7 @@ class TranslationPresenter:
     def reset_original(self, original: str) -> TranslationViewState:
         self._state = TranslationViewState(
             original=_wrap_text(original),
+            ipa=self._state.ipa,
             translation=self._state.translation,
             example_en=self._state.example_en,
             example_ru=self._state.example_ru,

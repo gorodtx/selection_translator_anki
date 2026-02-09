@@ -6,43 +6,31 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiohttp>=3.13.2",
-    "ctranslate2>=4.7.1",
-    "pymorphy3>=2.0.6",
-    "sentencepiece>=0.2.1",
 ]
 
 [dependency-groups]
 dev = [
-    "mcp-server-fetch>=2025.4.7",
-    "mcp-server-sqlite>=2025.4.25",
+    "mypy>=1.19.1",
+    "pyright>=1.1.407",
     "pytest>=9.0.2",
     "ruff>=0.14.10",
-    "ty>=0.0.14",
     "types-python-xlib>=0.33.0.20250809",
 ]
 
-[tool.ty.environment]
-python-version = "3.13"
-python-platform = "linux"
-root = ["."]
-extra-paths = ["./typings"]
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+reportUnusedImport = "error"
+reportUnusedVariable = "error"
+venvPath = "."
+venv = ".venv"
 
-[tool.ty.src]
-include = ["translate_logic", "desktop_app", "tests", "typings"]
+include = ["."]
 exclude = [
-  "**/node_modules/**",
-  "**/__pycache__/**",
-  "**/.venv/**",
-  "**/.git/**",
-  "**/.idea/**",
-  ".mypy_cache/**",
-  ".pytest_cache/**",
-  ".ruff_cache/**",
+  ".venv",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  "**/__pycache__",
 ]
 
-[tool.ty.rules]
-possibly-missing-import = "error"
-possibly-missing-attribute = "error"
-
-[tool.ty.analysis]
-respect-type-ignore-comments = true

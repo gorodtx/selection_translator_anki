@@ -4,11 +4,7 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
 
-from translate_logic.models import (
-    TranslationResult,
-    TranslationStatus,
-    TranslationVariant,
-)
+from translate_logic.models import FieldValue, TranslationResult, TranslationStatus
 
 
 @dataclass(slots=True)
@@ -27,16 +23,14 @@ class TranslationSession:
         def handle_partial(result: TranslationResult) -> None:
             if result.status is not TranslationStatus.SUCCESS:
                 return
-            stripped_variants = tuple(
-                TranslationVariant(
-                    ru=variant.ru,
-                    pos=variant.pos,
-                    synonyms=variant.synonyms,
-                    examples=(),
+            self.on_partial(
+                TranslationResult(
+                    translation_ru=result.translation_ru,
+                    ipa_uk=FieldValue.missing(),
+                    example_en=FieldValue.missing(),
+                    example_ru=FieldValue.missing(),
                 )
-                for variant in result.variants
             )
-            self.on_partial(TranslationResult(variants=stripped_variants))
 
         future = self.start_translation(query_text, handle_partial)
         future.add_done_callback(self._handle_done)

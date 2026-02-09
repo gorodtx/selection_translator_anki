@@ -11,41 +11,41 @@ from desktop_app.config import AppConfig
 from translate_logic.models import TranslationResult
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class PreparedTranslation:
     display_text: str
     query_text: str
     cached: TranslationResult | None
 
 
+@dataclass(slots=True)
 class TranslationExecutor:
-    def __init__(self, *, flow: TranslationFlow, config: AppConfig) -> None:
-        self._flow = flow
-        self._config = config
+    flow: TranslationFlow
+    config: AppConfig
 
     def update_config(self, config: AppConfig) -> None:
-        self._config = config
+        self.config = config
+
+    def history_snapshot(self) -> list[HistoryItem]:
+        return self.flow.snapshot_history()
 
     def prepare(self, text: str) -> PreparedTranslation | None:
-        outcome = self._flow.prepare(
-            text,
-            self._config.languages.source,
-            self._config.languages.target,
-        )
-        if outcome.error is not None:
+        languages = self.config.languages
+        outcome = self.flow.prepare(text, languages.source, languages.target)
+        if (
+            outcome.display_text is None
+            or outcome.query_text is None
+            or outcome.error is not None
+        ):
             return None
-        if outcome.display_text is None or outcome.query_text is None:
-            return None
-        cached = self._flow.cached_result(
-            outcome.query_text,
-            self._config.languages.source,
-            self._config.languages.target,
-        )
         return PreparedTranslation(
             display_text=outcome.display_text,
             query_text=outcome.query_text,
-            cached=cached,
+            cached=None,
         )
+
+    def register_result(self, display_text: str, result: TranslationResult) -> None:
+        self.flow.register_result(display_text, result)
 
     def run(
         self,
@@ -57,14 +57,16 @@ class TranslationExecutor:
         on_complete: Callable[[TranslationResult], None],
         on_error: Callable[[], None],
     ) -> Future[TranslationResult]:
+        languages = self.config.languages
+
         def start_translation(
-            query: str, on_partial_callback: Callable[[TranslationResult], None]
+            query: str, on_partial_result: Callable[[TranslationResult], None]
         ) -> Future[TranslationResult]:
-            return self._flow.translate(
+            return self.flow.translate(
                 query,
-                self._config.languages.source,
-                self._config.languages.target,
-                on_partial=on_partial_callback,
+                languages.source,
+                languages.target,
+                on_partial=on_partial_result,
             )
 
         session = TranslationSession(
@@ -75,9 +77,3 @@ class TranslationExecutor:
             on_error=on_error,
         )
         return session.run(display_text, query_text)
-
-    def register_result(self, display_text: str, result: TranslationResult) -> None:
-        self._flow.register_result(display_text, result)
-
-    def history_snapshot(self) -> list[HistoryItem]:
-        return self._flow.snapshot_history()

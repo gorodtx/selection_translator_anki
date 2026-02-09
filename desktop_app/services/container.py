@@ -11,6 +11,7 @@ from desktop_app.anki.service import AnkiService
 from desktop_app.services.history import HistoryStore
 from desktop_app.services.result_cache import ResultCache
 from desktop_app.services.runtime import AsyncRuntime
+from desktop_app.services.selection_cache import SelectionCache, selection_cache_path
 from desktop_app.services.translation_service import TranslationService
 
 
@@ -22,6 +23,7 @@ class AppServices:
     history: HistoryStore
     translation_flow: TranslationFlow
     anki_flow: AnkiFlow
+    selection_cache: SelectionCache
 
     @classmethod
     def create(cls) -> "AppServices":
@@ -40,6 +42,7 @@ class AppServices:
         )
         translation_flow = TranslationFlow(translator=translator, history=history)
         anki_flow = AnkiFlow(service=anki)
+        selection_cache = SelectionCache(selection_cache_path())
         return cls(
             runtime=runtime,
             translator=translator,
@@ -47,11 +50,11 @@ class AppServices:
             history=history,
             translation_flow=translation_flow,
             anki_flow=anki_flow,
+            selection_cache=selection_cache,
         )
 
     def start(self) -> None:
         self.runtime.start()
-        # Warm up the offline model in background to avoid first-request latency.
         self.translator.warmup()
 
     def stop(self) -> None:

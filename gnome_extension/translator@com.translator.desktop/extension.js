@@ -140,9 +140,7 @@ export default class TranslatorExtension extends Extension {
     }
     try {
       Main.wm.removeKeybinding(HOTKEY_SETTING);
-    } catch (error) {
-      logError(error);
-    }
+    } catch (error) {}
     this._hotkeyRegistered = false;
   }
 

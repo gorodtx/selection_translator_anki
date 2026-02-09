@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 DEFAULT_MODEL_NAME = "Translator"
-DEFAULT_MODEL_FIELDS = ["word", "translation", "example_en", "example_ru"]
+DEFAULT_MODEL_FIELDS = ["word", "ipa", "translation", "example_en", "example_ru"]
 
 DEFAULT_FRONT_TEMPLATE = """
 <div class="eng">{{word}}</div>
+
+{{#ipa}}
+  <div class="ipa">/{{ipa}}/</div>
+{{/ipa}}
 
 {{#example_en}}
   <div class="ex ex-en">{{example_en}}</div>
@@ -37,6 +41,12 @@ DEFAULT_MODEL_CSS = """
   font-size: 34px;
   font-weight: 700;
   margin-bottom: 10px;
+}
+
+.ipa {
+  font-size: 22px;
+  opacity: 0.8;
+  margin-bottom: 14px;
 }
 
 .ru {

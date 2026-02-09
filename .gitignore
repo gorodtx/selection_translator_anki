@@ -710,28 +710,7 @@ test.*
 
 # End of https://www.toptal.com/developers/gitignore/api/python,pycharm+all,vs,jupyternotebooks,c,c++
 
-.docker-compose.local.yaml
+*.docker-compose.local.yaml
 .uv-cache
 .uv_cache
 .config
-
-
-*llm
-.local_models
-.hf-home
-.npm-cache
-
-# Offline language bases are distributed via GitHub Releases and downloaded
-# locally into this directory. They are intentionally not committed to git.
-offline_language_base/*.sqlite3
-offline_language_base/*.sqlite3-wal
-offline_language_base/*.sqlite3-shm
-offline_language_base/*.sqlite3-journal
-offline_language_base/*.sqlite3.part
-
-# Offline translation models are distributed via GitHub Releases and downloaded
-# locally into this directory. They are intentionally not committed to git.
-offline_assets/*
-!offline_assets/.gitkeep
-offline_assets.zip
-offline_assets.zip.part

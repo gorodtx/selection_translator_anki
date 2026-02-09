@@ -313,6 +313,7 @@ class SettingsWindow:
         if self._model_ready:
             fields = AnkiFieldMap(
                 word="word",
+                ipa="ipa",
                 translation="translation",
                 example_en="example_en",
                 example_ru="example_ru",
@@ -321,6 +322,7 @@ class SettingsWindow:
         else:
             fields = AnkiFieldMap(
                 word="",
+                ipa="",
                 translation="",
                 example_en="",
                 example_ru="",
@@ -385,6 +387,7 @@ class SettingsWindow:
         target_deck = deck or self._current_deck()
         fields = AnkiFieldMap(
             word="word",
+            ipa="ipa",
             translation="translation",
             example_en="example_en",
             example_ru="example_ru",
@@ -460,7 +463,7 @@ class SettingsWindow:
 
 def missing_required_fields(mapping: dict[str, str]) -> list[str]:
     missing: list[str] = []
-    for key in ("word", "translation", "example_en", "example_ru"):
+    for key in ("word", "ipa", "translation", "example_en", "example_ru"):
         value = mapping.get(key, "")
         if not value:
             missing.append(key)
