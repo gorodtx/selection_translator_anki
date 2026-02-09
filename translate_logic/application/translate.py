@@ -9,6 +9,7 @@ from translate_logic.cache import LruTtlCache
 from translate_logic.domain import rules
 from translate_logic.domain.policies import SourcePolicy
 from translate_logic.http import AsyncFetcher, build_async_fetcher
+from translate_logic.language_base.base import LanguageBase
 from translate_logic.models import (
     Example,
     FieldValue,
@@ -34,6 +35,7 @@ from translate_logic.translation import (
 
 DEFAULT_CACHE = LruTtlCache()
 _POLICY = SourcePolicy()
+_LANGUAGE_BASE_EXAMPLE_LIMIT = 3
 
 
 async def translate_async(
@@ -41,16 +43,22 @@ async def translate_async(
     source_lang: str = "en",
     target_lang: str = "ru",
     fetcher: AsyncFetcher | None = None,
+    language_base: LanguageBase | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     if fetcher is not None:
         return await _translate_with_fetcher_async(
-            text, source_lang, target_lang, fetcher, on_partial
+            text, source_lang, target_lang, fetcher, language_base, on_partial
         )
     async with aiohttp.ClientSession() as session:
         async_fetcher = build_async_fetcher(session, cache=DEFAULT_CACHE)
         return await _translate_with_fetcher_async(
-            text, source_lang, target_lang, async_fetcher, on_partial
+            text,
+            source_lang,
+            target_lang,
+            async_fetcher,
+            language_base,
+            on_partial,
         )
 
 
@@ -59,11 +67,16 @@ async def _translate_with_fetcher_async(
     source_lang: str,
     target_lang: str,
     fetcher: AsyncFetcher,
+    language_base: LanguageBase | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     normalized_text = normalize_text(text)
     if not normalized_text:
         return TranslationResult.empty()
+    language_base_examples = await _language_base_examples_async(
+        text=normalized_text,
+        language_base=language_base,
+    )
 
     word_count = count_words(normalized_text)
     if not _POLICY.use_cambridge(word_count):
@@ -79,9 +92,15 @@ async def _translate_with_fetcher_async(
             source_lang,
             target_lang,
             fetcher,
+            language_base_examples,
             on_partial,
         )
-        return _build_result(translation_ru, ipa_uk, example)
+        return _build_result(
+            translation_ru,
+            ipa_uk,
+            example,
+            language_base_examples=language_base_examples,
+        )
 
     cambridge_result = await translate_cambridge(normalized_text, fetcher)
     if cambridge_result.found:
@@ -120,17 +139,28 @@ async def _translate_with_fetcher_async(
                             cambridge_non_meta, google_candidates
                         )
             ipa_uk, example = await ipa_task
-            return _build_result(translation_ru, ipa_uk, example)
+            return _build_result(
+                translation_ru,
+                ipa_uk,
+                example,
+                language_base_examples=language_base_examples,
+            )
         translation_ru, ipa_uk, example = await _translate_with_google_fallback_async(
             normalized_text,
             cambridge_result,
             source_lang,
             target_lang,
             fetcher,
+            language_base_examples,
             on_partial,
             secondary_translations=cambridge_meta,
         )
-        return _build_result(translation_ru, ipa_uk, example)
+        return _build_result(
+            translation_ru,
+            ipa_uk,
+            example,
+            language_base_examples=language_base_examples,
+        )
 
     translation_ru, ipa_uk, example = await _translate_with_google_fallback_async(
         normalized_text,
@@ -138,9 +168,15 @@ async def _translate_with_fetcher_async(
         source_lang,
         target_lang,
         fetcher,
+        language_base_examples,
         on_partial,
     )
-    return _build_result(translation_ru, ipa_uk, example)
+    return _build_result(
+        translation_ru,
+        ipa_uk,
+        example,
+        language_base_examples=language_base_examples,
+    )
 
 
 async def _translate_with_google_fallback_async(
@@ -149,6 +185,7 @@ async def _translate_with_google_fallback_async(
     source_lang: str,
     target_lang: str,
     fetcher: AsyncFetcher,
+    language_base_examples: list[Example],
     on_partial: Callable[[TranslationResult], None] | None = None,
     secondary_translations: list[str] | None = None,
 ) -> tuple[str | None, str | None, Example | None]:
@@ -193,6 +230,7 @@ async def _translate_with_google_fallback_async(
         fetcher,
         dictionary_result,
         tatoeba_result,
+        language_base_examples,
     )
     return translation_ru, ipa_uk, example
 
@@ -206,8 +244,10 @@ async def _supplement_pronunciation_and_examples_async(
     fetcher: AsyncFetcher,
     dictionary_result: DictionaryApiResult | None = None,
     tatoeba_result: TatoebaResult | None = None,
+    language_base_examples: list[Example] | None = None,
 ) -> tuple[str | None, Example | None]:
     available_examples = filter_examples(examples)
+    local_examples = filter_examples(language_base_examples or [])
     needs_dictionary = _POLICY.needs_dictionary(ipa_uk, available_examples)
     needs_tatoeba = _POLICY.needs_tatoeba(available_examples)
 
@@ -227,6 +267,10 @@ async def _supplement_pronunciation_and_examples_async(
     if tatoeba_task is not None:
         tatoeba_result = await tatoeba_task
 
+    paired_local_example = _select_example_with_ru(local_examples)
+    if paired_local_example is not None:
+        return ipa_uk, paired_local_example
+
     paired_example = _select_example_with_ru(available_examples)
     if paired_example is None and tatoeba_result is not None:
         paired_example = _select_example_with_ru(
@@ -234,6 +278,8 @@ async def _supplement_pronunciation_and_examples_async(
         )
 
     fallback_example = _select_any_example(available_examples)
+    if fallback_example is None:
+        fallback_example = _select_any_example(local_examples)
     final_example = paired_example or fallback_example
     if final_example is None:
         return ipa_uk, None
@@ -285,15 +331,55 @@ def _needs_more_variants(translations: list[str]) -> bool:
 
 
 def _build_result(
-    translation_ru: str | None, ipa_uk: str | None, example: Example | None
+    translation_ru: str | None,
+    ipa_uk: str | None,
+    example: Example | None,
+    *,
+    language_base_examples: list[Example],
 ) -> TranslationResult:
+    preferred_example = _pick_preferred_example(example, language_base_examples)
     return TranslationResult(
         translation_ru=FieldValue.from_optional(translation_ru),
         ipa_uk=FieldValue.from_optional(ipa_uk),
-        example_en=FieldValue.from_optional(example.en if example else None),
-        example_ru=FieldValue.from_optional(example.ru if example else None),
+        example_en=FieldValue.from_optional(
+            preferred_example.en if preferred_example else None
+        ),
+        example_ru=FieldValue.from_optional(
+            preferred_example.ru if preferred_example else None
+        ),
     )
 
 
 def filter_examples(examples: list[Example]) -> list[Example]:
     return [example for example in examples if rules.is_example_candidate(example.en)]
+
+
+def _pick_preferred_example(
+    current: Example | None,
+    language_base_examples: list[Example],
+) -> Example | None:
+    paired = _select_example_with_ru(language_base_examples)
+    if paired is not None:
+        return paired
+    fallback = _select_any_example(language_base_examples)
+    if fallback is not None:
+        return fallback
+    return current
+
+
+async def _language_base_examples_async(
+    *,
+    text: str,
+    language_base: LanguageBase | None,
+) -> list[Example]:
+    if language_base is None or not language_base.is_available:
+        return []
+    try:
+        examples = await asyncio.to_thread(
+            language_base.get_examples,
+            word=text,
+            limit=_LANGUAGE_BASE_EXAMPLE_LIMIT,
+        )
+    except Exception:
+        return []
+    return filter_examples(list(examples))

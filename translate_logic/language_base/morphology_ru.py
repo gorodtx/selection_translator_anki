@@ -14,10 +14,14 @@ def has_cyrillic(text: str) -> bool:
 
 
 @lru_cache(maxsize=1)
-def _analyzer() -> "object":
-    # Lazy import keeps CLI startup fast when morphology isn't needed.
-    import pymorphy3
-
+def _analyzer() -> "object | None":
+    # Lazy import keeps startup fast when morphology isn't needed.
+    # On desktop D-Bus activation we may run under system python that doesn't
+    # have optional morphology deps installed; fallback must stay functional.
+    try:
+        import pymorphy3
+    except ModuleNotFoundError:
+        return None
     return pymorphy3.MorphAnalyzer()
 
 
@@ -35,6 +39,8 @@ def ru_lemma(token: str) -> str | None:
     if not has_cyrillic(normalized):
         return None
     analyzer = _analyzer()
+    if analyzer is None:
+        return normalized
     parses = analyzer.parse(normalized)
     if not parses:
         return None
@@ -53,6 +59,8 @@ def ru_lemma_and_pos(token: str) -> tuple[str | None, str | None]:
     if not has_cyrillic(normalized):
         return None, _POS_NONE
     analyzer = _analyzer()
+    if analyzer is None:
+        return normalized, _POS_NONE
     parses = analyzer.parse(normalized)
     if not parses:
         return None, _POS_NONE
@@ -74,6 +82,8 @@ def ru_lemma_pos_grammemes(token: str) -> tuple[str | None, str | None, frozense
     if not has_cyrillic(normalized):
         return None, _POS_NONE, _GRAMMEMES_NONE
     analyzer = _analyzer()
+    if analyzer is None:
+        return normalized, _POS_NONE, _GRAMMEMES_NONE
     parses = analyzer.parse(normalized)
     if not parses:
         return None, _POS_NONE, _GRAMMEMES_NONE

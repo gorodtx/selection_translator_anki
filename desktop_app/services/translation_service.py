@@ -12,6 +12,12 @@ from desktop_app.services.runtime import AsyncRuntime
 from translate_logic.cache import LruTtlCache
 from translate_logic.application.translate import translate_async
 from translate_logic.http import AsyncFetcher, build_async_fetcher
+from translate_logic.language_base.base import LanguageBase
+from translate_logic.language_base.multi_provider import MultiLanguageBaseProvider
+from translate_logic.language_base.provider import (
+    LanguageBaseProvider,
+    default_fallback_language_base_path,
+)
 from translate_logic.models import TranslationResult, TranslationStatus
 from translate_logic.text import normalize_text
 
@@ -31,6 +37,15 @@ class TranslationService:
     _session_lock: asyncio.Lock | None = None
     _http_cache: LruTtlCache = field(default_factory=LruTtlCache)
     _active: set[Future[TranslationResult]] = field(default_factory=_future_set)
+    _language_base: LanguageBase = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._language_base = MultiLanguageBaseProvider(
+            primary=LanguageBaseProvider(),
+            fallback=LanguageBaseProvider(
+                db_path=default_fallback_language_base_path()
+            ),
+        )
 
     def translate(
         self,
@@ -56,6 +71,10 @@ class TranslationService:
                 self._ensure_fetcher(), self.runtime.loop
             )
             future.add_done_callback(lambda done: done.exception())
+            language_base_future = asyncio.run_coroutine_threadsafe(
+                asyncio.to_thread(self._language_base.warmup), self.runtime.loop
+            )
+            language_base_future.add_done_callback(lambda done: done.exception())
         except Exception:
             return
 
@@ -88,6 +107,7 @@ class TranslationService:
             source_lang,
             target_lang,
             fetcher=fetcher,
+            language_base=self._language_base,
             on_partial=handle_partial,
         )
         cache_key = _cache_key(text, source_lang, target_lang)
