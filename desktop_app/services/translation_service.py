@@ -10,8 +10,8 @@ import aiohttp
 from desktop_app.services.result_cache import ResultCache
 from desktop_app.services.runtime import AsyncRuntime
 from translate_logic.cache import LruTtlCache
-from translate_logic.application.translate import translate_async
-from translate_logic.http import AsyncFetcher, build_async_fetcher
+from translate_logic.application.translate import build_latency_fetcher, translate_async
+from translate_logic.http import AsyncFetcher
 from translate_logic.language_base.base import LanguageBase
 from translate_logic.language_base.multi_provider import MultiLanguageBaseProvider
 from translate_logic.language_base.provider import (
@@ -126,10 +126,9 @@ class TranslationService:
             if self._fetcher is not None and self._session is not None:
                 return self._fetcher
             self._session = aiohttp.ClientSession()
-            self._fetcher = build_async_fetcher(
+            self._fetcher = build_latency_fetcher(
                 self._session,
                 cache=self._http_cache,
-                timeout=self.timeout_seconds,
             )
             return self._fetcher
 

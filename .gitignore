@@ -714,3 +714,5 @@ test.*
 .uv-cache
 .uv_cache
 .config
+.venv-desktop
+.npm-cache
