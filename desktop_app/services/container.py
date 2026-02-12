@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future
 from dataclasses import dataclass
 
 from desktop_app.anki import DEFAULT_TIMEOUT_SECONDS
@@ -38,7 +39,6 @@ class AppServices:
         )
         history = HistoryStore(
             max_entries=result_cache.max_entries,
-            ttl_seconds=result_cache.ttl_seconds,
         )
         translation_flow = TranslationFlow(translator=translator, history=history)
         anki_flow = AnkiFlow(service=anki)
@@ -58,19 +58,26 @@ class AppServices:
         self.translator.warmup()
 
     def stop(self) -> None:
-        close_translator = asyncio.run_coroutine_threadsafe(
+        close_translator: Future[None] = asyncio.run_coroutine_threadsafe(
             self.translator.close(), self.runtime.loop
         )
-        close_anki = asyncio.run_coroutine_threadsafe(
+        close_anki: Future[None] = asyncio.run_coroutine_threadsafe(
             self.anki.close(), self.runtime.loop
         )
-        for future in [close_translator, close_anki]:
-            try:
-                future.result(timeout=1.0)
-            except Exception:
-                continue
+        _drain_future(close_translator)
+        _drain_future(close_anki)
         self.runtime.stop()
 
     def cancel_active(self) -> None:
         self.translator.cancel_active()
         self.anki.cancel_active()
+
+
+def _drain_future(future: Future[None]) -> None:
+    try:
+        if future.done():
+            future.result()
+            return
+        future.cancel()
+    except Exception:
+        pass

@@ -14,7 +14,6 @@ from .history_view import HistoryViewCoordinator
 from .translation_state import TranslationState
 from .translation_view import TranslationViewCoordinator
 from desktop_app.notifications import Notification
-from desktop_app.notifications.models import NotificationDuration
 from desktop_app.notifications import messages as notify_messages
 from desktop_app import gtk_types
 from translate_logic.models import TranslationResult, TranslationStatus
@@ -279,8 +278,7 @@ class TranslationController:
 
     def _on_anki_success(self) -> None:
         self._notify(notify_messages.anki_success())
-        GLib.timeout_add(NotificationDuration.SHORT.value, self._close_after_success)
+        self._close_after_success()
 
-    def _close_after_success(self) -> bool:
+    def _close_after_success(self) -> None:
         self.close_window()
-        return False

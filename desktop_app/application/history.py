@@ -9,4 +9,3 @@ from translate_logic.models import TranslationResult
 class HistoryItem:
     text: str
     result: TranslationResult
-    expires_at: float

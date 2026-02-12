@@ -21,10 +21,8 @@ const HISTORY_LABEL = "History";
 const SETTINGS_LABEL = "Settings";
 const DEFAULT_ICON_NAME = "accessories-dictionary-symbolic";
 const TEXT_FILTER = /^[.\s\d-]+$/;
-const DBUS_RETRY_DELAY_MS = 200;
 const DBUS_RETRY_ATTEMPTS = 10;
 const MAX_TEXT_LEN = 200;
-const HOTKEY_DEBOUNCE_MS = 80;
 const DBUS_RETRYABLE_ERRORS = [
   "org.freedesktop.DBus.Error.ServiceUnknown",
   "org.freedesktop.DBus.Error.UnknownObject",
@@ -65,8 +63,6 @@ export default class TranslatorExtension extends Extension {
     this._clipboard = St.Clipboard.get_default();
     this._oldtext = null;
     this._proxy = null;
-    this._hotkeyDebounceId = 0;
-    this._pendingText = null;
     this._hotkey = this._getHotkeyValue();
     this._hotkeyRegistered = false;
     this._settingsChangedId = this._settings.connect(
@@ -82,7 +78,6 @@ export default class TranslatorExtension extends Extension {
 
   disable() {
     this._unregisterHotkey();
-    this._clearDebounce();
     if (this._settings && this._settingsChangedId) {
       this._settings.disconnect(this._settingsChangedId);
       this._settingsChangedId = 0;
@@ -155,7 +150,7 @@ export default class TranslatorExtension extends Extension {
         return;
       }
       this._oldtext = candidate;
-      this._scheduleTranslate(candidate);
+      this._callTranslate(candidate);
     });
   }
 
@@ -177,35 +172,6 @@ export default class TranslatorExtension extends Extension {
       return null;
     }
     return trimmed;
-  }
-
-  _scheduleTranslate(text) {
-    this._pendingText = text;
-    if (this._hotkeyDebounceId !== 0) {
-      return;
-    }
-    this._hotkeyDebounceId = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT,
-      HOTKEY_DEBOUNCE_MS,
-      () => {
-        this._hotkeyDebounceId = 0;
-        const pending = this._pendingText;
-        this._pendingText = null;
-        if (pending) {
-          this._callTranslate(pending);
-        }
-        return GLib.SOURCE_REMOVE;
-      },
-    );
-  }
-
-  _clearDebounce() {
-    if (this._hotkeyDebounceId === 0) {
-      return;
-    }
-    GLib.source_remove(this._hotkeyDebounceId);
-    this._hotkeyDebounceId = 0;
-    this._pendingText = null;
   }
 
   _callTranslate(text) {
@@ -243,7 +209,9 @@ export default class TranslatorExtension extends Extension {
   _callDbusWithRetry(method, parameters, attempt) {
     const proxy = this._getProxy();
     if (!proxy) {
-      this._scheduleRetry(method, parameters, attempt);
+      if (attempt < DBUS_RETRY_ATTEMPTS) {
+        this._callDbusWithRetry(method, parameters, attempt + 1);
+      }
       return;
     }
     proxy.call(
@@ -262,22 +230,12 @@ export default class TranslatorExtension extends Extension {
             DBUS_RETRYABLE_ERRORS.some((marker) => message.includes(marker));
           if (shouldRetry) {
             this._proxy = null;
-            this._scheduleRetry(method, parameters, attempt);
+            this._callDbusWithRetry(method, parameters, attempt + 1);
             return;
           }
           return;
         }
       },
     );
-  }
-
-  _scheduleRetry(method, parameters, attempt) {
-    if (attempt >= DBUS_RETRY_ATTEMPTS) {
-      return;
-    }
-    GLib.timeout_add(GLib.PRIORITY_DEFAULT, DBUS_RETRY_DELAY_MS, () => {
-      this._callDbusWithRetry(method, parameters, attempt + 1);
-      return GLib.SOURCE_REMOVE;
-    });
   }
 }

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
 from enum import Enum
 import importlib
 
@@ -34,10 +33,6 @@ _LEVEL_CLASSES: dict[NotificationLevel, str] = {
 
 class BannerHost:
     def __init__(self) -> None:
-        self._queue: deque[Notification] = deque()
-        self._active = False
-        self._timer_id: int | None = None
-
         self._label = Gtk.Label(label="")
         self._label.set_xalign(0.0)
         self._label.set_wrap(True)
@@ -63,46 +58,15 @@ class BannerHost:
         return self._revealer
 
     def notify(self, notification: Notification) -> None:
-        GLib.idle_add(self._enqueue, notification)
+        GLib.idle_add(self._show_notification, notification)
 
-    def _enqueue(self, notification: Notification) -> bool:
-        self._queue.append(notification)
-        if not self._active:
-            self._show_next()
-        return False
-
-    def _show_next(self) -> None:
-        if not self._queue:
-            self._active = False
-            return
-        self._active = True
-        notification = self._queue.popleft()
+    def _show_notification(self, notification: Notification) -> bool:
         self._apply_level(notification.level)
         self._label.set_text(notification.message)
         self._revealer.set_reveal_child(True)
-        self._cancel_timer()
-        self._timer_id = GLib.timeout_add(
-            notification.duration.value, self._hide_current
-        )
-
-    def _hide_current(self) -> bool:
-        self._revealer.set_reveal_child(False)
-        self._timer_id = None
-        GLib.idle_add(self._after_hide)
-        return False
-
-    def _after_hide(self) -> bool:
-        self._active = False
-        self._show_next()
         return False
 
     def _apply_level(self, level: NotificationLevel) -> None:
         for css_class in _LEVEL_CLASSES.values():
             self._box.remove_css_class(css_class)
         self._box.add_css_class(_LEVEL_CLASSES[level])
-
-    def _cancel_timer(self) -> None:
-        if self._timer_id is None:
-            return
-        GLib.source_remove(self._timer_id)
-        self._timer_id = None

@@ -83,8 +83,8 @@ class LanguageBaseProvider:
         conn = sqlite3.connect(uri, uri=True)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA temp_store=MEMORY")
-        conn.execute("PRAGMA cache_size=-100000")
-        conn.execute("PRAGMA mmap_size=268435456")
+        conn.execute("PRAGMA cache_size=-8192")
+        conn.execute("PRAGMA mmap_size=67108864")
         setattr(self._local, "conn", conn)
         return conn
 

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 import logging
 import time
 from typing import Callable, Final
 
 import aiohttp
 
-from translate_logic.cache import LruTtlCache
+from translate_logic.cache import HttpCache
 from translate_logic.domain import rules
 from translate_logic.domain.policies import SourcePolicy
 from translate_logic.http import (
@@ -40,9 +42,13 @@ from translate_logic.translation import (
     select_translation_candidates,
 )
 
-DEFAULT_CACHE = LruTtlCache()
+DEFAULT_CACHE = HttpCache()
 _POLICY = SourcePolicy()
 _LANGUAGE_BASE_EXAMPLE_LIMIT = 3
+_LANGUAGE_BASE_EXECUTOR: Final[ThreadPoolExecutor] = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="translator-langbase",
+)
 _LOGGER = logging.getLogger(__name__)
 _FAILURE_BACKOFF_SECONDS: Final[float] = 30.0
 _FAILURE_BACKOFF_STORE = FailureBackoffStore(
@@ -77,7 +83,7 @@ _CAMBRIDGE_PRIMARY_WAIT_S: Final[float] = 0.25
 def build_latency_fetcher(
     session: aiohttp.ClientSession,
     *,
-    cache: LruTtlCache | None = DEFAULT_CACHE,
+    cache: HttpCache | None = DEFAULT_CACHE,
 ) -> AsyncFetcher:
     return build_async_fetcher(
         session,
@@ -595,11 +601,13 @@ async def _language_base_examples_async(
     if language_base is None or not language_base.is_available:
         return []
     try:
-        examples = await asyncio.to_thread(
+        loop = asyncio.get_running_loop()
+        fetch_examples = partial(
             language_base.get_examples,
             word=text,
             limit=_LANGUAGE_BASE_EXAMPLE_LIMIT,
         )
+        examples = await loop.run_in_executor(_LANGUAGE_BASE_EXECUTOR, fetch_examples)
     except Exception:
         return []
     return filter_examples(list(examples))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import threading
 
 
@@ -13,16 +14,24 @@ class AsyncRuntime:
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
+        self._ready.clear()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         self._ready.wait()
 
     def stop(self) -> None:
-        if self._loop is None:
+        loop = self._loop
+        if loop is None:
             return
-        self._loop.call_soon_threadsafe(self._loop.stop)
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
+        with suppress(Exception):
+            loop.call_soon_threadsafe(loop.stop)
+        thread = self._thread
+        if thread is None:
+            self._loop = None
+            return
+        if not thread.is_alive():
+            self._thread = None
+            self._loop = None
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
@@ -42,3 +51,5 @@ class AsyncRuntime:
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
+        self._loop = None
+        self._thread = None

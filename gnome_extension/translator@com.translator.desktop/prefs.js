@@ -10,7 +10,6 @@ const HOTKEY_KEY = "hotkey";
 const BUS_NAME = "com.translator.desktop";
 const OBJECT_PATH = "/com/translator/desktop";
 const INTERFACE_NAME = "com.translator.desktop";
-const MESSAGE_TIMEOUT_SECONDS = 2;
 let cssApplied = false;
 
 export default class TranslatorPrefs extends ExtensionPreferences {
@@ -203,7 +202,6 @@ export default class TranslatorPrefs extends ExtensionPreferences {
         return;
       }
       const toast = new Adw.Toast({ title: text });
-      toast.set_timeout(MESSAGE_TIMEOUT_SECONDS);
       window.add_toast(toast);
     };
 

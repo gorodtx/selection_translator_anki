@@ -4,6 +4,7 @@ import importlib
 import os
 import shutil
 import subprocess
+import threading
 
 gi = importlib.import_module("gi")
 require_version = getattr(gi, "require_version", None)
@@ -18,16 +19,15 @@ class ClipboardWriter:
     def copy_text(self, text: str) -> None:
         if not text:
             return
-        if self._copy_external(text):
-            return
         display = Gdk.Display.get_default()
-        if display is None:
+        if display is not None:
+            clipboard = display.get_clipboard()
+            provider = Gdk.ContentProvider.new_for_bytes(
+                "text/plain", GLib.Bytes.new(text.encode("utf-8"))
+            )
+            clipboard.set_content(provider)
             return
-        clipboard = display.get_clipboard()
-        provider = Gdk.ContentProvider.new_for_bytes(
-            "text/plain", GLib.Bytes.new(text.encode("utf-8"))
-        )
-        clipboard.set_content(provider)
+        self._copy_external(text)
 
     def _copy_external(self, text: str) -> bool:
         session = os.environ.get("XDG_SESSION_TYPE", "").casefold()
@@ -45,16 +45,18 @@ class ClipboardWriter:
         return False
 
     def _run_clipboard_command(self, command: list[str], text: str) -> bool:
-        try:
-            subprocess.run(
-                command,
-                input=text,
-                check=False,
-                text=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=0.5,
-            )
-        except Exception:
-            return False
+        def _worker() -> None:
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                process.communicate(input=text)
+            except Exception:
+                return
+
+        threading.Thread(target=_worker, daemon=True).start()
         return True

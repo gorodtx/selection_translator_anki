@@ -4,12 +4,13 @@ import asyncio
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+import os
 
 import aiohttp
 
 from desktop_app.services.result_cache import ResultCache
 from desktop_app.services.runtime import AsyncRuntime
-from translate_logic.cache import LruTtlCache
+from translate_logic.cache import HttpCache
 from translate_logic.application.translate import build_latency_fetcher, translate_async
 from translate_logic.http import AsyncFetcher
 from translate_logic.language_base.base import LanguageBase
@@ -31,11 +32,10 @@ class TranslationService:
     runtime: AsyncRuntime
     result_cache: ResultCache
 
-    timeout_seconds: float = 6.0
     _session: aiohttp.ClientSession | None = None
     _fetcher: AsyncFetcher | None = None
     _session_lock: asyncio.Lock | None = None
-    _http_cache: LruTtlCache = field(default_factory=LruTtlCache)
+    _http_cache: HttpCache = field(default_factory=HttpCache)
     _active: set[Future[TranslationResult]] = field(default_factory=_future_set)
     _language_base: LanguageBase = field(init=False)
 
@@ -71,10 +71,11 @@ class TranslationService:
                 self._ensure_fetcher(), self.runtime.loop
             )
             future.add_done_callback(lambda done: done.exception())
-            language_base_future = asyncio.run_coroutine_threadsafe(
-                asyncio.to_thread(self._language_base.warmup), self.runtime.loop
-            )
-            language_base_future.add_done_callback(lambda done: done.exception())
+            if _should_warmup_language_base():
+                language_base_future = asyncio.run_coroutine_threadsafe(
+                    asyncio.to_thread(self._language_base.warmup), self.runtime.loop
+                )
+                language_base_future.add_done_callback(lambda done: done.exception())
         except Exception:
             return
 
@@ -150,3 +151,8 @@ class TranslationService:
 def _cache_key(text: str, source_lang: str, target_lang: str) -> str:
     normalized = normalize_text(text)
     return f"{source_lang}:{target_lang}:{normalized}"
+
+
+def _should_warmup_language_base() -> bool:
+    value = os.environ.get("TRANSLATOR_WARMUP_LANGUAGE_BASE_ON_START", "0")
+    return value.strip() == "1"

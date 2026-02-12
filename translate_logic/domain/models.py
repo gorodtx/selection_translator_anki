@@ -69,7 +69,7 @@ class TranslationResult:
 
 
 class TranslationLimit(Enum):
-    PRIMARY = 4
+    PRIMARY = 8
 
 
 class QueryLimit(Enum):
