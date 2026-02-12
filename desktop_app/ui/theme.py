@@ -41,7 +41,6 @@ def apply_theme() -> None:
         button:hover { background-color: #444444; }
         separator { background-color: #444444; }
         .original { font-weight: 600; font-size: 1.05em; }
-        .ipa { color: #b3b3b3; font-style: italic; }
         .translation { font-size: 1.1em; color: #e6e6e6; }
         .example { font-size: 1.1em; color: #e6e6e6; }
         .history-title { font-weight: 600; font-size: 1.1em; }

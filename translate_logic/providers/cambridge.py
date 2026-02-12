@@ -3,13 +3,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable
 from urllib.parse import quote_plus
 
 from translate_logic.html_parser import (
     HtmlNode,
     find_all,
-    find_first,
     has_ancestor_with_class,
     parse_html,
 )
@@ -36,7 +34,6 @@ class CambridgeUrls:
 
 @dataclass(frozen=True, slots=True)
 class CambridgePageData:
-    ipa_uk: str | None
     translations: list[str]
     examples: list[Example]
 
@@ -45,7 +42,6 @@ class CambridgePageData:
 class CambridgeResult:
     found: bool
     translations: list[str]
-    ipa_uk: str | None
     examples: list[Example]
 
 
@@ -64,7 +60,6 @@ async def translate_cambridge(text: str, fetcher: AsyncFetcher) -> CambridgeResu
         return CambridgeResult(
             found=False,
             translations=[],
-            ipa_uk=None,
             examples=[],
         )
 
@@ -96,18 +91,16 @@ async def translate_cambridge(text: str, fetcher: AsyncFetcher) -> CambridgeResu
             continue
 
         translations = russian_data.translations or english_data.translations
-        ipa_uk = english_data.ipa_uk or russian_data.ipa_uk
         examples = _rank_examples(russian_data.examples or english_data.examples)
 
         result = CambridgeResult(
             found=bool(translations),
             translations=translations,
-            ipa_uk=ipa_uk,
             examples=examples,
         )
         if result.found:
             return result
-        if best_fallback is None and (ipa_uk or examples):
+        if best_fallback is None and examples:
             best_fallback = result
 
     if best_fallback is not None:
@@ -115,7 +108,6 @@ async def translate_cambridge(text: str, fetcher: AsyncFetcher) -> CambridgeResu
     return CambridgeResult(
         found=False,
         translations=[],
-        ipa_uk=None,
         examples=[],
     )
 
@@ -132,14 +124,11 @@ def parse_cambridge_page(
 ) -> CambridgePageData:
     root = parse_html(html)
     entries = find_all(root, _is_entry_block)
-    ipa_uk: str | None = None
     translations: list[str] = []
     examples: list[Example] = []
     seen_examples: set[tuple[str, str | None]] = set()
 
     for entry in entries:
-        if ipa_uk is None:
-            ipa_uk = _extract_ipa_uk(entry)
         for translation in _extract_entry_translations(entry, translation_lang):
             translations.append(translation)
         for example in _extract_entry_examples(entry):
@@ -149,12 +138,10 @@ def parse_cambridge_page(
                 seen_examples.add(key)
 
     if not entries:
-        ipa_uk = _extract_ipa_uk(root)
         translations = _extract_translations(root, translation_lang)
         examples = _extract_examples(root)
     translations = clean_translations(translations)
     return CambridgePageData(
-        ipa_uk=ipa_uk,
         translations=translations,
         examples=examples,
     )
@@ -162,7 +149,6 @@ def parse_cambridge_page(
 
 def _empty_page_data() -> CambridgePageData:
     return CambridgePageData(
-        ipa_uk=None,
         translations=[],
         examples=[],
     )
@@ -202,35 +188,6 @@ def _build_cambridge_queries(value: str) -> list[str]:
 
 def _build_cambridge_search_url(dataset: CambridgeDataset, query: str) -> str:
     return f"{CAMBRIDGE_SEARCH_URL}?datasetsearch={dataset.value}&q={query}"
-
-
-def _extract_ipa_uk(root: HtmlNode) -> str | None:
-    def _is_pron(node: HtmlNode) -> bool:
-        return node.tag == "span" and {"pron", "dpron"}.issubset(node.classes())
-
-    def _is_ipa(node: HtmlNode) -> bool:
-        return node.tag == "span" and {"ipa", "dipa"}.issubset(node.classes())
-
-    def _is_uk_pron(node: HtmlNode) -> bool:
-        return _is_pron(node) and has_ancestor_with_class(node, "uk")
-
-    def _is_uk_ipa(node: HtmlNode) -> bool:
-        return _is_ipa(node) and has_ancestor_with_class(node, "uk")
-
-    predicates: list[Callable[[HtmlNode], bool]] = [
-        _is_uk_pron,
-        _is_pron,
-        _is_uk_ipa,
-        _is_ipa,
-    ]
-    for predicate in predicates:
-        node = find_first(root, predicate)
-        if node is None:
-            continue
-        text = normalize_whitespace(node.text_content())
-        if text:
-            return text
-    return None
 
 
 def _extract_translations(

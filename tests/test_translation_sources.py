@@ -29,7 +29,6 @@ def test_cambridge_fallback_query_uses_slug() -> None:
     html = """
     <html><body>
       <div class="entry-body__el">
-        <span class="ipa dipa">/test/</span>
         <span class="trans" lang="ru">пример</span>
       </div>
     </body></html>

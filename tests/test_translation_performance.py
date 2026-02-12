@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 
 import aiohttp
@@ -9,11 +8,9 @@ import pytest
 
 from translate_logic.application.translate import (
     _recover_empty_translation_async,
-    _supplement_pronunciation_and_examples_async,
     _translate_with_fetcher_async,
 )
 from translate_logic.http import FailureBackoffStore, FetchError, build_async_fetcher
-from translate_logic.models import Example
 from translate_logic.providers.cambridge import CambridgeResult
 from translate_logic.providers.google import GoogleResult
 
@@ -171,111 +168,41 @@ def test_shared_failure_backoff_store_applies_across_fetchers(
     assert attempts == 1
 
 
-def test_supplement_returns_local_example_without_network() -> None:
-    local = Example(en="local paired", ru="локальный перевод")
-
-    async def forbidden_fetch(_url: str) -> str:
-        raise AssertionError("network should not be used")
-
-    async def run() -> None:
-        ipa, example = await _supplement_pronunciation_and_examples_async(
-            text="hello",
-            ipa_uk="/həˈləʊ/",
-            examples=[],
-            source_lang="en",
-            target_lang="ru",
-            fetcher=forbidden_fetch,
-            language_base_examples=[local],
-        )
-        assert ipa == "/həˈləʊ/"
-        assert example == local
-
-    asyncio.run(run())
-
-
-def test_supplement_uses_dictionary_ipa_for_local_example() -> None:
-    local = Example(en="local paired", ru="локальный перевод")
-    dictionary_payload = json.dumps(
-        [
-            {
-                "phonetics": [{"text": "/ipa/"}],
-                "meanings": [],
-            }
-        ]
-    )
-
-    calls = 0
-
-    async def fetcher(url: str) -> str:
-        nonlocal calls
-        calls += 1
-        if "dictionaryapi.dev" not in url:
-            raise FetchError("unexpected url")
-        return dictionary_payload
-
-    async def run() -> None:
-        ipa, example = await _supplement_pronunciation_and_examples_async(
-            text="hello",
-            ipa_uk=None,
-            examples=[],
-            source_lang="en",
-            target_lang="ru",
-            fetcher=fetcher,
-            language_base_examples=[local],
-        )
-        assert ipa == "/ipa/"
-        assert example == local
-
-    asyncio.run(run())
-
-    assert calls == 1
-
-
 def test_cambridge_flow_prefetches_google_for_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cambridge_finished = False
     google_started_before_cambridge_done = False
 
-    async def fake_cambridge(text: str, fetcher: object) -> CambridgeResult:
-        del text, fetcher
+    async def fake_cambridge(_text: str, _fetcher: object) -> CambridgeResult:
         nonlocal cambridge_finished
         await asyncio.sleep(0.05)
         cambridge_finished = True
         return CambridgeResult(
             found=False,
             translations=[],
-            ipa_uk=None,
             examples=[],
         )
 
     async def fake_google(
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        fetcher: object,
+        _text: str,
+        _source_lang: str,
+        _target_lang: str,
+        _fetcher: object,
     ) -> GoogleResult:
-        del text, source_lang, target_lang, fetcher
         nonlocal google_started_before_cambridge_done
         google_started_before_cambridge_done = not cambridge_finished
         return GoogleResult(translations=["перевод"])
-
-    async def fake_supplement(*args: object, **kwargs: object) -> tuple[None, None]:
-        del args, kwargs
-        return None, None
 
     async def fake_fetcher(url: str) -> str:
         raise AssertionError(f"unexpected fetch: {url}")
 
     monkeypatch.setattr(
-        "translate_logic.application.translate.translate_cambridge", fake_cambridge
+        "translate_logic.application.translate._run_cambridge_with_budget",
+        fake_cambridge,
     )
     monkeypatch.setattr(
-        "translate_logic.application.translate.translate_google", fake_google
-    )
-    monkeypatch.setattr(
-        "translate_logic.application.translate._supplement_pronunciation_and_examples_async",
-        fake_supplement,
+        "translate_logic.application.translate._run_google_with_budget", fake_google
     )
 
     async def run() -> None:
@@ -299,31 +226,24 @@ def test_single_char_prefers_google_without_waiting_cambridge(
 ) -> None:
     cambridge_completed = False
 
-    async def slow_cambridge(text: str, fetcher: object) -> CambridgeResult:
-        del text, fetcher
+    async def slow_cambridge(_text: str, _fetcher: object) -> CambridgeResult:
         nonlocal cambridge_completed
         await asyncio.sleep(0.2)
         cambridge_completed = True
         return CambridgeResult(
             found=True,
             translations=["кембридж"],
-            ipa_uk="/ipa/",
             examples=[],
         )
 
     async def fast_google(
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        fetcher: object,
+        _text: str,
+        _source_lang: str,
+        _target_lang: str,
+        _fetcher: object,
     ) -> GoogleResult:
-        del text, source_lang, target_lang, fetcher
         await asyncio.sleep(0.01)
         return GoogleResult(translations=["гугл"])
-
-    async def fake_supplement(*args: object, **kwargs: object) -> tuple[None, None]:
-        del args, kwargs
-        return None, None
 
     async def fake_fetcher(url: str) -> str:
         raise AssertionError(f"unexpected fetch: {url}")
@@ -335,10 +255,6 @@ def test_single_char_prefers_google_without_waiting_cambridge(
     monkeypatch.setattr(
         "translate_logic.application.translate._run_google_with_budget",
         fast_google,
-    )
-    monkeypatch.setattr(
-        "translate_logic.application.translate._supplement_pronunciation_and_examples_async",
-        fake_supplement,
     )
 
     async def run() -> tuple[float, str]:
@@ -364,13 +280,12 @@ def test_single_char_prefers_google_without_waiting_cambridge(
 def test_recover_empty_translation_uses_relaxed_google(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def slow_google(
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        fetcher: object,
+    async def fast_google(
+        _text: str,
+        _source_lang: str,
+        _target_lang: str,
+        _fetcher: object,
     ) -> GoogleResult:
-        del text, source_lang, target_lang, fetcher
         await asyncio.sleep(0.01)
         return GoogleResult(translations=["восстановлено"])
 
@@ -378,7 +293,7 @@ def test_recover_empty_translation_uses_relaxed_google(
         raise AssertionError(f"unexpected fetch: {url}")
 
     monkeypatch.setattr(
-        "translate_logic.application.translate.translate_google", slow_google
+        "translate_logic.application.translate.translate_google", fast_google
     )
 
     async def run() -> str | None:
