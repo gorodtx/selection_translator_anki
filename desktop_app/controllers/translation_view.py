@@ -24,6 +24,8 @@ class TranslationWindowProtocol(Protocol):
 
     def show_banner(self, notification: Notification) -> None: ...
 
+    def clear_banner(self) -> None: ...
+
 
 def _build_window(
     *,
@@ -59,6 +61,7 @@ class TranslationViewCoordinator:
         )
         self._presenter = TranslationPresenter()
         self._visible = False
+        self._last_applied_state: TranslationViewState | None = None
         self._apply_state(self._presenter.state)
 
     @property
@@ -66,6 +69,7 @@ class TranslationViewCoordinator:
         return self._presenter.state
 
     def begin(self, original: str) -> None:
+        self._window.clear_banner()
         self._apply_state(self._presenter.begin(original))
 
     def apply_partial(self, result: TranslationResult) -> None:
@@ -106,4 +110,7 @@ class TranslationViewCoordinator:
         self._window.show_banner(notification)
 
     def _apply_state(self, state: TranslationViewState) -> None:
+        if self._last_applied_state == state:
+            return
         self._window.apply_state(state)
+        self._last_applied_state = state

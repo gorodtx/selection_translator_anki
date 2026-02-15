@@ -27,7 +27,7 @@ class AnkiFieldMap:
     word: str
     translation: str
     example_en: str
-    example_ru: str
+    definitions_en: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +97,7 @@ def _default_config() -> AppConfig:
                 word="",
                 translation="",
                 example_en="",
-                example_ru="",
+                definitions_en="definitions_en",
             ),
         ),
     )
@@ -123,7 +123,9 @@ def _parse_config(payload: JsonValue) -> AppConfig:
         word=_get_str(fields_data.get("word"), "") if fields_data else "",
         translation=_get_str(fields_data.get("translation"), "") if fields_data else "",
         example_en=_get_str(fields_data.get("example_en"), "") if fields_data else "",
-        example_ru=_get_str(fields_data.get("example_ru"), "") if fields_data else "",
+        definitions_en=_get_str(fields_data.get("definitions_en"), "definitions_en")
+        if fields_data
+        else "definitions_en",
     )
     anki = AnkiConfig(
         deck=_get_str(anki_data.get("deck"), "") if anki_data else "",
@@ -155,7 +157,7 @@ def _config_to_dict(config: AppConfig) -> dict[str, JsonValue]:
                 "word": config.anki.fields.word,
                 "translation": config.anki.fields.translation,
                 "example_en": config.anki.fields.example_en,
-                "example_ru": config.anki.fields.example_ru,
+                "definitions_en": config.anki.fields.definitions_en,
             },
         },
     }

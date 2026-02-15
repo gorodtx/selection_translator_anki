@@ -38,6 +38,7 @@ class BannerHost:
         self._label.set_wrap(True)
         self._label.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self._label.set_hexpand(True)
+        self._hide_source_id: int | None = None
 
         box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
@@ -60,13 +61,33 @@ class BannerHost:
     def notify(self, notification: Notification) -> None:
         GLib.idle_add(self._show_notification, notification)
 
+    def clear(self) -> None:
+        GLib.idle_add(self._hide_notification)
+
     def _show_notification(self, notification: Notification) -> bool:
+        self._cancel_hide_timer()
         self._apply_level(notification.level)
         self._label.set_text(notification.message)
         self._revealer.set_reveal_child(True)
+        self._hide_source_id = GLib.timeout_add(1200, self._hide_notification)
+        return False
+
+    def _hide_notification(self) -> bool:
+        self._cancel_hide_timer()
+        self._label.set_text("")
+        self._revealer.set_reveal_child(False)
         return False
 
     def _apply_level(self, level: NotificationLevel) -> None:
         for css_class in _LEVEL_CLASSES.values():
             self._box.remove_css_class(css_class)
         self._box.add_css_class(_LEVEL_CLASSES[level])
+
+    def _cancel_hide_timer(self) -> None:
+        if self._hide_source_id is None:
+            return
+        try:
+            GLib.source_remove(self._hide_source_id)
+        except Exception:
+            pass
+        self._hide_source_id = None

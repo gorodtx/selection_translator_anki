@@ -247,7 +247,7 @@ class SettingsController:
                 word="word",
                 translation="translation",
                 example_en="example_en",
-                example_ru="example_ru",
+                definitions_en="definitions_en",
             )
             model = DEFAULT_MODEL_NAME
         else:
@@ -255,7 +255,7 @@ class SettingsController:
                 word="",
                 translation="",
                 example_en="",
-                example_ru="",
+                definitions_en="",
             )
             model = ""
         self._pending_anki = AnkiConfig(
@@ -398,7 +398,7 @@ class SettingsController:
             word="word",
             translation="translation",
             example_en="example_en",
-            example_ru="example_ru",
+            definitions_en="definitions_en",
         )
         self._pending_anki = AnkiConfig(
             deck=target_deck,

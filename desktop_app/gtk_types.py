@@ -161,6 +161,9 @@ class Gtk:
         def __init__(self, label: str = "") -> None:
             raise NotImplementedError
 
+        def set_markup(self, markup: str) -> None:
+            raise NotImplementedError
+
         def set_text(self, text: str) -> None:
             raise NotImplementedError
 

@@ -51,7 +51,16 @@ def _on_drag_begin(
 def _is_interactive_target(widget: gtk_types.Gtk.Widget, x: float, y: float) -> bool:
     target = widget.pick(x, y, 0)
     while target is not None:
-        if isinstance(target, (Gtk.Button, Gtk.Entry, Gtk.ListBox, Gtk.ListBoxRow)):
+        if isinstance(
+            target,
+            (
+                Gtk.Button,
+                Gtk.Entry,
+                Gtk.Label,
+                Gtk.ListBox,
+                Gtk.ListBoxRow,
+            ),
+        ):
             return True
         target = target.get_parent()
     return False

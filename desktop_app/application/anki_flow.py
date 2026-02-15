@@ -8,6 +8,11 @@ from enum import Enum
 from desktop_app.anki import AnkiAddResult, AnkiCreateModelResult, AnkiListResult
 from desktop_app.application.ports import AnkiPort
 from desktop_app.config import AnkiConfig
+from translate_logic.highlight import (
+    HighlightSpec,
+    build_highlight_spec,
+    highlight_to_html_mark,
+)
 from translate_logic.models import TranslationResult
 
 
@@ -43,7 +48,7 @@ class AnkiFlow:
                 fields.word,
                 fields.translation,
                 fields.example_en,
-                fields.example_ru,
+                fields.definitions_en,
             ]
         )
 
@@ -51,12 +56,16 @@ class AnkiFlow:
         self, config: AnkiConfig, original_text: str, result: TranslationResult
     ) -> dict[str, str]:
         fields = config.fields
-        return {
+        highlight_spec = build_highlight_spec(original_text)
+        example_en = _all_examples_html(result, highlight_spec)
+        definitions_en = _format_definitions_html(result, highlight_spec)
+        payload = {
             fields.word: original_text,
             fields.translation: result.translation_ru.text,
-            fields.example_en: result.example_en.text,
-            fields.example_ru: result.example_ru.text,
+            fields.example_en: example_en,
+            fields.definitions_en: definitions_en,
         }
+        return payload
 
     def add_note(
         self,
@@ -110,3 +119,25 @@ class AnkiFlow:
             on_done(AnkiResult(outcome=AnkiOutcome.UNAVAILABLE, message=message))
             return
         on_done(AnkiResult(outcome=AnkiOutcome.ERROR, message=message))
+
+
+def _format_definitions_html(
+    result: TranslationResult, highlight_spec: HighlightSpec
+) -> str:
+    if not result.definitions_en:
+        return ""
+    lines: list[str] = []
+    for index, definition in enumerate(result.definitions_en, start=1):
+        highlighted = highlight_to_html_mark(definition, highlight_spec, class_name="hl")
+        lines.append(f"{index}. {highlighted}")
+    return "<br>".join(lines)
+
+
+def _all_examples_html(result: TranslationResult, highlight_spec: HighlightSpec) -> str:
+    if not result.examples:
+        return ""
+    lines: list[str] = []
+    for index, example in enumerate(result.examples, start=1):
+        highlighted = highlight_to_html_mark(example.en, highlight_spec, class_name="hl")
+        lines.append(f"{index}. {highlighted}")
+    return "<br>".join(lines)

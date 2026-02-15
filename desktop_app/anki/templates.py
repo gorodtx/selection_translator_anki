@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 DEFAULT_MODEL_NAME = "Translator"
-DEFAULT_MODEL_FIELDS = ["word", "translation", "example_en", "example_ru"]
+DEFAULT_MODEL_FIELDS = [
+    "word",
+    "translation",
+    "example_en",
+    "definitions_en",
+]
 
 DEFAULT_FRONT_TEMPLATE = """
 <div class="eng">{{word}}</div>
@@ -18,9 +23,9 @@ DEFAULT_BACK_TEMPLATE = """
 
 <div class="ru">{{translation}}</div>
 
-{{#example_ru}}
-  <div class="ex ex-ru">{{example_ru}}</div>
-{{/example_ru}}
+{{#definitions_en}}
+  <div class="ex ex-def">{{definitions_en}}</div>
+{{/definitions_en}}
 """.strip()
 
 DEFAULT_MODEL_CSS = """
@@ -56,6 +61,14 @@ DEFAULT_MODEL_CSS = """
   border-top: 4px solid #ccc;
   display: inline-block;
   max-width: 90%;
+}
+
+.hl,
+mark {
+  background: #fff4a8;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 0.08em;
 }
 
 #answer {

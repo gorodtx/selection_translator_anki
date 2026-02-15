@@ -43,6 +43,7 @@ def apply_theme() -> None:
         .original { font-weight: 600; font-size: 1.05em; }
         .translation { font-size: 1.1em; color: #e6e6e6; }
         .example { font-size: 1.1em; color: #e6e6e6; }
+        .definition { font-size: 1.02em; color: #cdd7ff; }
         .history-title { font-weight: 600; font-size: 1.1em; }
         .history-original { font-weight: 600; }
         .banner {

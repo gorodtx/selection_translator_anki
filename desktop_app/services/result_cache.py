@@ -32,3 +32,7 @@ class ResultCache:
         self._items.move_to_end(key)
         while len(self._items) > self.max_entries:
             self._items.popitem(last=False)
+
+    def delete(self, key: str) -> None:
+        if key in self._items:
+            self._items.pop(key, None)

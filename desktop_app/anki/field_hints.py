@@ -4,10 +4,10 @@ FIELD_HINTS: dict[str, list[str]] = {
     "word": ["word", "front", "expression", "term"],
     "translation": ["translation", "meaning", "ru"],
     "example_en": ["example", "sentence", "en"],
-    "example_ru": ["example_ru", "ru_example", "translation_example"],
+    "definitions_en": ["definition", "definitions", "gloss", "definition_en"],
 }
 
-REQUIRED_FIELD_KEYS = ("word", "translation", "example_en", "example_ru")
+REQUIRED_FIELD_KEYS = ("word", "translation", "example_en", "definitions_en")
 
 
 def score_field_match(fields: list[str]) -> tuple[int, int]:

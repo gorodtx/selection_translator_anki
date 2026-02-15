@@ -16,6 +16,7 @@ from .translation_view import TranslationViewCoordinator
 from desktop_app.notifications import Notification
 from desktop_app.notifications import messages as notify_messages
 from desktop_app import gtk_types
+from translate_logic.highlight import build_highlight_spec, highlight_to_markdown
 from translate_logic.models import TranslationResult, TranslationStatus
 
 gi = importlib.import_module("gi")
@@ -88,9 +89,8 @@ class TranslationController:
         hotkey: bool = False,
         source: str = "dbus",
     ) -> None:
-        request_id = self._next_request_id()
-        if prepare and not silent:
-            self._prepare_request()
+        del hotkey
+        del source
         normalized = text.strip() if text else ""
         if not normalized:
             return
@@ -100,6 +100,10 @@ class TranslationController:
                 self._view.apply_final(self._state.memory.result)
             self._present_window()
             return
+        self.cancel_tasks()
+        request_id = self._next_request_id()
+        if prepare and not silent:
+            self._prepare_request()
         prepared = self._translation_executor.prepare(text)
         if prepared is None:
             return
@@ -155,8 +159,6 @@ class TranslationController:
                 return
             self._state.memory.update(display_text, None)
             self._view.begin(display_text)
-            if self._translation_future is not None:
-                self._translation_future.cancel()
 
         def on_partial(result: TranslationResult) -> None:
             GLib.idle_add(self._apply_partial_result, request_id, result)
@@ -219,14 +221,21 @@ class TranslationController:
             return
         lines: list[str] = []
         original = self._state.memory.text.strip()
+        highlight_spec = build_highlight_spec(original)
         if original:
             lines.append(f"Original: {original}")
         if result.translation_ru.is_present:
             lines.append(f"Translation: {result.translation_ru.text}")
-        if result.example_en.is_present:
-            lines.append(f"Example EN: {result.example_en.text}")
-        if result.example_ru.is_present:
-            lines.append(f"Example RU: {result.example_ru.text}")
+        if result.definitions_en:
+            lines.append("Definitions EN:")
+            for index, definition in enumerate(result.definitions_en, start=1):
+                highlighted = highlight_to_markdown(definition, highlight_spec)
+                lines.append(f"{index}. {highlighted}")
+        if result.examples:
+            lines.append("Examples:")
+            for index, example in enumerate(result.examples, start=1):
+                highlighted = highlight_to_markdown(example.en, highlight_spec)
+                lines.append(f"{index}. EN: {highlighted}")
         if not lines:
             return
         self._copy_text("\n".join(lines))

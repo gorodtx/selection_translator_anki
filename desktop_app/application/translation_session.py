@@ -4,7 +4,7 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
 
-from translate_logic.models import FieldValue, TranslationResult, TranslationStatus
+from translate_logic.models import TranslationResult, TranslationStatus
 
 
 @dataclass(slots=True)
@@ -26,8 +26,8 @@ class TranslationSession:
             self.on_partial(
                 TranslationResult(
                     translation_ru=result.translation_ru,
-                    example_en=FieldValue.missing(),
-                    example_ru=FieldValue.missing(),
+                    definitions_en=(),
+                    examples=(),
                 )
             )
 

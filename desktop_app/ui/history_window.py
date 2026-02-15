@@ -8,7 +8,8 @@ from desktop_app.application.history import HistoryItem
 from desktop_app.ui.drag import attach_window_drag
 from desktop_app.ui.theme import apply_theme
 from desktop_app import gtk_types
-from translate_logic.models import TranslationStatus
+from translate_logic.highlight import build_highlight_spec, highlight_to_pango_markup
+from translate_logic.models import Example, TranslationStatus
 
 gi = importlib.import_module("gi")
 require_version = getattr(gi, "require_version", None)
@@ -90,23 +91,7 @@ class HistoryWindow:
             if item.result.status is not TranslationStatus.SUCCESS:
                 continue
             filtered.append(item)
-        if len(filtered) == len(self._rows):
-            self._items = filtered
-            for row_data, item in zip(self._rows, filtered, strict=True):
-                current = row_data.item
-                _set_label_text(row_data.original, current.text, item.text)
-                _set_label_text(
-                    row_data.translation,
-                    current.result.translation_ru.text,
-                    item.result.translation_ru.text,
-                )
-                row_data.item = item
-            return
-        child = self._list_box.get_first_child()
-        while child is not None:
-            next_child = child.get_next_sibling()
-            self._list_box.remove(child)
-            child = next_child
+        self._clear_children(self._list_box)
         self._items = filtered
         self._rows = []
         for item in filtered:
@@ -125,15 +110,44 @@ class HistoryWindow:
             translation.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
             translation.set_max_width_chars(48)
 
+            definition_text = _definition_preview(item)
+            definition_spec = build_highlight_spec(item.text)
+            definition = Gtk.Label(label="")
+            definition.set_xalign(0.0)
+            definition.set_wrap(True)
+            definition.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            definition.set_max_width_chars(48)
+            definition.set_selectable(True)
+            definition.add_css_class("definition")
+            definition.set_visible(bool(definition_text))
+            if definition_text:
+                definition.set_markup(
+                    highlight_to_pango_markup(definition_text, definition_spec)
+                )
+            else:
+                definition.set_text("")
+
+            examples_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+
             container.append(original)
             container.append(translation)
+            container.append(definition)
+            container.append(examples_row)
             row.set_child(container)
             row_data = _HistoryRow(
                 row=row,
                 original=original,
                 translation=translation,
+                definition=definition,
+                examples=(),
                 item=item,
             )
+            row_data.examples = self._build_examples(
+                examples_row=examples_row,
+                examples=list(item.result.examples)[:3],
+                query=item.text,
+            )
+            examples_row.set_visible(bool(row_data.examples))
             gesture = Gtk.GestureClick()
             gesture.connect("released", self._handle_row_click, row_data)
             row.add_controller(gesture)
@@ -164,15 +178,64 @@ class HistoryWindow:
         if hasattr(self._list_box, "unselect_all"):
             self._list_box.unselect_all()
 
+    def _build_examples(
+        self,
+        *,
+        examples_row: gtk_types.Gtk.Box,
+        examples: list[Example],
+        query: str,
+    ) -> tuple["_HistoryExampleRow", ...]:
+        built: list[_HistoryExampleRow] = []
+        spec = build_highlight_spec(query)
+        for example in examples:
+            en = example.en.strip()
+            if not en:
+                continue
+            example_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+
+            en_label = Gtk.Label(label="")
+            en_label.set_xalign(0.0)
+            en_label.set_wrap(True)
+            en_label.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            en_label.set_max_width_chars(48)
+            en_label.set_selectable(True)
+            en_label.add_css_class("example")
+            en_label.set_markup(highlight_to_pango_markup(en, spec))
+
+            example_box.append(en_label)
+            examples_row.append(example_box)
+            built.append(
+                _HistoryExampleRow(
+                    en_label=en_label,
+                )
+            )
+        return tuple(built)
+
+    def _clear_children(self, container: gtk_types.Gtk.ListBox) -> None:
+        child = container.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            container.remove(child)
+            child = next_child
+
 
 @dataclass(slots=True)
 class _HistoryRow:
     row: gtk_types.Gtk.ListBoxRow
     original: gtk_types.Gtk.Label
     translation: gtk_types.Gtk.Label
+    definition: gtk_types.Gtk.Label
+    examples: tuple["_HistoryExampleRow", ...]
     item: HistoryItem
 
 
-def _set_label_text(label: gtk_types.Gtk.Label, current: str, value: str) -> None:
-    if current != value:
-        label.set_text(value)
+@dataclass(slots=True)
+class _HistoryExampleRow:
+    en_label: gtk_types.Gtk.Label
+
+
+def _definition_preview(item: HistoryItem) -> str:
+    definitions = item.result.definitions_en
+    if not definitions:
+        return ""
+    return f"Definition EN: {definitions[0]}"

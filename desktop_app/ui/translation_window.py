@@ -8,6 +8,7 @@ from desktop_app.notifications import BannerHost, Notification
 from desktop_app.ui.drag import attach_window_drag
 from desktop_app.ui.theme import apply_theme
 from desktop_app import gtk_types
+from translate_logic.highlight import build_highlight_spec, highlight_to_pango_markup
 
 gi = importlib.import_module("gi")
 require_version = getattr(gi, "require_version", None)
@@ -73,19 +74,13 @@ class TranslationWindow:
         self._label_translation.set_max_width_chars(max_label_chars)
         self._label_translation.add_css_class("translation")
 
-        self._label_example_en = Gtk.Label(label="")
-        self._label_example_en.set_xalign(0.0)
-        self._label_example_en.set_wrap(True)
-        self._label_example_en.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._label_example_en.set_max_width_chars(max_label_chars)
-        self._label_example_en.add_css_class("example")
-
-        self._label_example_ru = Gtk.Label(label="")
-        self._label_example_ru.set_xalign(0.0)
-        self._label_example_ru.set_wrap(True)
-        self._label_example_ru.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._label_example_ru.set_max_width_chars(max_label_chars)
-        self._label_example_ru.add_css_class("example")
+        self._label_definitions = Gtk.Label(label="")
+        self._label_definitions.set_xalign(0.0)
+        self._label_definitions.set_wrap(True)
+        self._label_definitions.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._label_definitions.set_max_width_chars(max_label_chars)
+        self._label_definitions.set_selectable(True)
+        self._label_definitions.add_css_class("definition")
 
         self._add_button = Gtk.Button(label="Add to Anki")
         self._add_button.set_sensitive(False)
@@ -106,15 +101,15 @@ class TranslationWindow:
         self._sep_after_translation = Gtk.Separator(
             orientation=Gtk.Orientation.HORIZONTAL
         )
-        self._row_example_en = self._field_row(self._label_example_en)
-        self._row_example_ru = self._field_row(self._label_example_ru)
+        self._row_definitions = self._field_row(self._label_definitions)
+        self._row_examples = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._sep_before_actions = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
 
         root.append(header)
         root.append(self._row_translation)
         root.append(self._sep_after_translation)
-        root.append(self._row_example_en)
-        root.append(self._row_example_ru)
+        root.append(self._row_definitions)
+        root.append(self._row_examples)
         root.append(self._sep_before_actions)
         root.append(actions)
 
@@ -123,6 +118,7 @@ class TranslationWindow:
         apply_theme()
 
         self._window = window
+        self._rendered_state: TranslationViewState | None = None
         self._apply_state(TranslationViewState.empty())
 
     @property
@@ -141,44 +137,152 @@ class TranslationWindow:
     def show_banner(self, notification: Notification) -> None:
         self._banner.notify(notification)
 
+    def clear_banner(self) -> None:
+        self._banner.clear()
+
     def _apply_state(self, state: TranslationViewState) -> None:
-        self._label_original.set_text(state.original)
-        self._label_translation.set_text(state.translation)
-        self._label_example_en.set_text(state.example_en)
-        self._label_example_ru.set_text(state.example_ru)
-        if state.loading:
-            self._spinner.set_visible(True)
-            self._spinner.start()
-        else:
-            self._spinner.stop()
-            self._spinner.set_visible(False)
+        previous = self._rendered_state
+        if previous == state:
+            return
+
+        if previous is None or state.original != previous.original:
+            self._label_original.set_text(state.original)
+        if previous is None or state.translation != previous.translation:
+            self._label_translation.set_text(state.translation)
+        if (
+            previous is None
+            or state.definitions_items != previous.definitions_items
+            or state.original_raw != previous.original_raw
+        ):
+            self._render_definitions(state)
+        if (
+            previous is None
+            or state.examples != previous.examples
+            or state.original_raw != previous.original_raw
+        ):
+            self._render_examples(state)
+
+        if previous is None or state.loading != previous.loading:
+            if state.loading:
+                self._spinner.set_visible(True)
+                self._spinner.start()
+            else:
+                self._spinner.stop()
+                self._spinner.set_visible(False)
         header_visible = bool(state.original.strip()) or state.loading
-        self._header_row.set_visible(header_visible)
+        previous_header_visible = (
+            None
+            if previous is None
+            else bool(previous.original.strip()) or previous.loading
+        )
+        if previous is None or header_visible != previous_header_visible:
+            self._header_row.set_visible(header_visible)
 
         translation_visible = bool(state.translation.strip())
-        example_en_visible = bool(state.example_en.strip())
-        example_ru_visible = bool(state.example_ru.strip())
-
-        self._row_translation.set_visible(translation_visible)
-        self._row_example_en.set_visible(example_en_visible)
-        self._row_example_ru.set_visible(example_ru_visible)
-
-        self._sep_after_translation.set_visible(
-            translation_visible and (example_en_visible or example_ru_visible)
+        definitions_visible = bool(state.definitions_items)
+        examples_visible = bool(state.examples)
+        previous_translation_visible = (
+            None if previous is None else bool(previous.translation.strip())
         )
-        self._sep_before_actions.set_visible(
-            translation_visible or example_en_visible or example_ru_visible
+        previous_definitions_visible = (
+            None if previous is None else bool(previous.definitions_items)
         )
+        previous_examples_visible = None if previous is None else bool(previous.examples)
 
-        self._add_button.set_sensitive(state.can_add_anki)
-        self._copy_all_button.set_sensitive(bool(state.translation.strip()))
+        if previous is None or translation_visible != previous_translation_visible:
+            self._row_translation.set_visible(translation_visible)
+        if previous is None or definitions_visible != previous_definitions_visible:
+            self._row_definitions.set_visible(definitions_visible)
+        if previous is None or examples_visible != previous_examples_visible:
+            self._row_examples.set_visible(examples_visible)
+
+        sep_after_translation_visible = translation_visible and (
+            definitions_visible or examples_visible
+        )
+        previous_sep_after_translation_visible = (
+            None
+            if previous is None
+            else bool(previous.translation.strip())
+            and (bool(previous.definitions_items) or bool(previous.examples))
+        )
+        if (
+            previous is None
+            or sep_after_translation_visible != previous_sep_after_translation_visible
+        ):
+            self._sep_after_translation.set_visible(sep_after_translation_visible)
+
+        sep_before_actions_visible = (
+            translation_visible
+            or definitions_visible
+            or examples_visible
+        )
+        previous_sep_before_actions_visible = (
+            None
+            if previous is None
+            else bool(previous.translation.strip())
+            or bool(previous.definitions_items)
+            or bool(previous.examples)
+        )
+        if (
+            previous is None
+            or sep_before_actions_visible != previous_sep_before_actions_visible
+        ):
+            self._sep_before_actions.set_visible(sep_before_actions_visible)
+
+        if previous is None or state.can_add_anki != previous.can_add_anki:
+            self._add_button.set_sensitive(state.can_add_anki)
+        copy_all_sensitive = bool(state.translation.strip())
+        previous_copy_all_sensitive = (
+            None if previous is None else bool(previous.translation.strip())
+        )
+        if previous is None or copy_all_sensitive != previous_copy_all_sensitive:
+            self._copy_all_button.set_sensitive(copy_all_sensitive)
+
         self._window.set_cursor(None)
+        self._rendered_state = state
 
     def _field_row(self, label: gtk_types.Gtk.Label) -> gtk_types.Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         label.set_xalign(0.0)
         row.append(label)
         return row
+
+    def _render_examples(self, state: TranslationViewState) -> None:
+        self._clear_children(self._row_examples)
+        spec = build_highlight_spec(state.original_raw)
+        for item in state.examples:
+            example_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+
+            en_label = Gtk.Label(label="")
+            en_label.set_xalign(0.0)
+            en_label.set_wrap(True)
+            en_label.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            en_label.set_max_width_chars(24)
+            en_label.set_hexpand(True)
+            en_label.set_selectable(True)
+            en_label.add_css_class("example")
+            en_label.set_markup(highlight_to_pango_markup(item.en, spec))
+
+            example_box.append(en_label)
+            self._row_examples.append(example_box)
+
+    def _render_definitions(self, state: TranslationViewState) -> None:
+        if not state.definitions_items:
+            self._label_definitions.set_text("")
+            return
+        spec = build_highlight_spec(state.original_raw)
+        lines: list[str] = []
+        for index, definition in enumerate(state.definitions_items, start=1):
+            rendered = highlight_to_pango_markup(definition, spec)
+            lines.append(f"{index}. {rendered}")
+        self._label_definitions.set_markup("\n".join(lines))
+
+    def _clear_children(self, container: gtk_types.Gtk.Box) -> None:
+        child = container.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            container.remove(child)
+            child = next_child
 
     def _handle_close_request(self, _window: object) -> bool:
         self._on_close_cb()

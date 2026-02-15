@@ -2,17 +2,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from translate_logic.models import TranslationResult, TranslationStatus
+from translate_logic.models import Example, TranslationResult, TranslationStatus
 
 WRAP_LIMIT = 85
 
 
 @dataclass(frozen=True, slots=True)
+class ExampleViewItem:
+    en: str
+
+
+@dataclass(frozen=True, slots=True)
 class TranslationViewState:
     original: str
+    original_raw: str
     translation: str
-    example_en: str
-    example_ru: str
+    definitions_en: str
+    definitions_items: tuple[str, ...]
+    examples: tuple[ExampleViewItem, ...]
     loading: bool
     can_add_anki: bool
 
@@ -20,9 +27,11 @@ class TranslationViewState:
     def empty(cls) -> "TranslationViewState":
         return cls(
             original="",
+            original_raw="",
             translation="",
-            example_en="",
-            example_ru="",
+            definitions_en="",
+            definitions_items=(),
+            examples=(),
             loading=False,
             can_add_anki=False,
         )
@@ -40,9 +49,11 @@ class TranslationPresenter:
     def begin(self, original: str) -> TranslationViewState:
         self._state = TranslationViewState(
             original=_wrap_text(original),
+            original_raw=original,
             translation="",
-            example_en="",
-            example_ru="",
+            definitions_en="",
+            definitions_items=(),
+            examples=(),
             loading=True,
             can_add_anki=False,
         )
@@ -56,9 +67,11 @@ class TranslationPresenter:
         translation = _wrap_text(result.translation_ru.text)
         self._state = TranslationViewState(
             original=self._state.original,
+            original_raw=self._state.original_raw,
             translation=translation,
-            example_en="",
-            example_ru="",
+            definitions_en="",
+            definitions_items=(),
+            examples=(),
             loading=True,
             can_add_anki=False,
         )
@@ -70,9 +83,11 @@ class TranslationPresenter:
         can_add = self._can_add(translation=translation, loading=loading)
         self._state = TranslationViewState(
             original=self._state.original,
+            original_raw=self._state.original_raw,
             translation=translation,
-            example_en=_wrap_text(result.example_en.text),
-            example_ru=_wrap_text(result.example_ru.text),
+            definitions_en=_format_definitions(result.definitions_en),
+            definitions_items=tuple(result.definitions_en),
+            examples=_format_examples(result),
             loading=loading,
             can_add_anki=can_add,
         )
@@ -83,9 +98,11 @@ class TranslationPresenter:
         loading = False
         self._state = TranslationViewState(
             original=self._state.original,
+            original_raw=self._state.original_raw,
             translation=translation,
-            example_en=self._state.example_en,
-            example_ru=self._state.example_ru,
+            definitions_en=self._state.definitions_en,
+            definitions_items=self._state.definitions_items,
+            examples=self._state.examples,
             loading=loading,
             can_add_anki=self._can_add(translation=translation, loading=loading),
         )
@@ -96,9 +113,11 @@ class TranslationPresenter:
         translation = self._state.translation
         self._state = TranslationViewState(
             original=self._state.original,
+            original_raw=self._state.original_raw,
             translation=translation,
-            example_en=self._state.example_en,
-            example_ru=self._state.example_ru,
+            definitions_en=self._state.definitions_en,
+            definitions_items=self._state.definitions_items,
+            examples=self._state.examples,
             loading=self._state.loading,
             can_add_anki=self._can_add(
                 translation=translation, loading=self._state.loading
@@ -109,9 +128,11 @@ class TranslationPresenter:
     def reset_original(self, original: str) -> TranslationViewState:
         self._state = TranslationViewState(
             original=_wrap_text(original),
+            original_raw=original,
             translation=self._state.translation,
-            example_en=self._state.example_en,
-            example_ru=self._state.example_ru,
+            definitions_en=self._state.definitions_en,
+            definitions_items=self._state.definitions_items,
+            examples=self._state.examples,
             loading=self._state.loading,
             can_add_anki=self._state.can_add_anki,
         )
@@ -142,3 +163,32 @@ def _wrap_text(value: str) -> str:
             remaining = remaining[WRAP_LIMIT:]
         lines.append(remaining)
     return "\n".join(lines)
+
+
+def _format_definitions(definitions: tuple[str, ...]) -> str:
+    if not definitions:
+        return ""
+    lines: list[str] = []
+    for index, definition in enumerate(definitions, start=1):
+        wrapped = _wrap_text(definition)
+        if not wrapped:
+            continue
+        lines.append(f"{index}. {wrapped}")
+    return "\n".join(lines)
+
+
+def _format_examples(result: TranslationResult) -> tuple[ExampleViewItem, ...]:
+    examples: list[Example] = list(result.examples)
+    if not examples:
+        return ()
+    rows: list[ExampleViewItem] = []
+    for example in examples[:3]:
+        en = example.en
+        if not en:
+            continue
+        rows.append(
+            ExampleViewItem(
+                en=en,
+            )
+        )
+    return tuple(rows)
