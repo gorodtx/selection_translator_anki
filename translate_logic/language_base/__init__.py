@@ -15,6 +15,10 @@ from translate_logic.language_base.provider import (
     default_fallback_language_base_path as default_fallback_language_base_path,
     default_language_base_path as default_language_base_path,
 )
+from translate_logic.language_base.definitions_provider import (
+    DefinitionsBaseProvider as DefinitionsBaseProvider,
+    default_definitions_base_path as default_definitions_base_path,
+)
 from translate_logic.language_base.multi_provider import (
     MultiLanguageBaseProvider as MultiLanguageBaseProvider,
 )

@@ -14,6 +14,7 @@ import aiohttp
 from translate_logic.cache import HttpCache
 from translate_logic.domain import rules
 from translate_logic.domain.policies import SourcePolicy
+from translate_logic.example_selection import select_diverse_examples
 from translate_logic.http import (
     MAX_FAILURE_BACKOFF_ENTRIES,
     AsyncFetcher,
@@ -21,6 +22,7 @@ from translate_logic.http import (
     build_async_fetcher,
 )
 from translate_logic.language_base.base import LanguageBase
+from translate_logic.language_base.definitions_base import DefinitionsBase
 from translate_logic.models import (
     Example,
     FieldValue,
@@ -34,7 +36,7 @@ from translate_logic.ranking import (
     extract_ranked_texts,
     rank_translation_candidates,
 )
-from translate_logic.text import count_words, normalize_text
+from translate_logic.text import count_words, normalize_text, normalize_whitespace
 from translate_logic.translation import (
     limit_translations,
     merge_translations,
@@ -44,7 +46,7 @@ from translate_logic.translation import (
 
 DEFAULT_CACHE = HttpCache()
 _POLICY = SourcePolicy()
-_LANGUAGE_BASE_EXAMPLE_LIMIT = 3
+_LANGUAGE_BASE_EXAMPLE_LIMIT = 4
 _LANGUAGE_BASE_EXECUTOR: Final[ThreadPoolExecutor] = ThreadPoolExecutor(
     max_workers=1,
     thread_name_prefix="translator-langbase",
@@ -78,6 +80,9 @@ _HIGH_AMBIGUITY_TOKENS: Final[set[str]] = {"a", "i", "x"}
 _GOOGLE_AUGMENT_TIMEOUT_S: Final[float] = 0.35
 _GOOGLE_RECOVERY_TIMEOUT_S: Final[float] = 2.2
 _CAMBRIDGE_PRIMARY_WAIT_S: Final[float] = 0.25
+_DEFINITIONS_LIMIT: Final[int] = 5
+_DEFINITIONS_PRIMARY_LIMIT: Final[int] = 5
+_DEFINITIONS_QUERY_MAX_WORDS: Final[int] = 5
 
 
 def build_latency_fetcher(
@@ -102,11 +107,18 @@ async def translate_async(
     target_lang: str = "ru",
     fetcher: AsyncFetcher | None = None,
     language_base: LanguageBase | None = None,
+    definitions_base: DefinitionsBase | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     if fetcher is not None:
         return await _translate_with_fetcher_async(
-            text, source_lang, target_lang, fetcher, language_base, on_partial
+            text,
+            source_lang,
+            target_lang,
+            fetcher,
+            language_base,
+            definitions_base,
+            on_partial,
         )
     async with aiohttp.ClientSession() as session:
         async_fetcher = build_latency_fetcher(session, cache=DEFAULT_CACHE)
@@ -116,6 +128,7 @@ async def translate_async(
             target_lang,
             async_fetcher,
             language_base,
+            definitions_base,
             on_partial,
         )
 
@@ -126,6 +139,7 @@ async def _translate_with_fetcher_async(
     target_lang: str,
     fetcher: AsyncFetcher,
     language_base: LanguageBase | None = None,
+    definitions_base: DefinitionsBase | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     started = time.perf_counter()
@@ -137,6 +151,10 @@ async def _translate_with_fetcher_async(
             text=normalized_text,
             language_base=language_base,
         )
+        definitions_base_defs = await _definitions_base_defs_async(
+            text=normalized_text,
+            definitions_base=definitions_base,
+        )
 
         if _prefer_google_primary(normalized_text):
             return await _translate_google_primary_with_cambridge_best_effort_async(
@@ -145,6 +163,7 @@ async def _translate_with_fetcher_async(
                 target_lang,
                 fetcher,
                 language_base_examples,
+                definitions_base_defs,
                 on_partial,
             )
 
@@ -174,10 +193,20 @@ async def _translate_with_fetcher_async(
                 secondary_translations=[],
             )
             _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+            examples_list = _merge_examples(
+                primary=filter_examples([]),
+                fallback=language_base_examples,
+            )
+            network_definitions = _merge_definition_sources(
+                google_result.definitions_en
+            )
             return _build_result(
                 translation_ru,
-                _pick_preferred_example(None, language_base_examples),
-                language_base_examples=language_base_examples,
+                examples=examples_list,
+                definitions_en=_merge_definitions(
+                    primary=network_definitions,
+                    fallback=definitions_base_defs,
+                ),
             )
 
         google_prefetch_task: asyncio.Task[GoogleResult] = asyncio.create_task(
@@ -208,15 +237,28 @@ async def _translate_with_fetcher_async(
                 prefetched_google_result=prefetched_google_result,
             )
             _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+            examples_list = _merge_examples(
+                primary=filter_examples([]),
+                fallback=language_base_examples,
+            )
+            network_definitions = _merge_definition_sources(
+                prefetched_google_result.definitions_en
+                if prefetched_google_result is not None
+                else []
+            )
             return _build_result(
                 translation_ru,
-                _pick_preferred_example(None, language_base_examples),
-                language_base_examples=language_base_examples,
+                examples=examples_list,
+                definitions_en=_merge_definitions(
+                    primary=network_definitions,
+                    fallback=definitions_base_defs,
+                ),
             )
 
         cambridge_non_meta, cambridge_meta = partition_translations(
             cambridge_result.translations
         )
+        google_result_for_defs: GoogleResult | None = None
         google_candidates: list[str] = []
         if _needs_more_variants(cambridge_non_meta):
             google_result = await _await_google_prefetch(
@@ -224,6 +266,7 @@ async def _translate_with_fetcher_async(
                 timeout_s=_GOOGLE_AUGMENT_TIMEOUT_S,
             )
             if google_result is not None:
+                google_result_for_defs = google_result
                 google_candidates = select_translation_candidates(
                     google_result.translations
                 )
@@ -250,14 +293,25 @@ async def _translate_with_fetcher_async(
         )
         _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
 
-        example = _pick_preferred_example(
-            _select_any_example(filter_examples(cambridge_result.examples)),
-            language_base_examples,
+        examples_list = _merge_examples(
+            primary=filter_examples(cambridge_result.examples),
+            fallback=language_base_examples,
+        )
+        network_definitions = _merge_definition_sources(
+            cambridge_result.definitions_en,
+            (
+                google_result_for_defs.definitions_en
+                if google_result_for_defs is not None
+                else []
+            ),
         )
         return _build_result(
             translation_ru,
-            example,
-            language_base_examples=language_base_examples,
+            examples=examples_list,
+            definitions_en=_merge_definitions(
+                primary=network_definitions,
+                fallback=definitions_base_defs,
+            ),
         )
     finally:
         _log_total_elapsed(_elapsed_ms(started))
@@ -269,6 +323,7 @@ async def _translate_google_primary_with_cambridge_best_effort_async(
     target_lang: str,
     fetcher: AsyncFetcher,
     language_base_examples: list[Example],
+    definitions_base_defs: list[str],
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     cambridge_task = asyncio.create_task(_run_cambridge_with_budget(text, fetcher))
@@ -284,6 +339,7 @@ async def _translate_google_primary_with_cambridge_best_effort_async(
         found=False,
         translations=[],
         examples=[],
+        definitions_en=[],
     )
     if cambridge_task.done():
         with suppress(Exception):
@@ -302,14 +358,21 @@ async def _translate_google_primary_with_cambridge_best_effort_async(
     )
     _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
 
-    example = _pick_preferred_example(
-        _select_any_example(filter_examples(cambridge_result.examples)),
-        language_base_examples,
+    examples_list = _merge_examples(
+        primary=filter_examples(cambridge_result.examples),
+        fallback=language_base_examples,
+    )
+    network_definitions = _merge_definition_sources(
+        cambridge_result.definitions_en,
+        google_result.definitions_en,
     )
     return _build_result(
         translation_ru,
-        example,
-        language_base_examples=language_base_examples,
+        examples=examples_list,
+        definitions_en=_merge_definitions(
+            primary=network_definitions,
+            fallback=definitions_base_defs,
+        ),
     )
 
 
@@ -437,12 +500,14 @@ async def _run_cambridge_with_budget(
             found=False,
             translations=[],
             examples=[],
+            definitions_en=[],
         )
     except Exception:
         return CambridgeResult(
             found=False,
             translations=[],
             examples=[],
+            definitions_en=[],
         )
     finally:
         _log_provider_elapsed("cambridge", _elapsed_ms(started), timed_out)
@@ -463,9 +528,9 @@ async def _run_google_with_budget(
         )
     except TimeoutError:
         timed_out = True
-        return GoogleResult(translations=[])
+        return GoogleResult(translations=[], definitions_en=[])
     except Exception:
-        return GoogleResult(translations=[])
+        return GoogleResult(translations=[], definitions_en=[])
     finally:
         _log_provider_elapsed("google", _elapsed_ms(started), timed_out)
 
@@ -533,24 +598,10 @@ def _emit_partial(
     on_partial(
         TranslationResult(
             translation_ru=translation_ru,
-            example_en=FieldValue.missing(),
-            example_ru=FieldValue.missing(),
+            definitions_en=(),
+            examples=(),
         )
     )
-
-
-def _select_example_with_ru(examples: list[Example]) -> Example | None:
-    for example in examples:
-        if example.ru:
-            return example
-    return None
-
-
-def _select_any_example(examples: list[Example]) -> Example | None:
-    if examples:
-        return examples[0]
-    return None
-
 
 def _needs_more_variants(translations: list[str]) -> bool:
     unique = merge_translations(translations, [])
@@ -560,19 +611,15 @@ def _needs_more_variants(translations: list[str]) -> bool:
 
 def _build_result(
     translation_ru: str | None,
-    example: Example | None,
     *,
-    language_base_examples: list[Example],
+    examples: list[Example] | None = None,
+    definitions_en: list[str] | None = None,
 ) -> TranslationResult:
-    preferred_example = _pick_preferred_example(example, language_base_examples)
+    resolved_examples = examples or []
     return TranslationResult(
         translation_ru=FieldValue.from_optional(translation_ru),
-        example_en=FieldValue.from_optional(
-            preferred_example.en if preferred_example else None
-        ),
-        example_ru=FieldValue.from_optional(
-            preferred_example.ru if preferred_example else None
-        ),
+        definitions_en=_normalize_definitions(definitions_en),
+        examples=tuple(resolved_examples),
     )
 
 
@@ -580,17 +627,47 @@ def filter_examples(examples: list[Example]) -> list[Example]:
     return [example for example in examples if rules.is_example_candidate(example.en)]
 
 
-def _pick_preferred_example(
-    current: Example | None,
-    language_base_examples: list[Example],
-) -> Example | None:
-    paired = _select_example_with_ru(language_base_examples)
-    if paired is not None:
-        return paired
-    fallback = _select_any_example(language_base_examples)
-    if fallback is not None:
+def _merge_definitions(*, primary: list[str], fallback: list[str]) -> list[str]:
+    if not primary:
         return fallback
-    return current
+    if not fallback:
+        return primary
+    return [*primary, *fallback]
+
+
+def _merge_definition_sources(*sources: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        for item in source:
+            normalized = normalize_whitespace(item)
+            if not normalized:
+                continue
+            key = normalized.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(normalized)
+    return merged
+
+
+def _normalize_definitions(definitions: list[str] | None) -> tuple[str, ...]:
+    if not definitions:
+        return ()
+    seen: set[str] = set()
+    normalized_values: list[str] = []
+    for item in definitions:
+        normalized = normalize_whitespace(item)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized_values.append(normalized)
+        if len(normalized_values) >= _DEFINITIONS_LIMIT:
+            break
+    return tuple(normalized_values)
 
 
 async def _language_base_examples_async(
@@ -600,14 +677,54 @@ async def _language_base_examples_async(
 ) -> list[Example]:
     if language_base is None or not language_base.is_available:
         return []
+    normalized = normalize_text(text)
+    if count_words(normalized) == 1:
+        token = normalized.casefold()
+        if len(token) <= 2 or token in _HIGH_AMBIGUITY_TOKENS:
+            return []
     try:
         loop = asyncio.get_running_loop()
         fetch_examples = partial(
             language_base.get_examples,
-            word=text,
+            word=normalized,
             limit=_LANGUAGE_BASE_EXAMPLE_LIMIT,
         )
         examples = await loop.run_in_executor(_LANGUAGE_BASE_EXECUTOR, fetch_examples)
     except Exception:
         return []
     return filter_examples(list(examples))
+
+
+async def _definitions_base_defs_async(
+    *,
+    text: str,
+    definitions_base: DefinitionsBase | None,
+) -> list[str]:
+    if definitions_base is None or not definitions_base.is_available:
+        return []
+    if count_words(text) > _DEFINITIONS_QUERY_MAX_WORDS:
+        return []
+    try:
+        loop = asyncio.get_running_loop()
+        fetch_defs = partial(
+            definitions_base.get_definitions,
+            word=text,
+            limit=_DEFINITIONS_PRIMARY_LIMIT,
+        )
+        definitions = await loop.run_in_executor(_LANGUAGE_BASE_EXECUTOR, fetch_defs)
+    except Exception:
+        return []
+    return list(definitions)
+
+
+def _merge_examples(*, primary: list[Example], fallback: list[Example]) -> list[Example]:
+    merged_pool: list[Example] = []
+    for example in [*primary, *fallback]:
+        if not example.en:
+            continue
+        merged_pool.append(example)
+    return select_diverse_examples(
+        merged_pool,
+        limit=_LANGUAGE_BASE_EXAMPLE_LIMIT,
+        seed=f"merge:{time.time_ns()}",
+    )

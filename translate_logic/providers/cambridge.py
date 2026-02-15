@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
+import time
 from urllib.parse import quote_plus
 
+from translate_logic.example_selection import rank_diverse_examples
 from translate_logic.html_parser import (
     HtmlNode,
     find_all,
@@ -36,6 +38,7 @@ class CambridgeUrls:
 class CambridgePageData:
     translations: list[str]
     examples: list[Example]
+    definitions_en: list[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +46,7 @@ class CambridgeResult:
     found: bool
     translations: list[str]
     examples: list[Example]
+    definitions_en: list[str]
 
 
 def build_cambridge_urls(query: str) -> CambridgeUrls:
@@ -61,6 +65,7 @@ async def translate_cambridge(text: str, fetcher: AsyncFetcher) -> CambridgeResu
             found=False,
             translations=[],
             examples=[],
+            definitions_en=[],
         )
 
     best_fallback: CambridgeResult | None = None
@@ -92,15 +97,17 @@ async def translate_cambridge(text: str, fetcher: AsyncFetcher) -> CambridgeResu
 
         translations = russian_data.translations or english_data.translations
         examples = _rank_examples(russian_data.examples or english_data.examples)
+        definitions_en = english_data.definitions_en or russian_data.definitions_en
 
         result = CambridgeResult(
             found=bool(translations),
             translations=translations,
             examples=examples,
+            definitions_en=definitions_en,
         )
         if result.found:
             return result
-        if best_fallback is None and examples:
+        if best_fallback is None and (examples or definitions_en):
             best_fallback = result
 
     if best_fallback is not None:
@@ -109,6 +116,7 @@ async def translate_cambridge(text: str, fetcher: AsyncFetcher) -> CambridgeResu
         found=False,
         translations=[],
         examples=[],
+        definitions_en=[],
     )
 
 
@@ -126,13 +134,13 @@ def parse_cambridge_page(
     entries = find_all(root, _is_entry_block)
     translations: list[str] = []
     examples: list[Example] = []
-    seen_examples: set[tuple[str, str | None]] = set()
+    seen_examples: set[str] = set()
 
     for entry in entries:
         for translation in _extract_entry_translations(entry, translation_lang):
             translations.append(translation)
         for example in _extract_entry_examples(entry):
-            key = (example.en, example.ru)
+            key = example.en.casefold()
             if key not in seen_examples:
                 examples.append(example)
                 seen_examples.add(key)
@@ -144,6 +152,7 @@ def parse_cambridge_page(
     return CambridgePageData(
         translations=translations,
         examples=examples,
+        definitions_en=_extract_definitions(root),
     )
 
 
@@ -151,6 +160,7 @@ def _empty_page_data() -> CambridgePageData:
     return CambridgePageData(
         translations=[],
         examples=[],
+        definitions_en=[],
     )
 
 
@@ -218,7 +228,7 @@ def _extract_translations(
 
 def _extract_examples(root: HtmlNode) -> list[Example]:
     examples: list[Example] = []
-    seen: set[tuple[str, str | None]] = set()
+    seen: set[str] = set()
     nodes = find_all(
         root,
         lambda node: node.tag == "div" and "examp" in node.classes(),
@@ -229,9 +239,8 @@ def _extract_examples(root: HtmlNode) -> list[Example]:
             en_text = normalize_whitespace(node.text_content())
         if not en_text:
             continue
-        ru_text = _extract_example_text(node, "trans")
-        example = Example(en=en_text, ru=ru_text)
-        key = (example.en, example.ru)
+        example = Example(en=en_text)
+        key = example.en.casefold()
         if key in seen:
             continue
         seen.add(key)
@@ -299,31 +308,57 @@ def _extract_entry_examples(entry: HtmlNode) -> list[Example]:
             en_text = normalize_whitespace(node.text_content())
         if not en_text:
             continue
-        ru_text = _extract_example_text(node, "trans")
-        examples.append(Example(en=en_text, ru=ru_text))
+        examples.append(Example(en=en_text))
     return _rank_examples(examples)
 
 
+def _extract_definitions(root: HtmlNode, limit: int = 8) -> list[str]:
+    definitions: list[str] = []
+    seen: set[str] = set()
+    nodes = find_all(root, _is_definition_text_node)
+    for node in nodes:
+        if has_ancestor_with_class(node, "examp") or has_ancestor_with_class(
+            node, "dexamp"
+        ):
+            continue
+        text = normalize_whitespace(node.text_content())
+        if not text or not _looks_like_definition(text):
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        definitions.append(text)
+        if len(definitions) >= limit:
+            break
+    return definitions
+
+
+def _is_definition_text_node(node: HtmlNode) -> bool:
+    if node.tag not in {"span", "div"}:
+        return False
+    classes = node.classes()
+    if "def" in classes and ("ddef_d" in classes or "ddef_b" in classes):
+        return True
+    if "def-body__text" in classes:
+        return True
+    return False
+
+
+def _looks_like_definition(text: str) -> bool:
+    if len(text) < 8:
+        return False
+    if text.endswith(":"):
+        return False
+    has_latin = any("a" <= char <= "z" for char in text.casefold())
+    return has_latin
+
+
 def _rank_examples(examples: list[Example]) -> list[Example]:
-    indexed = list(enumerate(examples))
-    indexed.sort(key=lambda item: (-_example_score(item[1]), item[0]))
-    return [example for _, example in indexed]
-
-
-def _example_score(example: Example) -> int:
-    score = 0
-    if example.ru:
-        score += 4
-    length = len(example.en)
-    if 20 <= length <= 120:
-        score += 2
-    elif length < 10:
-        score -= 1
-    elif length > 160:
-        score -= 2
-    if "..." in example.en or "…" in example.en:
-        score -= 1
-    return score
+    return rank_diverse_examples(
+        examples,
+        seed=f"cambridge:{time.time_ns()}",
+    )
 
 
 def _normalize_lang(value: str | None) -> str | None:

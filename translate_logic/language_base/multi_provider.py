@@ -20,17 +20,9 @@ class MultiLanguageBaseProvider(LanguageBase):
         if limit <= 0:
             return ()
         primary = self.primary.get_examples(word=word, limit=limit)
-        if len(primary) >= limit:
+        if primary:
             return primary[:limit]
-        extra = self.fallback.get_examples(word=word, limit=limit * 2)
-        merged: list[Example] = list(primary)
-        for pair in extra:
-            if len(merged) >= limit:
-                break
-            if pair in merged:
-                continue
-            merged.append(pair)
-        return tuple(merged[:limit])
+        return self.fallback.get_examples(word=word, limit=limit)[:limit]
 
     def warmup(self) -> None:
         self.primary.warmup()

@@ -32,6 +32,7 @@ JsonValue: TypeAlias = (
 @dataclass(frozen=True, slots=True)
 class GoogleResult:
     translations: list[str]
+    definitions_en: list[str]
 
 
 def build_google_url(text: str, source_lang: str, target_lang: str) -> str:
@@ -48,28 +49,36 @@ async def translate_google(
     text: str, source_lang: str, target_lang: str, fetcher: AsyncFetcher
 ) -> GoogleResult:
     if not text:
-        return GoogleResult(translations=[])
+        return GoogleResult(translations=[], definitions_en=[])
     url = build_google_url(text, source_lang, target_lang)
     try:
         payload = await fetcher(url)
     except FetchError:
-        return GoogleResult(translations=[])
+        return GoogleResult(translations=[], definitions_en=[])
     try:
-        translations = parse_google_response(payload)
+        parsed = parse_google_payload(payload)
     except Exception:
-        return GoogleResult(translations=[])
-    return GoogleResult(translations=translations)
+        return GoogleResult(translations=[], definitions_en=[])
+    return parsed
 
 
 def parse_google_response(payload: str) -> list[str]:
+    return parse_google_payload(payload).translations
+
+
+def parse_google_payload(payload: str) -> GoogleResult:
     raw_payload: JsonValue = json.loads(payload)
     raw_data = _as_dict(raw_payload)
     if raw_data is None:
-        return []
+        return GoogleResult(translations=[], definitions_en=[])
     translations = _extract_dict_terms(raw_data)
     translations.extend(_extract_alternative_translations(raw_data))
     translations.extend(_extract_sentence_translations(raw_data))
-    return clean_translations(translations)
+    definitions = _extract_definitions(raw_data)
+    return GoogleResult(
+        translations=clean_translations(translations),
+        definitions_en=_clean_definitions(definitions),
+    )
 
 
 def _extract_sentence_translations(raw_data: dict[str, JsonValue]) -> list[str]:
@@ -128,6 +137,45 @@ def _extract_alternative_translations(raw_data: dict[str, JsonValue]) -> list[st
                     translations.append(value)
                     break
     return translations
+
+
+def _extract_definitions(raw_data: dict[str, JsonValue]) -> list[str]:
+    definition_groups = _as_list(raw_data.get("definitions"))
+    if definition_groups is None:
+        return []
+    definitions: list[str] = []
+    for group in definition_groups:
+        group_obj = _as_dict(group)
+        if group_obj is None:
+            continue
+        entries = _as_list(group_obj.get("entry"))
+        if entries is None:
+            continue
+        for entry in entries:
+            entry_obj = _as_dict(entry)
+            if entry_obj is None:
+                continue
+            gloss = _get_str(entry_obj.get("gloss"))
+            if gloss:
+                definitions.append(gloss)
+    return definitions
+
+
+def _clean_definitions(values: list[str], limit: int = 8) -> list[str]:
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for value in values:
+        normalized = normalize_whitespace(value)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(normalized)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
 
 
 def _as_dict(value: JsonValue) -> dict[str, JsonValue] | None:

@@ -7,7 +7,6 @@ from enum import Enum
 @dataclass(frozen=True, slots=True)
 class Example:
     en: str
-    ru: str | None
 
 
 class FieldStatus(Enum):
@@ -50,15 +49,15 @@ class TranslationStatus(Enum):
 @dataclass(frozen=True, slots=True)
 class TranslationResult:
     translation_ru: FieldValue
-    example_en: FieldValue
-    example_ru: FieldValue
+    definitions_en: tuple[str, ...] = ()
+    examples: tuple[Example, ...] = ()
 
     @classmethod
     def empty(cls) -> "TranslationResult":
         return cls(
             translation_ru=FieldValue.missing(),
-            example_en=FieldValue.missing(),
-            example_ru=FieldValue.missing(),
+            definitions_en=(),
+            examples=(),
         )
 
     @property
