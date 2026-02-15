@@ -187,7 +187,9 @@ class TranslationWindow:
         previous_definitions_visible = (
             None if previous is None else bool(previous.definitions_items)
         )
-        previous_examples_visible = None if previous is None else bool(previous.examples)
+        previous_examples_visible = (
+            None if previous is None else bool(previous.examples)
+        )
 
         if previous is None or translation_visible != previous_translation_visible:
             self._row_translation.set_visible(translation_visible)
@@ -212,9 +214,7 @@ class TranslationWindow:
             self._sep_after_translation.set_visible(sep_after_translation_visible)
 
         sep_before_actions_visible = (
-            translation_visible
-            or definitions_visible
-            or examples_visible
+            translation_visible or definitions_visible or examples_visible
         )
         previous_sep_before_actions_visible = (
             None

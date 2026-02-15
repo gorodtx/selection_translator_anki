@@ -128,7 +128,9 @@ def _format_definitions_html(
         return ""
     lines: list[str] = []
     for index, definition in enumerate(result.definitions_en, start=1):
-        highlighted = highlight_to_html_mark(definition, highlight_spec, class_name="hl")
+        highlighted = highlight_to_html_mark(
+            definition, highlight_spec, class_name="hl"
+        )
         lines.append(f"{index}. {highlighted}")
     return "<br>".join(lines)
 
@@ -138,6 +140,8 @@ def _all_examples_html(result: TranslationResult, highlight_spec: HighlightSpec)
         return ""
     lines: list[str] = []
     for index, example in enumerate(result.examples, start=1):
-        highlighted = highlight_to_html_mark(example.en, highlight_spec, class_name="hl")
+        highlighted = highlight_to_html_mark(
+            example.en, highlight_spec, class_name="hl"
+        )
         lines.append(f"{index}. {highlighted}")
     return "<br>".join(lines)

@@ -130,6 +130,12 @@ class Gtk:
         def append(self, child: Gtk.Widget) -> None:
             raise NotImplementedError
 
+        def remove(self, child: Gtk.Widget) -> None:
+            raise NotImplementedError
+
+        def get_first_child(self) -> Gtk.Widget | None:
+            raise NotImplementedError
+
         def set_margin_top(self, margin: int) -> None:
             raise NotImplementedError
 

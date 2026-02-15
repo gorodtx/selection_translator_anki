@@ -603,6 +603,7 @@ def _emit_partial(
         )
     )
 
+
 def _needs_more_variants(translations: list[str]) -> bool:
     unique = merge_translations(translations, [])
     limited = limit_translations(unique, TranslationLimit.PRIMARY.value)
@@ -717,7 +718,9 @@ async def _definitions_base_defs_async(
     return list(definitions)
 
 
-def _merge_examples(*, primary: list[Example], fallback: list[Example]) -> list[Example]:
+def _merge_examples(
+    *, primary: list[Example], fallback: list[Example]
+) -> list[Example]:
     merged_pool: list[Example] = []
     for example in [*primary, *fallback]:
         if not example.en:

@@ -99,7 +99,7 @@ class NoveltyState:
 
     def _trim_to_budget(self) -> None:
         while len(self._recent) > self.max_keys:
-            oldest_key = min(self._last_seen, key=self._last_seen.get)
+            oldest_key = min(self._last_seen, key=lambda key: self._last_seen[key])
             self._last_seen.pop(oldest_key, None)
             self._recent.pop(oldest_key, None)
 
@@ -313,7 +313,9 @@ def _build_candidates(
     query_token_set: frozenset[str],
     candidate_cap: int,
 ) -> list[_Candidate]:
-    raw: list[tuple[Example, str, frozenset[str], tuple[str, ...], float, float, float, float]] = []
+    raw: list[
+        tuple[Example, str, frozenset[str], tuple[str, ...], float, float, float, float]
+    ] = []
     seen_signatures: set[str] = set()
 
     for index, source in enumerate(examples):
@@ -334,7 +336,9 @@ def _build_candidates(
         phrase_exact = 1.0 if query_key and query_key in text.casefold() else 0.0
         token_coverage = 0.0
         if query_token_set:
-            token_coverage = len(token_set & query_token_set) / max(1, len(query_token_set))
+            token_coverage = len(token_set & query_token_set) / max(
+                1, len(query_token_set)
+            )
         length_quality = _length_quality(len(text))
         punct_quality = _punct_quality(text)
         bm25 = _bm25_value(index=index, values=bm25_scores)
@@ -359,7 +363,16 @@ def _build_candidates(
     relevance_from_bm25 = _bm25_relevance([item[4] for item in raw])
     candidates: list[_Candidate] = []
     for index, item in enumerate(raw):
-        example, signature, token_set, prefix_tokens, _, phrase_exact, token_cov, quality_sum = item
+        (
+            example,
+            signature,
+            token_set,
+            prefix_tokens,
+            _,
+            phrase_exact,
+            token_cov,
+            quality_sum,
+        ) = item
         relevance = (
             0.55 * relevance_from_bm25[index]
             + 0.15 * phrase_exact

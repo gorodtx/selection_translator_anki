@@ -84,7 +84,7 @@ def _load_model() -> Any | None:
         if _MODEL is not None:
             return _MODEL
         try:
-            import spacy  # type: ignore[import-not-found]
+            import spacy
         except Exception:
             _MODEL_UNAVAILABLE = True
             return None
