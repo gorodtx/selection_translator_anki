@@ -39,26 +39,9 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._services = AppServices.create()
         self._clipboard_writer = ClipboardWriter()
         self._dbus_service: DbusService | None = None
-        self._anki_controller = AnkiController(anki_flow=self._services.anki_flow)
-        self._settings_controller = SettingsController(
-            config=self._config,
-            runtime=self._services.runtime,
-            anki_flow=self._services.anki_flow,
-            on_save=self._on_settings_saved,
-        )
-        self._translation_controller = TranslationController(
-            app=self,
-            translation_executor=TranslationExecutor(
-                flow=self._services.translation_flow,
-                config=self._config,
-            ),
-            cancel_active=self._services.cancel_active,
-            config=self._config,
-            clipboard_writer=self._clipboard_writer,
-            anki_controller=self._anki_controller,
-            on_present_window=self._on_present_window,
-            on_open_settings=self._open_settings,
-        )
+        self._anki_controller: AnkiController | None = None
+        self._settings_controller: SettingsController | None = None
+        self._translation_controller: TranslationController | None = None
         self.connect("startup", self._on_startup)
         self.connect("activate", self._on_activate)
         self.connect("shutdown", self._on_shutdown)
@@ -66,6 +49,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
     def _on_startup(self, _app: gtk_types.Gtk.Application) -> None:
         self.hold()
         self._services.start()
+        self._build_controllers()
         self._reset_settings_if_requested()
         GLib.set_application_name("Translator")
         GLib.set_prgname("translator")
@@ -78,11 +62,14 @@ class TranslatorApp(gtk_types.Gtk.Application):
         if self._dbus_service is not None:
             self._dbus_service.close()
             self._dbus_service = None
-        self._translation_controller.cancel_tasks()
+        if self._translation_controller is not None:
+            self._translation_controller.cancel_tasks()
         self._services.stop()
         self.release()
 
     def _register_dbus_service(self) -> None:
+        if not self._ensure_controllers_ready():
+            return
         self._dbus_service = DbusService.register(
             app=self,
             on_translate=self._on_dbus_translate,
@@ -96,6 +83,10 @@ class TranslatorApp(gtk_types.Gtk.Application):
         )
 
     def _on_dbus_translate(self, text: str) -> None:
+        if not self._ensure_controllers_ready():
+            return
+        if self._translation_controller is None:
+            return
         self._translation_controller.trigger_text(
             text,
             silent=True,
@@ -105,23 +96,89 @@ class TranslatorApp(gtk_types.Gtk.Application):
         )
 
     def _on_dbus_get_anki_status(self, reply: Callable[[AnkiStatus], None]) -> None:
+        if not self._ensure_controllers_ready():
+            reply(self._fallback_anki_status())
+            return
+        if self._settings_controller is None:
+            reply(self._fallback_anki_status())
+            return
         self._settings_controller.get_anki_status(reply)
 
     def _on_dbus_create_model(self, reply: Callable[[AnkiActionResult], None]) -> None:
+        if not self._ensure_controllers_ready():
+            reply(
+                AnkiActionResult(
+                    message="Settings controller is not ready.",
+                    status=self._fallback_anki_status(),
+                )
+            )
+            return
+        if self._settings_controller is None:
+            reply(
+                AnkiActionResult(
+                    message="Settings controller is not ready.",
+                    status=self._fallback_anki_status(),
+                )
+            )
+            return
         self._settings_controller.create_model(reply)
 
     def _on_dbus_list_decks(self, reply: Callable[[AnkiListResult], None]) -> None:
+        if not self._ensure_controllers_ready():
+            reply(AnkiListResult(items=[], error="Settings controller is not ready."))
+            return
+        if self._settings_controller is None:
+            reply(AnkiListResult(items=[], error="Settings controller is not ready."))
+            return
         self._settings_controller.list_decks(reply)
 
     def _on_dbus_select_deck(
         self, deck: str, reply: Callable[[AnkiActionResult], None]
     ) -> None:
+        if not self._ensure_controllers_ready():
+            del deck
+            reply(
+                AnkiActionResult(
+                    message="Settings controller is not ready.",
+                    status=self._fallback_anki_status(),
+                )
+            )
+            return
+        if self._settings_controller is None:
+            del deck
+            reply(
+                AnkiActionResult(
+                    message="Settings controller is not ready.",
+                    status=self._fallback_anki_status(),
+                )
+            )
+            return
         self._settings_controller.select_deck(deck, reply)
 
     def _on_dbus_save_settings(self, reply: Callable[[AnkiActionResult], None]) -> None:
+        if not self._ensure_controllers_ready():
+            reply(
+                AnkiActionResult(
+                    message="Settings controller is not ready.",
+                    status=self._fallback_anki_status(),
+                )
+            )
+            return
+        if self._settings_controller is None:
+            reply(
+                AnkiActionResult(
+                    message="Settings controller is not ready.",
+                    status=self._fallback_anki_status(),
+                )
+            )
+            return
         self._settings_controller.save_settings(reply)
 
     def _show_history(self) -> None:
+        if not self._ensure_controllers_ready():
+            return
+        if self._translation_controller is None:
+            return
         self._translation_controller.show_history_window()
 
     def _open_settings(self) -> None:
@@ -130,8 +187,10 @@ class TranslatorApp(gtk_types.Gtk.Application):
     def _on_settings_saved(self, config: AppConfig) -> None:
         self._config = config
         save_config(config)
-        self._translation_controller.update_config(self._config)
-        self._settings_controller.update_config(self._config)
+        if self._translation_controller is not None:
+            self._translation_controller.update_config(self._config)
+        if self._settings_controller is not None:
+            self._settings_controller.update_config(self._config)
 
     def _on_present_window(self, window: gtk_types.Gtk.ApplicationWindow) -> None:
         del window
@@ -146,4 +205,54 @@ class TranslatorApp(gtk_types.Gtk.Application):
         except OSError:
             pass
         self._config = load_config()
-        self._translation_controller.update_config(self._config)
+        if self._translation_controller is not None:
+            self._translation_controller.update_config(self._config)
+
+    def _build_controllers(self) -> None:
+        if self._anki_controller is None:
+            self._anki_controller = AnkiController(anki_flow=self._services.anki_flow)
+        if self._settings_controller is None:
+            self._settings_controller = SettingsController(
+                config=self._config,
+                runtime=self._services.runtime,
+                anki_flow=self._services.anki_flow,
+                on_save=self._on_settings_saved,
+            )
+        if self._translation_controller is None:
+            self._translation_controller = TranslationController(
+                app=self,
+                translation_executor=TranslationExecutor(
+                    flow=self._services.translation_flow,
+                    config=self._config,
+                ),
+                cancel_active=self._services.cancel_active,
+                config=self._config,
+                clipboard_writer=self._clipboard_writer,
+                anki_controller=self._anki_controller,
+                on_present_window=self._on_present_window,
+                on_open_settings=self._open_settings,
+            )
+
+    def _ensure_controllers_ready(self) -> bool:
+        if (
+            self._translation_controller is not None
+            and self._settings_controller is not None
+            and self._anki_controller is not None
+        ):
+            return True
+        try:
+            self._build_controllers()
+        except Exception:
+            return False
+        return (
+            self._translation_controller is not None
+            and self._settings_controller is not None
+            and self._anki_controller is not None
+        )
+
+    def _fallback_anki_status(self) -> AnkiStatus:
+        return AnkiStatus(
+            model_status="Model not found",
+            deck_status="Not selected",
+            deck_name="",
+        )

@@ -22,6 +22,7 @@ const SETTINGS_LABEL = "Settings";
 const DEFAULT_ICON_NAME = "accessories-dictionary-symbolic";
 const TEXT_FILTER = /^[.\s\d-]+$/;
 const DBUS_RETRY_ATTEMPTS = 10;
+const DBUS_RETRY_DELAY_MS = 120;
 const MAX_TEXT_LEN = 200;
 const DBUS_RETRYABLE_ERRORS = [
   "org.freedesktop.DBus.Error.ServiceUnknown",
@@ -210,7 +211,10 @@ export default class TranslatorExtension extends Extension {
     const proxy = this._getProxy();
     if (!proxy) {
       if (attempt < DBUS_RETRY_ATTEMPTS) {
-        this._callDbusWithRetry(method, parameters, attempt + 1);
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, DBUS_RETRY_DELAY_MS, () => {
+          this._callDbusWithRetry(method, parameters, attempt + 1);
+          return GLib.SOURCE_REMOVE;
+        });
       }
       return;
     }
@@ -230,7 +234,10 @@ export default class TranslatorExtension extends Extension {
             DBUS_RETRYABLE_ERRORS.some((marker) => message.includes(marker));
           if (shouldRetry) {
             this._proxy = null;
-            this._callDbusWithRetry(method, parameters, attempt + 1);
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, DBUS_RETRY_DELAY_MS, () => {
+              this._callDbusWithRetry(method, parameters, attempt + 1);
+              return GLib.SOURCE_REMOVE;
+            });
             return;
           }
           return;

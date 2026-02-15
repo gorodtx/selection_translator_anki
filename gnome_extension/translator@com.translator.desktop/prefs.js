@@ -58,27 +58,13 @@ export default class TranslatorPrefs extends ExtensionPreferences {
     const row = new Adw.ActionRow({ title: "Hotkey" });
     const valueLabel = new Gtk.Label({ xalign: 0 });
     row.add_suffix(valueLabel);
-    row.set_activatable(true);
-    row.activatable_widget = valueLabel;
     group.add(row);
 
     const hotkeyButtonsRow = new Adw.PreferencesRow();
     hotkeyButtonsRow.set_margin_bottom(0);
-    const delButton = new Gtk.Button({ label: "Del" });
-    const resetButton = new Gtk.Button({ label: "Reset" });
-    const hotkeyButtons = new Gtk.Box({
-      orientation: Gtk.Orientation.HORIZONTAL,
-      spacing: 8,
-      homogeneous: true,
-      hexpand: true,
-    });
-    delButton.set_hexpand(true);
-    resetButton.set_hexpand(true);
-    delButton.set_halign(Gtk.Align.FILL);
+    const resetButton = new Gtk.Button({ label: "Reset", hexpand: true });
     resetButton.set_halign(Gtk.Align.FILL);
-    hotkeyButtons.append(delButton);
-    hotkeyButtons.append(resetButton);
-    hotkeyButtonsRow.set_child(hotkeyButtons);
+    hotkeyButtonsRow.set_child(resetButton);
     group.add(hotkeyButtonsRow);
 
     page.add(group);
@@ -168,16 +154,7 @@ export default class TranslatorPrefs extends ExtensionPreferences {
       state.pending = null;
       valueLabel.set_label("Press keys...");
     };
-    row.connect("activated", startCapture);
-
     resetButton.connect("clicked", startCapture);
-
-    delButton.connect("clicked", () => {
-      settings.set_strv(HOTKEY_KEY, []);
-      state.pending = null;
-      updateLabel();
-      showMessage("Hotkey cleared.");
-    });
 
     const keyController = new Gtk.EventControllerKey();
     keyController.connect("key-pressed", (_ctrl, keyval, _keycode, stateMask) => {
