@@ -7,6 +7,14 @@ def anki_success() -> Notification:
     return Notification("Card added to Anki.", NotificationLevel.SUCCESS)
 
 
+def anki_updated() -> Notification:
+    return Notification("Card updated in Anki.", NotificationLevel.SUCCESS)
+
+
+def anki_unchanged() -> Notification:
+    return Notification("Card already has selected data.", NotificationLevel.INFO)
+
+
 def anki_duplicate() -> Notification:
     return Notification("Card already exists in Anki.", NotificationLevel.WARNING)
 

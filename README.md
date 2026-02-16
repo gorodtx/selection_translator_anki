@@ -37,26 +37,36 @@ A GNOME-first desktop translator that works on the **primary selection** and sho
 
 ## Installation (GNOME)
 
-Download the install script from [Releases](https://github.com/igor3204/selection_translator_anki/releases) and run:
+Run the single installer script:
 
 ```bash
-bash install_gnome.sh install
+bash scripts/install_gnome.sh install
 ```
 
 Update:
 
 ```bash
-bash install_gnome.sh update
+bash scripts/install_gnome.sh update
 ```
 
 Remove:
 
 ```bash
-bash install_gnome.sh remove
+bash scripts/install_gnome.sh remove
 ```
 
 Notes:
-- The script installs the GNOME extension, the Python backend, and the D-Bus service.
+- The script installs the GNOME extension, backend code, D-Bus service, and offline bases (`primary.sqlite3`, `fallback.sqlite3`, `definitions_pack.sqlite3`).
+- If local base files are missing, the installer downloads them from GitHub Releases (`latest` by default).
+- Every base file is verified by SHA-256 against a release manifest; install fails fast on checksum mismatch.
+- Override release source with:
+  - `TRANSLATOR_RELEASE_REPO=owner/repo`
+  - `TRANSLATOR_RELEASE_TAG=vX.Y.Z`
+  - `TRANSLATOR_ASSETS_BASE_URL=https://.../download`
+  - `TRANSLATOR_ASSETS_MANIFEST_ASSET=release-assets.sha256`
+  - `TRANSLATOR_ASSETS_MANIFEST_URL=https://.../release-assets.sha256`
+  - `TRANSLATOR_ASSETS_MANIFEST_PATH=/path/to/release-assets.sha256`
+- Local developer update/reload scripts live only in `dev/tools/`.
 - If the extension does not appear immediately, **log out and back in**.
 
 ## Usage

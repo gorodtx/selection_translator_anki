@@ -5,7 +5,14 @@ from concurrent.futures import Future
 from typing import Protocol
 
 from desktop_app.application.history import HistoryItem
-from desktop_app.anki import AnkiAddResult, AnkiCreateModelResult, AnkiListResult
+from desktop_app.anki import (
+    AnkiAddResult,
+    AnkiCreateModelResult,
+    AnkiIdListResult,
+    AnkiListResult,
+    AnkiNoteDetailsResult,
+    AnkiUpdateResult,
+)
 from translate_logic.models import TranslationResult
 
 
@@ -30,9 +37,17 @@ class AnkiPort(Protocol):
 
     def model_names(self) -> Future[AnkiListResult]: ...
 
+    def find_notes(self, query: str) -> Future[AnkiIdListResult]: ...
+
+    def note_details(self, note_ids: list[int]) -> Future[AnkiNoteDetailsResult]: ...
+
     def add_note(
         self, deck: str, model: str, fields: dict[str, str]
     ) -> Future[AnkiAddResult]: ...
+
+    def update_note_fields(
+        self, note_id: int, fields: dict[str, str]
+    ) -> Future[AnkiUpdateResult]: ...
 
     def create_model(
         self,

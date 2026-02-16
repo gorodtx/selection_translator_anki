@@ -42,6 +42,19 @@ class AnkiNoteInfoResult:
 
 
 @dataclass(frozen=True, slots=True)
+class AnkiNoteDetails:
+    note_id: int
+    model: str
+    fields: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class AnkiNoteDetailsResult:
+    items: list[AnkiNoteDetails]
+    error: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class AnkiAddResult:
     success: bool
     error: str | None
@@ -50,6 +63,12 @@ class AnkiAddResult:
 
 @dataclass(frozen=True, slots=True)
 class AnkiCreateModelResult:
+    success: bool
+    error: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AnkiUpdateResult:
     success: bool
     error: str | None
 
@@ -82,6 +101,12 @@ class AnkiClient:
         response = await self._request("notesInfo", {"notes": note_ids})
         return _coerce_note_info(response)
 
+    async def note_details(self, note_ids: list[int]) -> AnkiNoteDetailsResult:
+        if not note_ids:
+            return AnkiNoteDetailsResult(items=[], error=None)
+        response = await self._request("notesInfo", {"notes": note_ids})
+        return _coerce_note_details(response)
+
     async def add_note(
         self,
         deck: str,
@@ -104,6 +129,22 @@ class AnkiClient:
                 note_id=None,
             )
         return AnkiAddResult(success=True, error=None, note_id=note_id)
+
+    async def update_note_fields(
+        self,
+        note_id: int,
+        fields: dict[str, str],
+    ) -> AnkiUpdateResult:
+        payload: dict[str, object] = {
+            "note": {
+                "id": note_id,
+                "fields": fields,
+            }
+        }
+        response = await self._request("updateNoteFields", payload)
+        if response.error is not None:
+            return AnkiUpdateResult(success=False, error=response.error)
+        return AnkiUpdateResult(success=True, error=None)
 
     async def create_model(
         self,
@@ -199,6 +240,41 @@ def _coerce_note_info(response: AnkiResponse) -> AnkiNoteInfoResult:
     if not fields:
         return AnkiNoteInfoResult(info=None, error="Invalid AnkiConnect response")
     return AnkiNoteInfoResult(info=AnkiNoteInfo(model=model, fields=fields), error=None)
+
+
+def _coerce_note_details(response: AnkiResponse) -> AnkiNoteDetailsResult:
+    if response.error is not None:
+        return AnkiNoteDetailsResult(items=[], error=response.error)
+    result_list = _coerce_list(response.result)
+    if result_list is None:
+        return AnkiNoteDetailsResult(items=[], error="Invalid AnkiConnect response")
+    details: list[AnkiNoteDetails] = []
+    for raw_item in result_list:
+        item_dict = _coerce_dict(raw_item)
+        if item_dict is None:
+            continue
+        note_id = _coerce_int(item_dict.get("noteId"))
+        model = _coerce_str(item_dict.get("modelName"))
+        fields_raw = _coerce_dict(item_dict.get("fields"))
+        if note_id is None or model is None or fields_raw is None:
+            continue
+        mapped_fields: dict[str, str] = {}
+        for field_name, field_payload in fields_raw.items():
+            field_dict = _coerce_dict(field_payload)
+            if field_dict is None:
+                continue
+            field_value = _coerce_str(field_dict.get("value"))
+            if field_value is None:
+                continue
+            mapped_fields[field_name] = field_value
+        details.append(
+            AnkiNoteDetails(
+                note_id=note_id,
+                model=model,
+                fields=mapped_fields,
+            )
+        )
+    return AnkiNoteDetailsResult(items=details, error=None)
 
 
 def _coerce_str_list(value: object | None) -> list[str]:

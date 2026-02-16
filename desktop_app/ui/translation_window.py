@@ -3,6 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable
 import importlib
 
+from desktop_app.application.anki_upsert import (
+    AnkiFieldAction,
+    AnkiUpsertDecision,
+    AnkiUpsertPreview,
+)
 from desktop_app.application.view_state import TranslationViewState
 from desktop_app.notifications import BannerHost, Notification
 from desktop_app.ui.drag import attach_window_drag
@@ -119,6 +124,7 @@ class TranslationWindow:
 
         self._window = window
         self._rendered_state: TranslationViewState | None = None
+        self._upsert_popover: object | None = None
         self._apply_state(TranslationViewState.empty())
 
     @property
@@ -129,6 +135,7 @@ class TranslationWindow:
         self._window.present()
 
     def hide(self) -> None:
+        self.hide_anki_upsert()
         self._window.hide()
 
     def apply_state(self, state: TranslationViewState) -> None:
@@ -139,6 +146,141 @@ class TranslationWindow:
 
     def clear_banner(self) -> None:
         self._banner.clear()
+
+    def show_anki_upsert(
+        self,
+        preview: AnkiUpsertPreview,
+        on_apply: Callable[[AnkiUpsertDecision], None],
+        on_cancel: Callable[[], None],
+    ) -> None:
+        self.hide_anki_upsert()
+        popover = Gtk.Popover()
+        if hasattr(popover, "set_has_arrow"):
+            popover.set_has_arrow(True)
+        if hasattr(popover, "set_autohide"):
+            popover.set_autohide(False)
+        if hasattr(popover, "set_parent"):
+            popover.set_parent(self._add_button)
+        elif hasattr(popover, "set_relative_to"):
+            popover.set_relative_to(self._add_button)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        content.set_margin_top(8)
+        content.set_margin_bottom(8)
+        content.set_margin_start(8)
+        content.set_margin_end(8)
+        content.set_size_request(380, -1)
+
+        title = Gtk.Label(label="Anki upsert")
+        title.set_xalign(0.0)
+        content.append(title)
+
+        create_new_check = Gtk.CheckButton(label="Create new card")
+        create_new_check.set_active(not bool(preview.matches))
+        content.append(create_new_check)
+
+        note_checks: list[tuple[int, object]] = []
+        if preview.matches:
+            notes_title = Gtk.Label(label="Existing cards:")
+            notes_title.set_xalign(0.0)
+            content.append(notes_title)
+            for index, match in enumerate(preview.matches):
+                label = f"#{match.note_id} | {self._shorten(match.word)}"
+                check = Gtk.CheckButton(label=label)
+                check.set_active(index == 0)
+                note_checks.append((match.note_id, check))
+                content.append(check)
+
+        translation_combo = self._build_action_combo()
+        definitions_combo = self._build_action_combo()
+        examples_combo = self._build_action_combo()
+
+        content.append(self._labeled_row("Translation action:", translation_combo))
+        content.append(self._labeled_row("Definitions action:", definitions_combo))
+        content.append(self._labeled_row("Examples action:", examples_combo))
+
+        translation_checks = self._build_value_checks(
+            title="Translations:",
+            values=preview.values.translations,
+            parent=content,
+        )
+        definition_checks = self._build_value_checks(
+            title="Definitions:",
+            values=preview.values.definitions_en,
+            parent=content,
+        )
+        example_checks = self._build_value_checks(
+            title="Examples:",
+            values=preview.values.examples_en,
+            parent=content,
+        )
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        apply_button = Gtk.Button(label="Apply")
+        cancel_button = Gtk.Button(label="Cancel")
+        buttons.append(cancel_button)
+        buttons.append(apply_button)
+        content.append(buttons)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_min_content_height(320)
+        scroller.set_child(content)
+        if hasattr(popover, "set_child"):
+            popover.set_child(scroller)
+
+        def _cancel(_button: object) -> None:
+            self.hide_anki_upsert()
+            on_cancel()
+
+        def _apply(_button: object) -> None:
+            selected_translations = tuple(
+                value
+                for value, check in translation_checks
+                if bool(check.get_active())
+            )
+            selected_definitions = tuple(
+                value for value, check in definition_checks if bool(check.get_active())
+            )
+            selected_examples = tuple(
+                value for value, check in example_checks if bool(check.get_active())
+            )
+            target_note_ids = tuple(
+                note_id for note_id, check in note_checks if bool(check.get_active())
+            )
+            decision = AnkiUpsertDecision(
+                create_new=bool(create_new_check.get_active()),
+                target_note_ids=target_note_ids,
+                translation_action=self._action_from_combo(translation_combo),
+                definitions_action=self._action_from_combo(definitions_combo),
+                examples_action=self._action_from_combo(examples_combo),
+                selected_translations=selected_translations,
+                selected_definitions_en=selected_definitions,
+                selected_examples_en=selected_examples,
+            )
+            self.hide_anki_upsert()
+            on_apply(decision)
+
+        cancel_button.connect("clicked", _cancel)
+        apply_button.connect("clicked", _apply)
+        self._upsert_popover = popover
+        if hasattr(popover, "popup"):
+            popover.popup()
+
+    def hide_anki_upsert(self) -> None:
+        popover = self._upsert_popover
+        self._upsert_popover = None
+        if popover is None:
+            return
+        try:
+            if hasattr(popover, "popdown"):
+                popover.popdown()
+        except Exception:
+            pass
+        try:
+            if hasattr(popover, "unparent"):
+                popover.unparent()
+        except Exception:
+            pass
 
     def _apply_state(self, state: TranslationViewState) -> None:
         previous = self._rendered_state
@@ -285,6 +427,7 @@ class TranslationWindow:
             child = next_child
 
     def _handle_close_request(self, _window: object) -> bool:
+        self.hide_anki_upsert()
         self._on_close_cb()
         return True
 
@@ -292,6 +435,7 @@ class TranslationWindow:
         self, _controller: object, keyval: int, _keycode: int, _state: int
     ) -> bool:
         if keyval == Gdk.KEY_Escape:
+            self.hide_anki_upsert()
             self._on_close_cb()
             return True
         return False
@@ -301,3 +445,58 @@ class TranslationWindow:
 
     def _handle_copy_all_clicked(self, _button: gtk_types.Gtk.Button) -> None:
         self._on_copy_all()
+
+    def _build_action_combo(self) -> object:
+        combo = Gtk.ComboBoxText()
+        combo.append("keep_existing", "Keep existing")
+        combo.append("replace_with_selected", "Replace with selected")
+        combo.append("merge_unique_selected", "Merge selected")
+        combo.set_active_id("merge_unique_selected")
+        return combo
+
+    def _action_from_combo(self, combo: object) -> AnkiFieldAction:
+        active_id = ""
+        if hasattr(combo, "get_active_id"):
+            active_id = combo.get_active_id() or ""
+        if active_id == "keep_existing":
+            return AnkiFieldAction.KEEP_EXISTING
+        if active_id == "replace_with_selected":
+            return AnkiFieldAction.REPLACE_WITH_SELECTED
+        return AnkiFieldAction.MERGE_UNIQUE_SELECTED
+
+    def _labeled_row(self, title: str, widget: object) -> gtk_types.Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        label = Gtk.Label(label=title)
+        label.set_xalign(0.0)
+        row.append(label)
+        row.append(widget)
+        return row
+
+    def _build_value_checks(
+        self,
+        *,
+        title: str,
+        values: tuple[str, ...],
+        parent: gtk_types.Gtk.Box,
+    ) -> list[tuple[str, object]]:
+        rows: list[tuple[str, object]] = []
+        label = Gtk.Label(label=title)
+        label.set_xalign(0.0)
+        parent.append(label)
+        if not values:
+            empty = Gtk.Label(label="(none)")
+            empty.set_xalign(0.0)
+            parent.append(empty)
+            return rows
+        for value in values:
+            check = Gtk.CheckButton(label=self._shorten(value))
+            check.set_active(True)
+            parent.append(check)
+            rows.append((value, check))
+        return rows
+
+    def _shorten(self, value: str, limit: int = 88) -> str:
+        text = value.strip()
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit - 1]}..."

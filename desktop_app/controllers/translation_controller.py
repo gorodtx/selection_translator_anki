@@ -5,6 +5,7 @@ from concurrent.futures import Future
 import importlib
 
 from desktop_app.adapters.clipboard_writer import ClipboardWriter
+from desktop_app.application.anki_upsert import AnkiUpsertDecision, AnkiUpsertPreview
 from desktop_app.application.history import HistoryItem
 from ..application.translation_executor import TranslationExecutor
 from desktop_app.anki.templates import DEFAULT_MODEL_NAME
@@ -77,6 +78,7 @@ class TranslationController:
     def cancel_tasks(self) -> None:
         if self._translation_future is not None:
             self._translation_future.cancel()
+        self._view.hide_anki_upsert()
         self._anki_controller.cancel_pending()
         self._cancel_active()
 
@@ -255,13 +257,40 @@ class TranslationController:
             self._on_open_settings()
             return
         request_id = self._state.request.current_id
-        self._anki_controller.add_note(
+        self._anki_controller.prepare_upsert(
             request_id=request_id,
             config=self._config.anki,
             original_text=self._state.memory.text,
             result=self._state.memory.result,
             is_request_active=self._is_request_active,
+            on_ready=self._on_anki_upsert_ready,
+            set_anki_available=self.set_anki_available,
+            notify=self._notify,
+        )
+
+    def _on_anki_upsert_ready(self, preview: AnkiUpsertPreview) -> None:
+        self._view.show_anki_upsert(
+            preview=preview,
+            on_apply=lambda decision: self._on_anki_upsert_apply(preview, decision),
+            on_cancel=lambda: None,
+        )
+
+    def _on_anki_upsert_apply(
+        self,
+        preview: AnkiUpsertPreview,
+        decision: AnkiUpsertDecision,
+    ) -> None:
+        request_id = self._state.request.current_id
+        self._anki_controller.apply_upsert(
+            request_id=request_id,
+            config=self._config.anki,
+            original_text=self._state.memory.text,
+            preview=preview,
+            decision=decision,
+            is_request_active=self._is_request_active,
             on_success=self._on_anki_success,
+            on_updated=self._on_anki_updated,
+            on_unchanged=self._on_anki_unchanged,
             set_anki_available=self.set_anki_available,
             notify=self._notify,
         )
@@ -288,6 +317,13 @@ class TranslationController:
     def _on_anki_success(self) -> None:
         self._notify(notify_messages.anki_success())
         self._close_after_success()
+
+    def _on_anki_updated(self) -> None:
+        self._notify(notify_messages.anki_updated())
+        self._close_after_success()
+
+    def _on_anki_unchanged(self) -> None:
+        self._notify(notify_messages.anki_unchanged())
 
     def _close_after_success(self) -> None:
         self.close_window()

@@ -12,7 +12,9 @@ from desktop_app.anki import (
     AnkiCreateModelResult,
     AnkiIdListResult,
     AnkiListResult,
+    AnkiNoteDetailsResult,
     AnkiNoteInfoResult,
+    AnkiUpdateResult,
 )
 from desktop_app.services.runtime import AsyncRuntime
 
@@ -44,6 +46,18 @@ def _schema_future_set() -> set[Future[AnkiSchemaResult]]:
     return set()
 
 
+def _id_future_set() -> set[Future[AnkiIdListResult]]:
+    return set()
+
+
+def _details_future_set() -> set[Future[AnkiNoteDetailsResult]]:
+    return set()
+
+
+def _update_future_set() -> set[Future[AnkiUpdateResult]]:
+    return set()
+
+
 @dataclass(slots=True)
 class AnkiService:
     runtime: AsyncRuntime
@@ -62,6 +76,13 @@ class AnkiService:
     )
     _active_schema: set[Future[AnkiSchemaResult]] = field(
         default_factory=_schema_future_set
+    )
+    _active_ids: set[Future[AnkiIdListResult]] = field(default_factory=_id_future_set)
+    _active_details: set[Future[AnkiNoteDetailsResult]] = field(
+        default_factory=_details_future_set
+    )
+    _active_update: set[Future[AnkiUpdateResult]] = field(
+        default_factory=_update_future_set
     )
 
     def deck_names(self) -> Future[AnkiListResult]:
@@ -96,6 +117,20 @@ class AnkiService:
         )
         return self._register_list_future(future)
 
+    def find_notes(self, query: str) -> Future[AnkiIdListResult]:
+        future: Future[AnkiIdListResult] = asyncio.run_coroutine_threadsafe(
+            self._find_notes_async(query),
+            self.runtime.loop,
+        )
+        return self._register_id_future(future)
+
+    def note_details(self, note_ids: list[int]) -> Future[AnkiNoteDetailsResult]:
+        future: Future[AnkiNoteDetailsResult] = asyncio.run_coroutine_threadsafe(
+            self._note_details_async(note_ids),
+            self.runtime.loop,
+        )
+        return self._register_details_future(future)
+
     def deck_schema(self, deck: str) -> Future[AnkiSchemaResult]:
         future: Future[AnkiSchemaResult] = asyncio.run_coroutine_threadsafe(
             self._deck_schema_async(deck),
@@ -111,6 +146,15 @@ class AnkiService:
             self.runtime.loop,
         )
         return self._register_add_future(future)
+
+    def update_note_fields(
+        self, note_id: int, fields: dict[str, str]
+    ) -> Future[AnkiUpdateResult]:
+        future: Future[AnkiUpdateResult] = asyncio.run_coroutine_threadsafe(
+            self._update_note_fields_async(note_id, fields),
+            self.runtime.loop,
+        )
+        return self._register_update_future(future)
 
     def create_model(
         self,
@@ -137,11 +181,20 @@ class AnkiService:
             create_future.cancel()
         for schema_future in list(self._active_schema):
             schema_future.cancel()
+        for id_future in list(self._active_ids):
+            id_future.cancel()
+        for details_future in list(self._active_details):
+            details_future.cancel()
+        for update_future in list(self._active_update):
+            update_future.cancel()
         self._active_list.clear()
         self._active_pair.clear()
         self._active_add.clear()
         self._active_create.clear()
         self._active_schema.clear()
+        self._active_ids.clear()
+        self._active_details.clear()
+        self._active_update.clear()
         asyncio.run_coroutine_threadsafe(self._abort_session(), self.runtime.loop)
 
     async def close(self) -> None:
@@ -182,6 +235,27 @@ class AnkiService:
         future.add_done_callback(self._active_schema.discard)
         return future
 
+    def _register_id_future(
+        self, future: Future[AnkiIdListResult]
+    ) -> Future[AnkiIdListResult]:
+        self._active_ids.add(future)
+        future.add_done_callback(self._active_ids.discard)
+        return future
+
+    def _register_details_future(
+        self, future: Future[AnkiNoteDetailsResult]
+    ) -> Future[AnkiNoteDetailsResult]:
+        self._active_details.add(future)
+        future.add_done_callback(self._active_details.discard)
+        return future
+
+    def _register_update_future(
+        self, future: Future[AnkiUpdateResult]
+    ) -> Future[AnkiUpdateResult]:
+        self._active_update.add(future)
+        future.add_done_callback(self._active_update.discard)
+        return future
+
     async def _deck_names_async(self) -> AnkiListResult:
         client = await self._ensure_client()
         return await client.deck_names()
@@ -202,6 +276,14 @@ class AnkiService:
     async def _model_field_names_async(self, model: str) -> AnkiListResult:
         client = await self._ensure_client()
         return await client.model_field_names(model)
+
+    async def _find_notes_async(self, query: str) -> AnkiIdListResult:
+        client = await self._ensure_client()
+        return await client.find_notes(query)
+
+    async def _note_details_async(self, note_ids: list[int]) -> AnkiNoteDetailsResult:
+        client = await self._ensure_client()
+        return await client.note_details(note_ids)
 
     async def _deck_schema_async(self, deck: str) -> AnkiSchemaResult:
         client = await self._ensure_client()
@@ -225,6 +307,12 @@ class AnkiService:
     ) -> AnkiAddResult:
         client = await self._ensure_client()
         return await client.add_note(deck, model, fields)
+
+    async def _update_note_fields_async(
+        self, note_id: int, fields: dict[str, str]
+    ) -> AnkiUpdateResult:
+        client = await self._ensure_client()
+        return await client.update_note_fields(note_id, fields)
 
     async def _create_model_async(
         self,

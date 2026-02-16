@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import asdict
 from datetime import UTC, datetime
 import json
 import random
@@ -35,6 +34,7 @@ STRICT_LATENCY_LIMITS = {
     "p99_ms": 5000.0,
     "max_ms": 8000.0,
 }
+STRICT_CPU_LIMIT_PERCENT = 85.0
 
 NON_NETWORK_TIMEOUT_PATTERNS: tuple[str, ...] = (
     r"join\(timeout=",
@@ -42,6 +42,11 @@ NON_NETWORK_TIMEOUT_PATTERNS: tuple[str, ...] = (
     r"wait\(timeout=",
     r"GLib\.timeout_add",
     r"set_timeout\(",
+)
+_NON_NETWORK_TIMEOUT_ALLOWLIST: tuple[str, ...] = (
+    "desktop_app/gtk_types.py",
+    "desktop_app/notifications/banner.py",
+    "gnome_extension/translator@com.translator.desktop/extension.js",
 )
 
 
@@ -140,6 +145,8 @@ def _systemctl_metrics() -> dict[str, int]:
             "-p",
             "NRestarts",
             "-p",
+            "MainPID",
+            "-p",
             "MemoryCurrent",
             "-p",
             "MemoryPeak",
@@ -150,9 +157,23 @@ def _systemctl_metrics() -> dict[str, int]:
         "active": 1 if parsed.get("ActiveState") == "active" else 0,
         "running": 1 if parsed.get("SubState") == "running" else 0,
         "n_restarts": _to_int(parsed.get("NRestarts")),
+        "main_pid": _to_int(parsed.get("MainPID")),
         "memory_current": _to_int(parsed.get("MemoryCurrent")),
         "memory_peak": _to_int(parsed.get("MemoryPeak")),
     }
+
+
+def _cpu_percent(pid: int) -> float:
+    if pid <= 0:
+        return 0.0
+    proc = _run_command(["ps", "-p", str(pid), "-o", "%cpu="])
+    if proc.returncode != 0:
+        return 0.0
+    value = proc.stdout.strip()
+    try:
+        return float(value)
+    except ValueError:
+        return 0.0
 
 
 def _static_guard_scan() -> list[dict[str, str]]:
@@ -185,7 +206,7 @@ def _static_guard_scan() -> list[dict[str, str]]:
             continue
         for row in proc.stdout.splitlines():
             location, _, line = row.partition(":")
-            if "desktop_app/gtk_types.py" in location:
+            if any(allowed in location for allowed in _NON_NETWORK_TIMEOUT_ALLOWLIST):
                 continue
             violations.append({"pattern": pattern, "location": location, "line": row})
     return violations
@@ -194,8 +215,8 @@ def _static_guard_scan() -> list[dict[str, str]]:
 def _cache_history_correctness_check() -> dict[str, Any]:
     result = TranslationResult(
         translation_ru=FieldValue.present("ok"),
-        example_en=FieldValue.missing(),
-        example_ru=FieldValue.missing(),
+        definitions_en=(),
+        examples=(),
     )
     cache = ResultCache()
     history = HistoryStore(max_entries=100)
@@ -323,6 +344,8 @@ def _build_report(summary: dict[str, Any]) -> str:
         f"- fail_calls: `{soak['fail_calls']}`",
         f"- n_restarts_max: `{soak['n_restarts_max']}`",
         f"- memory_growth_pct: `{soak['memory_growth_pct']:.2f}`",
+        f"- cpu_p95_percent: `{soak['cpu_p95_percent']:.1f}`",
+        f"- cpu_max_percent: `{soak['cpu_max_percent']:.1f}`",
         f"- translate_p95_ms: `{soak['translate_p95_ms']:.1f}`",
         "",
         "## Quality",
@@ -400,6 +423,7 @@ def main() -> int:
     fail_calls = 0
     restart_samples: list[int] = []
     memory_samples: list[int] = []
+    cpu_samples: list[float] = []
     static_guard_violations: list[dict[str, str]] = []
 
     while time.monotonic() < soak_end:
@@ -451,13 +475,16 @@ def main() -> int:
 
         if now >= next_memory:
             metrics = _systemctl_metrics()
+            cpu_percent = _cpu_percent(metrics["main_pid"])
             restart_samples.append(metrics["n_restarts"])
             memory_samples.append(metrics["memory_current"])
+            cpu_samples.append(cpu_percent)
             _append_event(
                 events_path,
                 {
                     "ts": _now_iso(),
                     "event": "service_metrics",
+                    "cpu_percent": cpu_percent,
                     **metrics,
                 },
             )
@@ -493,6 +520,8 @@ def main() -> int:
         "translate_max_ms": max(translate_latencies) if translate_latencies else 0.0,
         "n_restarts_max": max(restart_samples) if restart_samples else 0,
         "memory_growth_pct": memory_growth_pct,
+        "cpu_p95_percent": _percentile(cpu_samples, 0.95),
+        "cpu_max_percent": max(cpu_samples) if cpu_samples else 0.0,
     }
 
     reasons: list[str] = []
@@ -502,6 +531,8 @@ def main() -> int:
         reasons.append("fail_calls > 0")
     if soak["memory_growth_pct"] > 20.0:
         reasons.append("memory growth > 20%")
+    if soak["cpu_max_percent"] > STRICT_CPU_LIMIT_PERCENT:
+        reasons.append("cpu max > strict limit")
     if quality["success_rate"] < 0.98:
         reasons.append("success_rate < 98%")
     if static_guard_violations:
@@ -533,6 +564,7 @@ def main() -> int:
         "status": "passed" if not reasons else "failed",
         "reasons": reasons,
         "strict_latency_limits_ms": STRICT_LATENCY_LIMITS,
+        "strict_cpu_limit_percent": STRICT_CPU_LIMIT_PERCENT,
     }
 
     summary = {

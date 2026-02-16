@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
+from desktop_app.application.anki_upsert import AnkiUpsertDecision, AnkiUpsertPreview
 from desktop_app import gtk_types
 from desktop_app.application.view_state import (
     TranslationPresenter,
@@ -25,6 +26,15 @@ class TranslationWindowProtocol(Protocol):
     def show_banner(self, notification: Notification) -> None: ...
 
     def clear_banner(self) -> None: ...
+
+    def show_anki_upsert(
+        self,
+        preview: AnkiUpsertPreview,
+        on_apply: Callable[[AnkiUpsertDecision], None],
+        on_cancel: Callable[[], None],
+    ) -> None: ...
+
+    def hide_anki_upsert(self) -> None: ...
 
 
 def _build_window(
@@ -108,6 +118,21 @@ class TranslationViewCoordinator:
 
     def notify(self, notification: Notification) -> None:
         self._window.show_banner(notification)
+
+    def show_anki_upsert(
+        self,
+        preview: AnkiUpsertPreview,
+        on_apply: Callable[[AnkiUpsertDecision], None],
+        on_cancel: Callable[[], None],
+    ) -> None:
+        self._window.show_anki_upsert(
+            preview=preview,
+            on_apply=on_apply,
+            on_cancel=on_cancel,
+        )
+
+    def hide_anki_upsert(self) -> None:
+        self._window.hide_anki_upsert()
 
     def _apply_state(self, state: TranslationViewState) -> None:
         if self._last_applied_state == state:

@@ -9,5 +9,8 @@ from desktop_app.anki.client import AnkiCreateModelResult as AnkiCreateModelResu
 from desktop_app.anki.client import AnkiIdListResult as AnkiIdListResult
 from desktop_app.anki.client import AnkiListResult as AnkiListResult
 from desktop_app.anki.client import AnkiNoteInfo as AnkiNoteInfo
+from desktop_app.anki.client import AnkiNoteDetails as AnkiNoteDetails
+from desktop_app.anki.client import AnkiNoteDetailsResult as AnkiNoteDetailsResult
 from desktop_app.anki.client import AnkiNoteInfoResult as AnkiNoteInfoResult
 from desktop_app.anki.client import AnkiResponse as AnkiResponse
+from desktop_app.anki.client import AnkiUpdateResult as AnkiUpdateResult
