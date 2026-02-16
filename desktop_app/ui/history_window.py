@@ -74,6 +74,7 @@ class HistoryWindow:
         self._list_box = list_box
         self._items: list[HistoryItem] = []
         self._rows: list[_HistoryRow] = []
+        self._render_signature: tuple[int, ...] | None = None
 
     @property
     def window(self) -> gtk_types.Gtk.ApplicationWindow:
@@ -91,6 +92,9 @@ class HistoryWindow:
             if item.result.status is not TranslationStatus.SUCCESS:
                 continue
             filtered.append(item)
+        signature = tuple(id(item) for item in filtered)
+        if signature == self._render_signature:
+            return
         self._clear_children(self._list_box)
         self._items = filtered
         self._rows = []
@@ -153,6 +157,7 @@ class HistoryWindow:
             row.add_controller(gesture)
             self._rows.append(row_data)
             self._list_box.append(row)
+        self._render_signature = signature
 
     def _handle_close_request(self, _window: object) -> bool:
         self._on_close_cb()

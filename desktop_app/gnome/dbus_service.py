@@ -72,6 +72,8 @@ class DbusService:
     on_list_decks: Callable[[Callable[[AnkiListResult], None]], None]
     on_select_deck: Callable[[str, Callable[[AnkiActionResult], None]], None]
     on_save_settings: Callable[[Callable[[AnkiActionResult], None]], None]
+    _settings_dispatch_queued: bool = False
+    _history_dispatch_queued: bool = False
 
     @classmethod
     def register(
@@ -137,11 +139,11 @@ class DbusService:
             invocation.return_value(VariantType("()", ()))
             return
         if method_name == "ShowSettings":
-            GLib.idle_add(self._dispatch_settings)
+            self._queue_settings_dispatch()
             invocation.return_value(VariantType("()", ()))
             return
         if method_name == "ShowHistory":
-            GLib.idle_add(self._dispatch_history)
+            self._queue_history_dispatch()
             invocation.return_value(VariantType("()", ()))
             return
         if method_name == "GetAnkiStatus":
@@ -181,12 +183,26 @@ class DbusService:
         return False
 
     def _dispatch_settings(self) -> bool:
+        self._settings_dispatch_queued = False
         self.on_show_settings()
         return False
 
     def _dispatch_history(self) -> bool:
+        self._history_dispatch_queued = False
         self.on_show_history()
         return False
+
+    def _queue_settings_dispatch(self) -> None:
+        if self._settings_dispatch_queued:
+            return
+        self._settings_dispatch_queued = True
+        GLib.idle_add(self._dispatch_settings)
+
+    def _queue_history_dispatch(self) -> None:
+        if self._history_dispatch_queued:
+            return
+        self._history_dispatch_queued = True
+        GLib.idle_add(self._dispatch_history)
 
 
 def _extract_text(parameters: object) -> str | None:
