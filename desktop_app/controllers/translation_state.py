@@ -47,9 +47,8 @@ class TranslationRequest:
         return request_id == self.current_id
 
     def should_present(self, is_visible: bool) -> bool:
-        if self._presented:
-            return False
-        return not is_visible
+        del is_visible
+        return not self._presented
 
     def mark_presented(self) -> None:
         self._presented = True

@@ -145,7 +145,6 @@ class AnkiController:
         if result.error is not None:
             if result.error.outcome is AnkiOutcome.UNAVAILABLE:
                 notify(notify_messages.anki_unavailable())
-                set_anki_available(False)
                 return False
             if result.error.outcome is AnkiOutcome.DUPLICATE:
                 notify(notify_messages.anki_duplicate())
@@ -196,7 +195,6 @@ class AnkiController:
             return False
         if result.outcome is AnkiOutcome.UNAVAILABLE:
             notify(notify_messages.anki_unavailable())
-            set_anki_available(False)
             return False
         notify(notify_messages.anki_error(result.message or "Failed to add card."))
         return False

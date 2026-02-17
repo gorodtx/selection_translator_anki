@@ -91,8 +91,19 @@ class TranslationController:
         hotkey: bool = False,
         source: str = "dbus",
     ) -> None:
-        del hotkey
-        del source
+        should_raise = hotkey or source == "dbus"
+        if should_raise and self._view.is_visible():
+            window = self._view.window()
+            inactive_window = True
+            if window is not None and hasattr(window, "is_active"):
+                try:
+                    inactive_window = not bool(window.is_active())
+                except Exception:
+                    inactive_window = True
+            if inactive_window:
+                self._view.hide()
+        # Recover Add-to-Anki button after temporary Anki unavailability.
+        self.set_anki_available(True)
         normalized = text.strip() if text else ""
         if not normalized:
             return
@@ -100,7 +111,7 @@ class TranslationController:
             self._view.reset_original(text)
             if self._state.memory.result is not None:
                 self._view.apply_final(self._state.memory.result)
-            self._present_window()
+            self._present_window(force=True)
             return
         self.cancel_tasks()
         request_id = self._next_request_id()
@@ -301,8 +312,10 @@ class TranslationController:
     def _next_request_id(self) -> int:
         return self._state.request.next_id()
 
-    def _present_window(self) -> None:
-        should_present = self._state.request.should_present(self._view.is_visible())
+    def _present_window(self, *, force: bool = False) -> None:
+        should_present = force or self._state.request.should_present(
+            self._view.is_visible()
+        )
         presented = self._view.present(should_present=should_present)
         if not presented:
             return

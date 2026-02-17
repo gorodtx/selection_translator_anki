@@ -23,7 +23,7 @@ from desktop_app.application.anki_upsert import (
     AnkiUpsertValues,
 )
 from desktop_app.application.ports import AnkiPort
-from desktop_app.config import AnkiConfig
+from desktop_app.config import AnkiConfig, AnkiFieldMap
 from translate_logic.highlight import (
     HighlightSpec,
     build_highlight_spec,
@@ -85,7 +85,12 @@ class AnkiFlow:
         self, config: AnkiConfig, original_text: str, result: TranslationResult
     ) -> dict[str, str]:
         values = _values_from_result(result)
-        return self._build_fields_from_values(config, original_text, values)
+        return self._build_fields_from_values(
+            config,
+            original_text,
+            values,
+            field_map=config.fields,
+        )
 
     def add_note(
         self,
@@ -111,106 +116,113 @@ class AnkiFlow:
     ) -> Future[AnkiUpsertPreviewResult]:
         completion: Future[AnkiUpsertPreviewResult] = Future()
         values = _values_from_result(result)
-        query = _build_deck_model_query(config.deck, config.model)
-        find_future = self.service.find_notes(query)
+        expected_fields = _required_field_names(config.fields)
+
+        def _fallback_preview() -> AnkiUpsertPreviewResult:
+            return AnkiUpsertPreviewResult(
+                preview=AnkiUpsertPreview(
+                    values=values,
+                    matches=(),
+                    available_fields=expected_fields,
+                ),
+                error=None,
+            )
 
         def _finish(payload: AnkiUpsertPreviewResult) -> None:
             if completion.cancelled() or completion.done():
                 return
             completion.set_result(payload)
 
-        def _on_find(done: Future[AnkiIdListResult]) -> None:
-            if completion.cancelled() or completion.done():
-                return
-            if done.cancelled():
-                completion.cancel()
-                return
-            try:
-                find_result = done.result()
-            except Exception as exc:
-                _finish(
-                    AnkiUpsertPreviewResult(
-                        preview=None,
-                        error=_result_for_error(str(exc) or "Failed to query Anki."),
-                    )
-                )
-                return
-            if find_result.error is not None:
-                _finish(
-                    AnkiUpsertPreviewResult(
-                        preview=None,
-                        error=_result_for_error(find_result.error),
-                    )
-                )
-                return
-            note_ids = find_result.items
-            if not note_ids:
-                _finish(
-                    AnkiUpsertPreviewResult(
-                        preview=AnkiUpsertPreview(values=values, matches=()),
-                        error=None,
-                    )
-                )
-                return
-            details_future = self.service.note_details(note_ids)
+        def _start_find() -> None:
+            query = _build_deck_model_query(config.deck, config.model)
+            find_future = self.service.find_notes(query)
 
-            def _on_details(done_details: Future[AnkiNoteDetailsResult]) -> None:
+            def _on_find(done: Future[AnkiIdListResult]) -> None:
                 if completion.cancelled() or completion.done():
                     return
-                if done_details.cancelled():
+                if done.cancelled():
                     completion.cancel()
                     return
                 try:
-                    details_result = done_details.result()
+                    find_result = done.result()
                 except Exception as exc:
+                    del exc
+                    _finish(_fallback_preview())
+                    return
+                if find_result.error is not None:
+                    _finish(_fallback_preview())
+                    return
+                note_ids = find_result.items
+                if not note_ids:
                     _finish(
                         AnkiUpsertPreviewResult(
-                            preview=None,
-                            error=_result_for_error(
-                                str(exc) or "Failed to load note details."
+                            preview=AnkiUpsertPreview(
+                                values=values,
+                                matches=(),
+                                available_fields=expected_fields,
                             ),
+                            error=None,
                         )
                     )
                     return
-                if details_result.error is not None:
+                details_future = self.service.note_details(note_ids)
+
+                def _on_details(done_details: Future[AnkiNoteDetailsResult]) -> None:
+                    if completion.cancelled() or completion.done():
+                        return
+                    if done_details.cancelled():
+                        completion.cancel()
+                        return
+                    try:
+                        details_result = done_details.result()
+                    except Exception as exc:
+                        del exc
+                        _finish(_fallback_preview())
+                        return
+                    if details_result.error is not None:
+                        _finish(_fallback_preview())
+                        return
+                    available_fields = _merge_available_fields(
+                        expected_fields,
+                        _collect_available_fields(details_result.items),
+                    )
+                    normalized_word = _normalize_token(original_text)
+                    matches: list[AnkiUpsertMatch] = []
+                    for details in details_result.items:
+                        stored_word = details.fields.get(config.fields.word, "")
+                        if _normalize_token(_strip_html(stored_word)) != normalized_word:
+                            continue
+                        matches.append(
+                            AnkiUpsertMatch(
+                                note_id=details.note_id,
+                                word=stored_word,
+                                translation=details.fields.get(
+                                    config.fields.translation, ""
+                                ),
+                                definitions_en=details.fields.get(
+                                    config.fields.definitions_en, ""
+                                ),
+                                examples_en=details.fields.get(
+                                    config.fields.example_en, ""
+                                ),
+                            )
+                        )
                     _finish(
                         AnkiUpsertPreviewResult(
-                            preview=None,
-                            error=_result_for_error(details_result.error),
-                        )
-                    )
-                    return
-                normalized_word = _normalize_token(original_text)
-                field_map = config.fields
-                matches: list[AnkiUpsertMatch] = []
-                for details in details_result.items:
-                    stored_word = details.fields.get(field_map.word, "")
-                    if _normalize_token(_strip_html(stored_word)) != normalized_word:
-                        continue
-                    matches.append(
-                        AnkiUpsertMatch(
-                            note_id=details.note_id,
-                            word=stored_word,
-                            translation=details.fields.get(field_map.translation, ""),
-                            definitions_en=details.fields.get(
-                                field_map.definitions_en, ""
+                            preview=AnkiUpsertPreview(
+                                values=values,
+                                matches=tuple(matches),
+                                available_fields=available_fields,
                             ),
-                            examples_en=details.fields.get(field_map.example_en, ""),
+                            error=None,
                         )
                     )
-                _finish(
-                    AnkiUpsertPreviewResult(
-                        preview=AnkiUpsertPreview(
-                            values=values,
-                            matches=tuple(matches),
-                        ),
-                        error=None,
-                    )
-                )
 
-            details_future.add_done_callback(_on_details)
+                details_future.add_done_callback(_on_details)
 
-        find_future.add_done_callback(_on_find)
+            find_future.add_done_callback(_on_find)
+
+        _start_find()
         return completion
 
     def apply_upsert(
@@ -222,10 +234,21 @@ class AnkiFlow:
     ) -> Future[AnkiResult]:
         completion: Future[AnkiResult] = Future()
         selected_values = _selected_values(decision)
+        selected_values = _fill_merge_defaults(
+            selected=selected_values,
+            defaults=preview.values,
+            decision=decision,
+        )
+        effective_field_map = config.fields
 
         if decision.create_new or not decision.target_note_ids:
             create_values = _fallback_values(preview.values, selected_values)
-            fields = self._build_fields_from_values(config, original_text, create_values)
+            fields = self._build_fields_from_values(
+                config,
+                original_text,
+                create_values,
+                field_map=effective_field_map,
+            )
             add_future = self.service.add_note(config.deck, config.model, fields)
 
             def _on_add(done: Future[AnkiAddResult]) -> None:
@@ -263,6 +286,7 @@ class AnkiFlow:
                 match=match,
                 decision=decision,
                 selected=selected_values,
+                field_map=effective_field_map,
             )
             if update_fields:
                 updates.append((note_id, update_fields))
@@ -310,24 +334,115 @@ class AnkiFlow:
         back: str,
         css: str,
     ) -> Future[AnkiCreateModelResult]:
-        return self.service.create_model(model_name, fields, front, back, css)
+        completion: Future[AnkiCreateModelResult] = Future()
+        model_names_future = self.service.model_names()
+
+        def _set_result(result: AnkiCreateModelResult) -> None:
+            if completion.cancelled() or completion.done():
+                return
+            completion.set_result(result)
+
+        def _start_create() -> None:
+            create_future = self.service.create_model(model_name, fields, front, back, css)
+
+            def _on_create(done_create: Future[AnkiCreateModelResult]) -> None:
+                if completion.cancelled() or completion.done():
+                    return
+                if done_create.cancelled():
+                    completion.cancel()
+                    return
+                try:
+                    create_result = done_create.result()
+                except Exception as exc:
+                    _set_result(
+                        AnkiCreateModelResult(
+                            success=False,
+                            error=str(exc) or "Failed to create Anki model.",
+                        )
+                    )
+                    return
+                _set_result(create_result)
+
+            create_future.add_done_callback(_on_create)
+
+        def _delete_models(candidates: list[str]) -> None:
+            if completion.cancelled() or completion.done():
+                return
+            if not candidates:
+                _start_create()
+                return
+            model_to_delete = candidates.pop(0)
+            delete_future = self.service.delete_model(model_to_delete)
+
+            def _on_delete(done_delete: Future[AnkiUpdateResult]) -> None:
+                if completion.cancelled() or completion.done():
+                    return
+                if done_delete.cancelled():
+                    completion.cancel()
+                    return
+                try:
+                    delete_result = done_delete.result()
+                except Exception as exc:
+                    _set_result(
+                        AnkiCreateModelResult(
+                            success=False,
+                            error=str(exc) or "Failed to delete legacy Anki model.",
+                        )
+                    )
+                    return
+                if not delete_result.success:
+                    message = delete_result.error or "Failed to delete legacy Anki model."
+                    if not _is_delete_model_non_fatal(message):
+                        _set_result(
+                            AnkiCreateModelResult(success=False, error=message)
+                        )
+                        return
+                _delete_models(candidates)
+
+            delete_future.add_done_callback(_on_delete)
+
+        def _on_model_names(done_names: Future[AnkiListResult]) -> None:
+            if completion.cancelled() or completion.done():
+                return
+            if done_names.cancelled():
+                completion.cancel()
+                return
+            try:
+                names_result = done_names.result()
+            except Exception as exc:
+                _set_result(
+                    AnkiCreateModelResult(
+                        success=False,
+                        error=str(exc) or "Failed to list Anki models.",
+                    )
+                )
+                return
+            if names_result.error is not None:
+                _set_result(
+                    AnkiCreateModelResult(success=False, error=names_result.error)
+                )
+                return
+            delete_candidates = _owned_models_for_cleanup(names_result.items, model_name)
+            _delete_models(delete_candidates)
+
+        model_names_future.add_done_callback(_on_model_names)
+        return completion
 
     def _build_fields_from_values(
         self,
         config: AnkiConfig,
         original_text: str,
         values: AnkiUpsertValues,
+        field_map: AnkiFieldMap,
     ) -> dict[str, str]:
-        fields = config.fields
+        fields = field_map
         highlight_spec = build_highlight_spec(original_text)
-        payload = {
-            fields.word: original_text,
-            fields.translation: _format_translation_html(values.translations),
-            fields.example_en: _format_ranked_html(values.examples_en, highlight_spec),
-            fields.definitions_en: _format_ranked_html(
-                values.definitions_en, highlight_spec
-            ),
-        }
+        payload: dict[str, str] = {fields.word: original_text}
+        payload[fields.translation] = _format_translation_html(values.translations)
+        payload[fields.definitions_en] = _format_definitions_html(
+            values.definitions_en, highlight_spec
+        )
+        payload[fields.example_en] = _format_ranked_html(values.examples_en, highlight_spec)
         return payload
 
     def _build_update_fields(
@@ -338,8 +453,9 @@ class AnkiFlow:
         match: AnkiUpsertMatch,
         decision: AnkiUpsertDecision,
         selected: AnkiUpsertValues,
+        field_map: AnkiFieldMap,
     ) -> dict[str, str]:
-        fields = config.fields
+        fields = field_map
         highlight_spec = build_highlight_spec(original_text)
         existing_translations = _parse_translation_values(match.translation)
         existing_definitions = _parse_ranked_values(match.definitions_en)
@@ -367,7 +483,7 @@ class AnkiFlow:
                 tuple(next_translations)
             )
         if not _same_values(existing_definitions, next_definitions):
-            update_fields[fields.definitions_en] = _format_ranked_html(
+            update_fields[fields.definitions_en] = _format_definitions_html(
                 tuple(next_definitions), highlight_spec
             )
         if not _same_values(existing_examples, next_examples):
@@ -429,6 +545,106 @@ def _fallback_values(
         translations=selected.translations or defaults.translations,
         definitions_en=selected.definitions_en or defaults.definitions_en,
         examples_en=selected.examples_en or defaults.examples_en,
+    )
+
+
+def _fill_merge_defaults(
+    *,
+    selected: AnkiUpsertValues,
+    defaults: AnkiUpsertValues,
+    decision: AnkiUpsertDecision,
+) -> AnkiUpsertValues:
+    translations = selected.translations
+    definitions = selected.definitions_en
+    examples = selected.examples_en
+    if (
+        decision.translation_action is AnkiFieldAction.MERGE_UNIQUE_SELECTED
+        and not translations
+    ):
+        translations = defaults.translations
+    if (
+        decision.definitions_action is AnkiFieldAction.MERGE_UNIQUE_SELECTED
+        and not definitions
+    ):
+        definitions = defaults.definitions_en
+    if (
+        decision.examples_action is AnkiFieldAction.MERGE_UNIQUE_SELECTED
+        and not examples
+    ):
+        examples = defaults.examples_en
+    return AnkiUpsertValues(
+        translations=translations,
+        definitions_en=definitions,
+        examples_en=examples,
+    )
+
+
+def _collect_available_fields(details: list[object]) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in details:
+        fields = getattr(item, "fields", None)
+        if not isinstance(fields, dict):
+            continue
+        for field_name in fields.keys():
+            if not isinstance(field_name, str):
+                continue
+            normalized = field_name.casefold()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            names.append(field_name)
+    return tuple(names)
+
+
+def _merge_available_fields(*groups: tuple[str, ...]) -> tuple[str, ...]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for field_name in group:
+            cleaned = field_name.strip()
+            if not cleaned:
+                continue
+            key = cleaned.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(cleaned)
+    return tuple(merged)
+
+
+def _required_field_names(fields: AnkiFieldMap) -> tuple[str, ...]:
+    required = (
+        fields.word.strip(),
+        fields.translation.strip(),
+        fields.example_en.strip(),
+        fields.definitions_en.strip(),
+    )
+    return tuple(value for value in required if value)
+
+
+def _owned_models_for_cleanup(model_names: list[str], target_model: str) -> list[str]:
+    target = target_model.strip()
+    if not target:
+        return []
+    target_key = target.casefold()
+    owned: list[str] = []
+    for model_name in model_names:
+        cleaned = model_name.strip()
+        if not cleaned:
+            continue
+        lowered = cleaned.casefold()
+        if lowered == target_key or lowered.startswith(f"{target_key} "):
+            owned.append(cleaned)
+    return list(dict.fromkeys(owned))
+
+
+def _is_delete_model_non_fatal(message: str) -> bool:
+    lowered = message.casefold()
+    return (
+        "does not exist" in lowered
+        or "model was not found" in lowered
+        or "no such model" in lowered
     )
 
 
@@ -523,7 +739,20 @@ def _parse_ranked_values(raw: str) -> list[str]:
         return []
     items: list[str] = []
     for line in normalized.splitlines():
-        stripped = _NUMBER_RE.sub("", line).strip()
+        stripped_line = line.strip()
+        if not stripped_line:
+            continue
+        if ";" in stripped_line:
+            for segment in stripped_line.split(";"):
+                stripped = _NUMBER_RE.sub("", segment).strip()
+                if stripped.startswith(":"):
+                    stripped = stripped[1:].strip()
+                if stripped:
+                    items.append(stripped)
+            continue
+        stripped = _NUMBER_RE.sub("", stripped_line).strip()
+        if stripped.startswith(":"):
+            stripped = stripped[1:].strip()
         if stripped:
             items.append(stripped)
     return _dedupe_list(items)
@@ -550,18 +779,28 @@ def _format_translation_html(values: tuple[str, ...]) -> str:
     cleaned = _dedupe_list(list(values))
     if not cleaned:
         return ""
-    lines: list[str] = []
-    for index, value in enumerate(cleaned, start=1):
-        lines.append(f"{index}. {html.escape(value, quote=False)}")
-    return "<br>".join(lines)
+    return "; ".join(html.escape(value, quote=False) for value in cleaned)
 
 
 def _format_ranked_html(values: tuple[str, ...], highlight_spec: HighlightSpec) -> str:
     cleaned = _dedupe_list(list(values))
     if not cleaned:
         return ""
-    lines: list[str] = []
-    for index, value in enumerate(cleaned, start=1):
-        highlighted = highlight_to_html_mark(value, highlight_spec, class_name="hl")
-        lines.append(f"{index}. {highlighted}")
+    lines = [
+        highlight_to_html_mark(value, highlight_spec, class_name="hl")
+        for value in cleaned
+    ]
     return "<br>".join(lines)
+
+
+def _format_definitions_html(
+    values: tuple[str, ...], highlight_spec: HighlightSpec
+) -> str:
+    cleaned = _dedupe_list(list(values))
+    if not cleaned:
+        return ""
+    lines: list[str] = []
+    for value in cleaned:
+        highlighted = highlight_to_html_mark(value, highlight_spec, class_name="hl")
+        lines.append(f": {highlighted}")
+    return f"<i>{'; '.join(lines)}</i>"

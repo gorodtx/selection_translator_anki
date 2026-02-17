@@ -30,6 +30,7 @@ class AnkiUpsertMatch:
 class AnkiUpsertPreview:
     values: AnkiUpsertValues
     matches: tuple[AnkiUpsertMatch, ...]
+    available_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
