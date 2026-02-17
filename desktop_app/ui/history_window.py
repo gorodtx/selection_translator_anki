@@ -125,9 +125,8 @@ class HistoryWindow:
             definition.add_css_class("definition")
             definition.set_visible(bool(definition_text))
             if definition_text:
-                definition.set_markup(
-                    highlight_to_pango_markup(definition_text, definition_spec)
-                )
+                rendered = highlight_to_pango_markup(definition_text, definition_spec)
+                definition.set_markup(f"<i>{rendered}</i>")
             else:
                 definition.set_text("")
 
@@ -243,4 +242,4 @@ def _definition_preview(item: HistoryItem) -> str:
     definitions = item.result.definitions_en
     if not definitions:
         return ""
-    return f"Definition EN: {definitions[0]}"
+    return f": {definitions[0]}"

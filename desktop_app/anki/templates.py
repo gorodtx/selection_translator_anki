@@ -24,7 +24,7 @@ DEFAULT_BACK_TEMPLATE = """
 <div class="ru">{{translation}}</div>
 
 {{#definitions_en}}
-  <div class="ex ex-def">{{definitions_en}}</div>
+  <div class="defs-block">{{definitions_en}}</div>
 {{/definitions_en}}
 """.strip()
 
@@ -47,7 +47,9 @@ DEFAULT_MODEL_CSS = """
 .ru {
   font-size: 28px;
   font-weight: 600;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  line-height: 1.35;
+  text-align: left;
 }
 
 .ex {
@@ -61,6 +63,16 @@ DEFAULT_MODEL_CSS = """
   border-top: 4px solid #ccc;
   display: inline-block;
   max-width: 90%;
+}
+
+.defs-block {
+  margin-top: 12px;
+  padding: 10px 12px;
+  font-size: 18px;
+  line-height: 1.4;
+  text-align: left;
+  border-left: 3px solid #8a8f9a;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .hl,

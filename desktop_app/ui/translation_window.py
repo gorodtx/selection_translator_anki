@@ -25,6 +25,13 @@ Gtk = importlib.import_module("gi.repository.Gtk")
 
 
 class TranslationWindow:
+    _DEFAULT_WINDOW_WIDTH = 560
+    _DEFAULT_WINDOW_HEIGHT = 210
+    _MIN_WINDOW_HEIGHT = 140
+    _MAX_WINDOW_WIDTH = 760
+    _MAX_WINDOW_HEIGHT = 760
+    _BASE_LABEL_CHARS = 52
+
     def __init__(
         self,
         *,
@@ -36,10 +43,13 @@ class TranslationWindow:
         self._on_close_cb = on_close
         self._on_copy_all = on_copy_all
         self._on_add = on_add
-        max_label_chars = 24
+        self._max_label_chars = self._BASE_LABEL_CHARS
         window = Gtk.ApplicationWindow(application=app)
         window.set_title("Translator")
-        window.set_default_size(420, -1)
+        window.set_default_size(
+            self._DEFAULT_WINDOW_WIDTH,
+            self._DEFAULT_WINDOW_HEIGHT,
+        )
         window.set_resizable(False)
         window.set_hide_on_close(True)
         window.set_decorated(False)
@@ -63,7 +73,7 @@ class TranslationWindow:
         self._label_original.set_xalign(0.0)
         self._label_original.set_wrap(True)
         self._label_original.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._label_original.set_max_width_chars(max_label_chars)
+        self._label_original.set_max_width_chars(self._max_label_chars)
         self._label_original.set_hexpand(True)
         self._label_original.add_css_class("original")
         self._spinner = Gtk.Spinner()
@@ -76,14 +86,14 @@ class TranslationWindow:
         self._label_translation.set_xalign(0.0)
         self._label_translation.set_wrap(True)
         self._label_translation.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._label_translation.set_max_width_chars(max_label_chars)
+        self._label_translation.set_max_width_chars(self._max_label_chars)
         self._label_translation.add_css_class("translation")
 
         self._label_definitions = Gtk.Label(label="")
         self._label_definitions.set_xalign(0.0)
         self._label_definitions.set_wrap(True)
         self._label_definitions.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._label_definitions.set_max_width_chars(max_label_chars)
+        self._label_definitions.set_max_width_chars(self._max_label_chars)
         self._label_definitions.set_selectable(True)
         self._label_definitions.add_css_class("definition")
 
@@ -119,12 +129,17 @@ class TranslationWindow:
         root.append(actions)
 
         attach_window_drag(window, root)
+        self._root = root
         window.set_child(root)
         apply_theme()
 
         self._window = window
         self._rendered_state: TranslationViewState | None = None
         self._upsert_popover: object | None = None
+        self._last_target_size = (
+            self._DEFAULT_WINDOW_WIDTH,
+            self._DEFAULT_WINDOW_HEIGHT,
+        )
         self._apply_state(TranslationViewState.empty())
 
     @property
@@ -132,7 +147,22 @@ class TranslationWindow:
         return self._window
 
     def present(self) -> None:
+        if hasattr(self._window, "unminimize"):
+            try:
+                self._window.unminimize()
+            except Exception:
+                pass
+        if hasattr(self._window, "set_visible"):
+            try:
+                self._window.set_visible(True)
+            except Exception:
+                pass
         self._window.present()
+        if hasattr(self._window, "grab_focus"):
+            try:
+                self._window.grab_focus()
+            except Exception:
+                pass
 
     def hide(self) -> None:
         self.hide_anki_upsert()
@@ -159,6 +189,10 @@ class TranslationWindow:
             popover.set_has_arrow(True)
         if hasattr(popover, "set_autohide"):
             popover.set_autohide(False)
+        if hasattr(popover, "set_position") and hasattr(Gtk, "PositionType"):
+            popover.set_position(Gtk.PositionType.TOP)
+        if hasattr(popover, "set_offset"):
+            popover.set_offset(0, -6)
         if hasattr(popover, "set_parent"):
             popover.set_parent(self._add_button)
         elif hasattr(popover, "set_relative_to"):
@@ -169,7 +203,7 @@ class TranslationWindow:
         content.set_margin_bottom(8)
         content.set_margin_start(8)
         content.set_margin_end(8)
-        content.set_size_request(380, -1)
+        content.set_size_request(520, -1)
 
         title = Gtk.Label(label="Anki upsert")
         title.set_xalign(0.0)
@@ -223,10 +257,22 @@ class TranslationWindow:
         content.append(buttons)
 
         scroller = Gtk.ScrolledWindow()
-        scroller.set_min_content_height(320)
+        if hasattr(scroller, "set_min_content_width"):
+            scroller.set_min_content_width(520)
+        if hasattr(scroller, "set_max_content_width"):
+            scroller.set_max_content_width(760)
+        scroller.set_min_content_height(380)
+        if hasattr(scroller, "set_max_content_height"):
+            scroller.set_max_content_height(620)
+        if hasattr(scroller, "set_propagate_natural_height"):
+            scroller.set_propagate_natural_height(True)
+        if hasattr(scroller, "set_propagate_natural_width"):
+            scroller.set_propagate_natural_width(True)
         scroller.set_child(content)
         if hasattr(popover, "set_child"):
             popover.set_child(scroller)
+        if hasattr(popover, "set_size_request"):
+            popover.set_size_request(560, -1)
 
         def _cancel(_button: object) -> None:
             self.hide_anki_upsert()
@@ -380,6 +426,7 @@ class TranslationWindow:
         if previous is None or copy_all_sensitive != previous_copy_all_sensitive:
             self._copy_all_button.set_sensitive(copy_all_sensitive)
 
+        self._autosize_window(state)
         self._window.set_cursor(None)
         self._rendered_state = state
 
@@ -399,7 +446,7 @@ class TranslationWindow:
             en_label.set_xalign(0.0)
             en_label.set_wrap(True)
             en_label.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-            en_label.set_max_width_chars(24)
+            en_label.set_max_width_chars(self._max_label_chars)
             en_label.set_hexpand(True)
             en_label.set_selectable(True)
             en_label.add_css_class("example")
@@ -414,9 +461,9 @@ class TranslationWindow:
             return
         spec = build_highlight_spec(state.original_raw)
         lines: list[str] = []
-        for index, definition in enumerate(state.definitions_items, start=1):
+        for definition in state.definitions_items:
             rendered = highlight_to_pango_markup(definition, spec)
-            lines.append(f"{index}. {rendered}")
+            lines.append(f"<i>: {rendered}</i>")
         self._label_definitions.set_markup("\n".join(lines))
 
     def _clear_children(self, container: gtk_types.Gtk.Box) -> None:
@@ -500,3 +547,92 @@ class TranslationWindow:
         if len(text) <= limit:
             return text
         return f"{text[:limit - 1]}..."
+
+    def _autosize_window(self, state: TranslationViewState) -> None:
+        target_width = self._estimate_window_width(state)
+        target_height = self._estimate_window_height(state, target_width)
+        target = (target_width, target_height)
+        if target == self._last_target_size:
+            return
+        self._window.set_default_size(target_width, target_height)
+        self._last_target_size = target
+
+    def _estimate_window_width(self, state: TranslationViewState) -> int:
+        max_len = max(
+            (
+                len(text.strip())
+                for text in (
+                    state.original,
+                    state.translation,
+                    *state.definitions_items,
+                    *(item.en for item in state.examples),
+                )
+                if text.strip()
+            ),
+            default=0,
+        )
+        extra = max(0, min(220, (max_len - 56) * 2))
+        return min(self._MAX_WINDOW_WIDTH, self._DEFAULT_WINDOW_WIDTH + extra)
+
+    def _estimate_window_height(
+        self, state: TranslationViewState, target_width: int
+    ) -> int:
+        measured = self._measured_content_height(target_width)
+        if measured is not None:
+            return measured
+        chars_per_line = max(34, min(84, target_width // 10))
+        lines = 0
+        lines += self._estimate_lines(state.original, chars_per_line)
+        lines += self._estimate_lines(state.translation, chars_per_line)
+        lines += sum(
+            self._estimate_lines(definition, chars_per_line)
+            for definition in state.definitions_items
+        )
+        lines += sum(
+            self._estimate_lines(example.en, chars_per_line) for example in state.examples
+        )
+        lines += len(state.definitions_items) + len(state.examples)
+        if state.loading:
+            lines += 1
+        estimated = 96 + lines * 16
+        if state.translation:
+            estimated += 8
+        if state.definitions_items:
+            estimated += 10
+        if state.examples:
+            estimated += 12
+        if not state.translation and not state.definitions_items and not state.examples:
+            estimated = self._DEFAULT_WINDOW_HEIGHT
+        return max(
+            self._MIN_WINDOW_HEIGHT,
+            min(self._MAX_WINDOW_HEIGHT, estimated),
+        )
+
+    def _measured_content_height(self, target_width: int) -> int | None:
+        root = getattr(self, "_root", None)
+        if root is None or not hasattr(root, "measure"):
+            return None
+        try:
+            min_height, natural_height, _, _ = root.measure(
+                Gtk.Orientation.VERTICAL,
+                target_width,
+            )
+        except Exception:
+            return None
+        content_height = max(int(min_height), int(natural_height)) + 8
+        return max(
+            self._MIN_WINDOW_HEIGHT,
+            min(self._MAX_WINDOW_HEIGHT, content_height),
+        )
+
+    def _estimate_lines(self, text: str, chars_per_line: int) -> int:
+        stripped = text.strip()
+        if not stripped:
+            return 0
+        total = 0
+        for line in stripped.splitlines():
+            clean = line.strip()
+            if not clean:
+                continue
+            total += max(1, (len(clean) + chars_per_line - 1) // chars_per_line)
+        return total
