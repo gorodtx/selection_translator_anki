@@ -1,0 +1,5 @@
+# Translator offline asset manifest (SHA-256)
+# Update this file for each release that changes offline databases.
+91a005c531fdb52f44627cab572de03c60d468c41c59ddeeff8de4b8572cc510  primary.sqlite3
+c4f31145e0d414b59b151bf9010104696158af796b40d1a583738337d0cc1925  fallback.sqlite3
+b2664e5949a3d6bb26b01afc3e78eae295b5adfdfb5c1191c4b1ca084b38f0fe  definitions_pack.sqlite3

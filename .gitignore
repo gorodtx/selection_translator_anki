@@ -523,7 +523,7 @@ publish/
 *.pubxml
 *.publishproj
 .skills
-
+.skills.bak.20260216040617
 # Microsoft Azure Web App publish settings. Comment the next line if you want to
 # checkin your Azure Web App publish settings, but sensitive information contained
 # in these scripts will be unencrypted
