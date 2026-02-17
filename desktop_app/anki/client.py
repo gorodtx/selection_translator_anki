@@ -146,6 +146,30 @@ class AnkiClient:
             return AnkiUpdateResult(success=False, error=response.error)
         return AnkiUpdateResult(success=True, error=None)
 
+    async def add_field(self, model: str, field_name: str) -> AnkiUpdateResult:
+        payload: dict[str, object] = {
+            "modelName": model,
+            "fieldName": field_name,
+        }
+        response = await self._request("addField", payload)
+        if response.error is not None:
+            return AnkiUpdateResult(success=False, error=response.error)
+        return AnkiUpdateResult(success=True, error=None)
+
+    async def delete_model(self, model: str) -> AnkiUpdateResult:
+        # Prefer explicit note deletion for hard cleanup; fallback to legacy payload.
+        payload: dict[str, object] = {
+            "modelName": model,
+            "deleteNotes": True,
+        }
+        response = await self._request("deleteModel", payload)
+        if response.error is not None and _should_retry_delete_model(response.error):
+            fallback_payload: dict[str, object] = {"modelName": model}
+            response = await self._request("deleteModel", fallback_payload)
+        if response.error is not None:
+            return AnkiUpdateResult(success=False, error=response.error)
+        return AnkiUpdateResult(success=True, error=None)
+
     async def create_model(
         self,
         model_name: str,
@@ -202,6 +226,15 @@ def _parse_response(payload: str) -> AnkiResponse:
         return AnkiResponse(result=None, error="Invalid AnkiConnect response")
     error = _coerce_str(data_dict.get("error"))
     return AnkiResponse(result=data_dict.get("result"), error=error)
+
+
+def _should_retry_delete_model(error: str) -> bool:
+    lowered = error.casefold()
+    return (
+        "unexpected parameter" in lowered
+        or "unknown parameter" in lowered
+        or "invalid parameter" in lowered
+    )
 
 
 def _coerce_list_response(response: AnkiResponse) -> AnkiListResult:

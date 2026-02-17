@@ -156,6 +156,20 @@ class AnkiService:
         )
         return self._register_update_future(future)
 
+    def add_field(self, model: str, field_name: str) -> Future[AnkiUpdateResult]:
+        future: Future[AnkiUpdateResult] = asyncio.run_coroutine_threadsafe(
+            self._add_field_async(model, field_name),
+            self.runtime.loop,
+        )
+        return self._register_update_future(future)
+
+    def delete_model(self, model: str) -> Future[AnkiUpdateResult]:
+        future: Future[AnkiUpdateResult] = asyncio.run_coroutine_threadsafe(
+            self._delete_model_async(model),
+            self.runtime.loop,
+        )
+        return self._register_update_future(future)
+
     def create_model(
         self,
         model_name: str,
@@ -313,6 +327,14 @@ class AnkiService:
     ) -> AnkiUpdateResult:
         client = await self._ensure_client()
         return await client.update_note_fields(note_id, fields)
+
+    async def _add_field_async(self, model: str, field_name: str) -> AnkiUpdateResult:
+        client = await self._ensure_client()
+        return await client.add_field(model, field_name)
+
+    async def _delete_model_async(self, model: str) -> AnkiUpdateResult:
+        client = await self._ensure_client()
+        return await client.delete_model(model)
 
     async def _create_model_async(
         self,

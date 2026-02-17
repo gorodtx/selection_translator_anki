@@ -79,9 +79,6 @@ class SettingsController:
         ):
             reply(self._action_result("Model creation is already in progress."))
             return
-        if self._model_names_future is not None and not self._model_names_future.done():
-            reply(self._action_result("Model check is already in progress."))
-            return
         if self._model_ready:
             reply(
                 self._action_result(
@@ -89,20 +86,8 @@ class SettingsController:
                 )
             )
             return
-        try:
-            self._model_names_future = self._anki_flow.model_names()
-        except Exception:
-            reply(
-                self._action_result(
-                    notify_messages.settings_error(
-                        "Failed to check Anki models."
-                    ).message
-                )
-            )
-            return
-        self._model_names_future.add_done_callback(
-            lambda done: GLib.idle_add(self._on_model_names_ready, done, reply)
-        )
+        deck = self._current_deck()
+        self._start_create_model(deck, reply)
 
     def list_decks(self, reply: Callable[[AnkiListResult], None]) -> None:
         if not self._runtime_ready():
@@ -267,44 +252,6 @@ class SettingsController:
         reply(self._action_result(notify_messages.anki_deck_selected(deck).message))
         return False
 
-    def _on_model_names_ready(
-        self,
-        future: Future[AnkiListResult],
-        reply: Callable[[AnkiActionResult], None],
-    ) -> bool:
-        if future.cancelled():
-            reply(self._action_result("Model check was cancelled."))
-            return False
-        try:
-            result = future.result()
-        except Exception:
-            reply(
-                self._action_result(
-                    notify_messages.settings_error(
-                        "Failed to check Anki models."
-                    ).message
-                )
-            )
-            return False
-        if result.error is not None:
-            reply(
-                self._action_result(
-                    notify_messages.settings_error(result.error).message
-                )
-            )
-            return False
-        deck = self._current_deck()
-        if DEFAULT_MODEL_NAME in result.items:
-            self._apply_created_model(deck)
-            reply(
-                self._action_result(
-                    notify_messages.anki_model_exists(DEFAULT_MODEL_NAME).message
-                )
-            )
-            return False
-        self._start_create_model(deck, reply)
-        return False
-
     def _start_create_model(
         self,
         deck: str,
@@ -348,14 +295,6 @@ class SettingsController:
             )
             return False
         if result.error is not None:
-            if _model_exists_error(result.error):
-                self._apply_created_model(deck)
-                reply(
-                    self._action_result(
-                        notify_messages.anki_model_exists(DEFAULT_MODEL_NAME).message
-                    )
-                )
-                return False
             reply(
                 self._action_result(
                     notify_messages.settings_error(result.error).message
@@ -385,7 +324,12 @@ class SettingsController:
             self._model_ready = False
             self._flush_status_waiters()
             return False
-        self._model_ready = DEFAULT_MODEL_NAME in result.items
+        default_key = DEFAULT_MODEL_NAME.casefold()
+        has_default = any(item.casefold() == default_key for item in result.items)
+        has_legacy = any(
+            item.casefold().startswith(f"{default_key} ") for item in result.items
+        )
+        self._model_ready = has_default and not has_legacy
         if self._model_ready and self._config.anki.model != DEFAULT_MODEL_NAME:
             self._apply_created_model(self._current_deck())
         self._flush_status_waiters()
@@ -444,7 +388,3 @@ class SettingsController:
         except RuntimeError:
             return False
         return True
-
-
-def _model_exists_error(message: str) -> bool:
-    return "already exists" in message.casefold()
