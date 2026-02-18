@@ -6,20 +6,20 @@ from concurrent.futures import Future
 import importlib
 from pathlib import Path
 
-from desktop_app.anki import AnkiCreateModelResult, AnkiListResult
-from desktop_app.anki.importer import DeckImportResult, import_deck
-from desktop_app.anki.templates import (
+from desktop_app.infrastructure.anki import AnkiCreateModelResult, AnkiListResult
+from desktop_app.infrastructure.anki.importer import DeckImportResult, import_deck
+from desktop_app.infrastructure.anki.templates import (
     DEFAULT_BACK_TEMPLATE,
     DEFAULT_FRONT_TEMPLATE,
     DEFAULT_MODEL_CSS,
     DEFAULT_MODEL_FIELDS,
     DEFAULT_MODEL_NAME,
 )
-from desktop_app.application.anki_flow import AnkiFlow
+from desktop_app.application.use_cases.anki_flow import AnkiFlow
 from desktop_app.config import AnkiConfig, AnkiFieldMap, AppConfig
-from desktop_app.notifications import BannerHost, Notification
-from desktop_app.notifications import messages as notify_messages
-from desktop_app.services.runtime import AsyncRuntime
+from desktop_app.infrastructure.notifications import BannerHost, Notification
+from desktop_app.infrastructure.notifications import messages as notify_messages
+from desktop_app.infrastructure.services.runtime import AsyncRuntime
 from desktop_app import gtk_types
 
 gi = importlib.import_module("gi")

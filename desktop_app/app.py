@@ -4,18 +4,18 @@ import importlib
 import os
 from collections.abc import Callable
 
-from desktop_app.adapters.clipboard_writer import ClipboardWriter
-from desktop_app.anki import AnkiListResult
+from desktop_app.infrastructure.adapters.clipboard_writer import ClipboardWriter
+from desktop_app.infrastructure.anki import AnkiListResult
 from desktop_app.config import AppConfig, config_path, load_config, save_config
-from desktop_app.controllers import (
+from desktop_app.presentation.controllers import (
     AnkiController,
     SettingsController,
     TranslationController,
 )
-from desktop_app.controllers.settings_controller import AnkiActionResult, AnkiStatus
-from .application.translation_executor import TranslationExecutor
-from desktop_app.gnome.dbus_service import DbusService
-from desktop_app.services.container import AppServices
+from desktop_app.presentation.controllers.settings_controller import AnkiActionResult, AnkiStatus
+from desktop_app.application.use_cases.translation_executor import TranslationExecutor
+from desktop_app.presentation.dbus.service import DbusService
+from desktop_app.infrastructure.services.container import AppServices
 from desktop_app import gtk_types
 
 gi = importlib.import_module("gi")

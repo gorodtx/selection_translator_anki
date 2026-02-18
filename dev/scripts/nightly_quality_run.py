@@ -18,9 +18,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from nightly_dataset import golden_queries
 
-from desktop_app.services.history import HistoryStore
-from desktop_app.services.result_cache import ResultCache
-from translate_logic.application.translate import translate_async
+from desktop_app.infrastructure.services.history import HistoryStore
+from desktop_app.infrastructure.services.result_cache import ResultCache
+from translate_logic.application.pipeline.translate import translate_async
 from translate_logic.models import FieldValue, TranslationResult
 
 BUS_NAME = "com.translator.desktop"
@@ -45,7 +45,7 @@ NON_NETWORK_TIMEOUT_PATTERNS: tuple[str, ...] = (
 )
 _NON_NETWORK_TIMEOUT_ALLOWLIST: tuple[str, ...] = (
     "desktop_app/gtk_types.py",
-    "desktop_app/notifications/banner.py",
+    "desktop_app/infrastructure/notifications/banner.py",
     "gnome_extension/translator@com.translator.desktop/extension.js",
 )
 
