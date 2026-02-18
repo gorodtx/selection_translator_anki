@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 import hashlib
 import math
@@ -314,7 +314,17 @@ def _build_candidates(
     candidate_cap: int,
 ) -> list[_Candidate]:
     raw: list[
-        tuple[Example, str, frozenset[str], tuple[str, ...], float, float, float, float]
+        tuple[
+            Example,
+            str,
+            frozenset[str],
+            tuple[str, ...],
+            float,
+            float,
+            float,
+            float,
+            float,
+        ]
     ] = []
     seen_signatures: set[str] = set()
 
@@ -341,6 +351,10 @@ def _build_candidates(
             )
         length_quality = _length_quality(len(text))
         punct_quality = _punct_quality(text)
+        repetition_quality = _repetition_quality(
+            tokens=text_tokens,
+            query_token_set=query_token_set,
+        )
         bm25 = _bm25_value(index=index, values=bm25_scores)
         raw.append(
             (
@@ -352,6 +366,7 @@ def _build_candidates(
                 phrase_exact,
                 token_coverage,
                 length_quality + punct_quality,
+                repetition_quality,
             )
         )
         if len(raw) >= candidate_cap:
@@ -372,12 +387,14 @@ def _build_candidates(
             phrase_exact,
             token_cov,
             quality_sum,
+            repetition_quality,
         ) = item
         relevance = (
             0.55 * relevance_from_bm25[index]
             + 0.15 * phrase_exact
             + 0.10 * token_cov
-            + 0.20 * quality_sum
+            + 0.12 * quality_sum
+            + 0.08 * repetition_quality
         )
         candidates.append(
             _Candidate(
@@ -395,11 +412,28 @@ def _is_low_information_tokens(tokens: list[str]) -> bool:
     if not tokens:
         return True
     diversity = len(set(tokens)) / len(tokens)
-    if diversity < 0.34 and len(tokens) >= 4:
+    if diversity < 0.42 and len(tokens) >= 4:
         return True
+    if len(tokens) >= 6:
+        max_frequency = max(Counter(tokens).values(), default=0)
+        if max_frequency / len(tokens) >= 0.40:
+            return True
+        if _repeated_ngram_ratio(tokens=tokens, n=2) >= 0.35:
+            return True
     if len(tokens) <= 3 and any(token in _HIGH_AMBIGUITY_TOKENS for token in tokens):
         return True
     return False
+
+
+def _repeated_ngram_ratio(*, tokens: list[str], n: int) -> float:
+    if n <= 0 or len(tokens) <= n:
+        return 0.0
+    grams = [tuple(tokens[index : index + n]) for index in range(len(tokens) - n + 1)]
+    if not grams:
+        return 0.0
+    unique = len(set(grams))
+    repeated = len(grams) - unique
+    return repeated / len(grams)
 
 
 def _signature_from_tokens(tokens: list[str]) -> str:
@@ -489,6 +523,38 @@ def _bm25_relevance(values: list[float]) -> list[float]:
         # For BM25 from SQLite FTS5 lower is better.
         result.append(1.0 - normalized)
     return result
+
+
+def _repetition_quality(
+    *,
+    tokens: list[str],
+    query_token_set: frozenset[str],
+) -> float:
+    if not tokens:
+        return 0.0
+    token_counts = Counter(tokens)
+    max_token_ratio = max(token_counts.values(), default=0) / len(tokens)
+    penalty = 0.0
+    if max_token_ratio >= 0.30:
+        penalty += 0.60
+
+    bigrams = [tuple(tokens[index : index + 2]) for index in range(len(tokens) - 1)]
+    if bigrams:
+        max_bigram_ratio = max(Counter(bigrams).values(), default=0) / len(bigrams)
+        if max_bigram_ratio >= 0.18:
+            penalty += 0.40
+
+    if query_token_set:
+        max_query_repeat = max(
+            (token_counts.get(token, 0) for token in query_token_set),
+            default=0,
+        )
+        if max_query_repeat >= 3:
+            penalty += 0.40
+        elif max_query_repeat == 2:
+            penalty += 0.20
+
+    return max(0.0, 1.0 - penalty)
 
 
 def _deterministic_jitter(*, seed: str, signature: str, bucket: int) -> float:

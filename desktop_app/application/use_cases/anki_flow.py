@@ -802,5 +802,11 @@ def _format_definitions_html(
     lines: list[str] = []
     for value in cleaned:
         highlighted = highlight_to_html_mark(value, highlight_spec, class_name="hl")
-        lines.append(f": {highlighted}")
-    return f"<i>{'; '.join(lines)}</i>"
+        lines.append(highlighted)
+    rendered: list[str] = []
+    for index, line in enumerate(lines):
+        if index < len(lines) - 1:
+            rendered.append(f"{line};")
+        else:
+            rendered.append(line)
+    return f"<i>{'<br>'.join(rendered)}</i>"
