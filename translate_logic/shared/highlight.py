@@ -165,8 +165,8 @@ def _find_token_ranges(text: str, spec: HighlightSpec) -> list[tuple[int, int]]:
 
     ranges = []
     for match in _TOKEN_RE.finditer(text):
-        token = match.group(0).casefold()
-        if token in literal_set:
+        token_text = match.group(0).casefold()
+        if token_text in literal_set:
             ranges.append((match.start(), match.end()))
     return ranges
 

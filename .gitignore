@@ -697,6 +697,12 @@ MigrationBackup/
 
 # Development environment
 dev/**
+!dev/
+dev/*
+!dev/scripts/
+dev/scripts/*
+!dev/scripts/nightly_quality_run.py
+!dev/scripts/build_release_assets.sh
 test.py
 test.*
 **/test.py

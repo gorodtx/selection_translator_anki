@@ -1,3 +1,4 @@
 [D-BUS Service]
 Name=com.translator.desktop
-Exec=python3 -m desktop_app.main
+SystemdService=translator-desktop.service
+Exec=/usr/bin/systemctl --user start translator-desktop.service

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import importlib
 import re
+from typing import Iterable, Protocol, Sequence, cast
 
 _CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 
@@ -9,20 +11,34 @@ _POS_NONE = None
 _GRAMMEMES_NONE: frozenset[str] = frozenset()
 
 
+class _TagProto(Protocol):
+    POS: str | None
+    grammemes: Iterable[str]
+
+
+class _ParseProto(Protocol):
+    normal_form: str
+    tag: _TagProto
+
+
+class _MorphAnalyzerProto(Protocol):
+    def parse(self, word: str) -> Sequence[_ParseProto]: ...
+
+
 def has_cyrillic(text: str) -> bool:
     return bool(_CYRILLIC_RE.search(text))
 
 
 @lru_cache(maxsize=1)
-def _analyzer() -> "object | None":
+def _analyzer() -> _MorphAnalyzerProto | None:
     # Lazy import keeps startup fast when morphology isn't needed.
     # On desktop D-Bus activation we may run under system python that doesn't
     # have optional morphology deps installed; fallback must stay functional.
     try:
-        import pymorphy3
+        pymorphy3 = importlib.import_module("pymorphy3")
     except ModuleNotFoundError:
         return None
-    return pymorphy3.MorphAnalyzer()
+    return cast(_MorphAnalyzerProto, pymorphy3.MorphAnalyzer())
 
 
 @lru_cache(maxsize=8_192)

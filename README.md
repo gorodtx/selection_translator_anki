@@ -37,28 +37,31 @@ A GNOME-first desktop translator that works on the **primary selection** and sho
 
 ## Installation (GNOME)
 
-Run the single installer script:
+One command from Releases:
 
 ```bash
-bash scripts/install_gnome.sh install
+curl -fsSL https://github.com/igor3204/selection_translator_anki/releases/latest/download/install.sh | bash -s -- install
 ```
 
-Update:
+Local repository install/update/remove:
 
 ```bash
-bash scripts/install_gnome.sh update
+bash scripts/install.sh install
+bash scripts/install.sh update
+bash scripts/install.sh remove
 ```
 
-Remove:
+Additional operations:
 
 ```bash
-bash scripts/install_gnome.sh remove
+bash scripts/install.sh rollback
+bash scripts/install.sh healthcheck
 ```
 
 Notes:
-- The script installs the GNOME extension, backend code, D-Bus service, and offline bases (`primary.sqlite3`, `fallback.sqlite3`, `definitions_pack.sqlite3`).
-- If local base files are missing, the installer downloads them from GitHub Releases (`latest` by default).
-- Every base file is verified by SHA-256 against a release manifest; install fails fast on checksum mismatch.
+- The installer is production-only: extension + backend runtime + user systemd + D-Bus + offline bases.
+- Release assets are checksum-verified using `release-assets.sha256` and fail-fast on mismatch.
+- Default release assets: `translator-app.tar.gz`, `translator-extension.zip`, `primary.sqlite3`, `fallback.sqlite3`, `definitions_pack.sqlite3`.
 - Override release source with:
   - `TRANSLATOR_RELEASE_REPO=owner/repo`
   - `TRANSLATOR_RELEASE_TAG=vX.Y.Z`
@@ -66,7 +69,10 @@ Notes:
   - `TRANSLATOR_ASSETS_MANIFEST_ASSET=release-assets.sha256`
   - `TRANSLATOR_ASSETS_MANIFEST_URL=https://.../release-assets.sha256`
   - `TRANSLATOR_ASSETS_MANIFEST_PATH=/path/to/release-assets.sha256`
-- Local developer update/reload scripts live only in `dev/tools/`.
+  - `TRANSLATOR_APP_ASSET=translator-app.tar.gz`
+  - `TRANSLATOR_EXTENSION_ASSET=translator-extension.zip`
+- Release asset builder for maintainers: `dev/scripts/build_release_assets.sh`.
+- Local developer reload scripts remain in `dev/tools/`.
 - If the extension does not appear immediately, **log out and back in**.
 
 ## Usage
