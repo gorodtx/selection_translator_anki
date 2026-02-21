@@ -6,7 +6,12 @@ ACTION="${1:-install}"
 APP_ID="com.translator.desktop"
 EXT_UUID="translator@com.translator.desktop"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]-}"
+if [[ -n "${SCRIPT_SOURCE}" && "${SCRIPT_SOURCE}" != "bash" && "${SCRIPT_SOURCE}" != "-bash" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
+else
+  SCRIPT_DIR="$(pwd)"
+fi
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 APP_ROOT="${HOME}/.local/share/translator"
