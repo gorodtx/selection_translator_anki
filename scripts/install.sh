@@ -555,6 +555,92 @@ SERVICE
   fi
 }
 
+list_release_dirs_sorted() {
+  python3 - "${RELEASES_DIR}" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+if not root.is_dir():
+    raise SystemExit(0)
+
+items = [path for path in root.iterdir() if path.is_dir()]
+items.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+for path in items:
+    print(path)
+PY
+}
+
+is_release_dir_path() {
+  local path="$1"
+  [[ -n "${path}" ]] || return 1
+  [[ -d "${path}" ]] || return 1
+  [[ "${path}" == "${RELEASES_DIR}"/* ]] || return 1
+  return 0
+}
+
+ensure_previous_release_link() {
+  local current_target=""
+  if [[ -L "${CURRENT_LINK}" || -d "${CURRENT_LINK}" ]]; then
+    current_target="$(readlink -f "${CURRENT_LINK}" || true)"
+  fi
+
+  local previous_target=""
+  if [[ -L "${PREVIOUS_LINK}" || -d "${PREVIOUS_LINK}" ]]; then
+    previous_target="$(readlink -f "${PREVIOUS_LINK}" || true)"
+  fi
+
+  if is_release_dir_path "${previous_target}" && [[ "${previous_target}" != "${current_target}" ]]; then
+    return
+  fi
+
+  local candidate=""
+  local release_dir=""
+  while IFS= read -r release_dir; do
+    [[ -n "${release_dir}" ]] || continue
+    if [[ "${release_dir}" == "${current_target}" ]]; then
+      continue
+    fi
+    candidate="${release_dir}"
+    break
+  done < <(list_release_dirs_sorted)
+
+  if [[ -n "${candidate}" ]]; then
+    ln -sfn "${candidate}" "${PREVIOUS_LINK}"
+    return
+  fi
+
+  rm -f "${PREVIOUS_LINK}" >/dev/null 2>&1 || true
+}
+
+cleanup_old_releases() {
+  ensure_previous_release_link
+
+  local current_target=""
+  if [[ -L "${CURRENT_LINK}" || -d "${CURRENT_LINK}" ]]; then
+    current_target="$(readlink -f "${CURRENT_LINK}" || true)"
+  fi
+
+  local previous_target=""
+  if [[ -L "${PREVIOUS_LINK}" || -d "${PREVIOUS_LINK}" ]]; then
+    previous_target="$(readlink -f "${PREVIOUS_LINK}" || true)"
+  fi
+
+  local release_dir=""
+  local removed=0
+  while IFS= read -r release_dir; do
+    [[ -n "${release_dir}" ]] || continue
+    if [[ "${release_dir}" == "${current_target}" || "${release_dir}" == "${previous_target}" ]]; then
+      continue
+    fi
+    rm -rf "${release_dir}"
+    removed=$((removed + 1))
+    log "pruned old release: $(basename "${release_dir}")"
+  done < <(list_release_dirs_sorted)
+
+  log "release cleanup: removed ${removed} old release(s)"
+}
+
 activate_release() {
   local release_dir="$1"
 
@@ -682,6 +768,8 @@ install_or_update() {
     run_dbus_healthcheck
   fi
 
+  cleanup_old_releases
+
   log "installed release: ${release_id}"
   log "current runtime: ${CURRENT_LINK}"
   log "extension: ${EXT_DIR}"
@@ -732,6 +820,8 @@ rollback_release() {
   if [[ "${SKIP_HEALTHCHECK}" != "1" ]]; then
     run_dbus_healthcheck
   fi
+
+  cleanup_old_releases
 
   log "rolled back to: ${previous_target}"
 }
