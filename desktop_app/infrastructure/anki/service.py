@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import aiohttp
 
@@ -152,6 +154,13 @@ class AnkiService:
     ) -> Future[AnkiUpdateResult]:
         future: Future[AnkiUpdateResult] = asyncio.run_coroutine_threadsafe(
             self._update_note_fields_async(note_id, fields),
+            self.runtime.loop,
+        )
+        return self._register_update_future(future)
+
+    def store_media_path(self, local_path: str, filename: str) -> Future[AnkiUpdateResult]:
+        future: Future[AnkiUpdateResult] = asyncio.run_coroutine_threadsafe(
+            self._store_media_path_async(local_path, filename),
             self.runtime.loop,
         )
         return self._register_update_future(future)
@@ -328,6 +337,17 @@ class AnkiService:
         client = await self._ensure_client()
         return await client.update_note_fields(note_id, fields)
 
+    async def _store_media_path_async(
+        self, local_path: str, filename: str
+    ) -> AnkiUpdateResult:
+        client = await self._ensure_client()
+        try:
+            raw = await asyncio.to_thread(_read_binary_file, local_path)
+        except OSError as exc:
+            return AnkiUpdateResult(success=False, error=f"Failed to read image: {exc}")
+        payload = base64.b64encode(raw).decode("ascii")
+        return await client.store_media_file(filename, payload)
+
     async def _add_field_async(self, model: str, field_name: str) -> AnkiUpdateResult:
         client = await self._ensure_client()
         return await client.add_field(model, field_name)
@@ -383,3 +403,7 @@ class AnkiService:
             return
         await self._session.close()
         self._session = None
+
+
+def _read_binary_file(path: str) -> bytes:
+    return Path(path).read_bytes()

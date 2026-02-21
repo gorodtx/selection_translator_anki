@@ -5,7 +5,10 @@ from concurrent.futures import Future
 import importlib
 
 from desktop_app.infrastructure.adapters.clipboard_writer import ClipboardWriter
-from desktop_app.application.use_cases.anki_upsert import AnkiUpsertDecision, AnkiUpsertPreview
+from desktop_app.application.use_cases.anki_upsert import (
+    AnkiUpsertDecision,
+    AnkiUpsertPreview,
+)
 from desktop_app.application.history import HistoryItem
 from desktop_app.application.use_cases.translation_executor import TranslationExecutor
 from desktop_app.infrastructure.anki.templates import DEFAULT_MODEL_NAME
@@ -95,10 +98,14 @@ class TranslationController:
         if should_raise and self._view.is_visible():
             window = self._view.window()
             inactive_window = True
-            if window is not None and hasattr(window, "is_active"):
-                try:
-                    inactive_window = not bool(window.is_active())
-                except Exception:
+            if window is not None:
+                is_active = getattr(window, "is_active", None)
+                if callable(is_active):
+                    try:
+                        inactive_window = not bool(is_active())
+                    except Exception:
+                        inactive_window = True
+                else:
                     inactive_window = True
             if inactive_window:
                 self._view.hide()
@@ -281,6 +288,7 @@ class TranslationController:
 
     def _on_anki_upsert_ready(self, preview: AnkiUpsertPreview) -> None:
         self._view.show_anki_upsert(
+            query_text=self._state.memory.text,
             preview=preview,
             on_apply=lambda decision: self._on_anki_upsert_apply(preview, decision),
             on_cancel=lambda: None,

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
 import html
+from pathlib import Path
 import re
 
 from desktop_app.infrastructure.anki import (
@@ -17,6 +19,7 @@ from desktop_app.infrastructure.anki import (
 )
 from desktop_app.application.use_cases.anki_upsert import (
     AnkiFieldAction,
+    AnkiImageAction,
     AnkiUpsertDecision,
     AnkiUpsertMatch,
     AnkiUpsertPreview,
@@ -35,6 +38,8 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _TAG_RE = re.compile(r"<[^>]+>")
 _BR_RE = re.compile(r"(?i)<br\s*/?>")
 _NUMBER_RE = re.compile(r"^\s*\d+\.\s*")
+_NON_FILE_CHARS_RE = re.compile(r"[^a-z0-9._-]+")
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 class AnkiOutcome(Enum):
@@ -58,6 +63,13 @@ class AnkiUpsertPreviewResult:
     error: AnkiResult | None
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedImage:
+    local_path: str
+    media_filename: str
+    html_tag: str
+
+
 @dataclass(slots=True)
 class AnkiFlow:
     service: AnkiPort
@@ -78,6 +90,7 @@ class AnkiFlow:
                 fields.translation,
                 fields.example_en,
                 fields.definitions_en,
+                fields.image,
             ]
         )
 
@@ -190,7 +203,10 @@ class AnkiFlow:
                     matches: list[AnkiUpsertMatch] = []
                     for details in details_result.items:
                         stored_word = details.fields.get(config.fields.word, "")
-                        if _normalize_token(_strip_html(stored_word)) != normalized_word:
+                        if (
+                            _normalize_token(_strip_html(stored_word))
+                            != normalized_word
+                        ):
                             continue
                         matches.append(
                             AnkiUpsertMatch(
@@ -205,6 +221,7 @@ class AnkiFlow:
                                 examples_en=details.fields.get(
                                     config.fields.example_en, ""
                                 ),
+                                image=details.fields.get(config.fields.image, ""),
                             )
                         )
                     _finish(
@@ -240,90 +257,138 @@ class AnkiFlow:
             decision=decision,
         )
         effective_field_map = config.fields
+        should_store_image = bool(decision.image_path) and (
+            decision.create_new
+            or not decision.target_note_ids
+            or decision.image_action is AnkiImageAction.REPLACE_WITH_SELECTED
+        )
+        prepared_image, image_error = _prepare_image_for_upsert(
+            original_text=original_text,
+            image_path=decision.image_path if should_store_image else None,
+        )
+        if image_error is not None:
+            completion.set_result(_result_for_error(image_error))
+            return completion
 
-        if decision.create_new or not decision.target_note_ids:
-            create_values = _fallback_values(preview.values, selected_values)
-            fields = self._build_fields_from_values(
-                config,
-                original_text,
-                create_values,
-                field_map=effective_field_map,
-            )
-            add_future = self.service.add_note(config.deck, config.model, fields)
+        def _apply_with_image(image_html: str | None) -> None:
+            if decision.create_new or not decision.target_note_ids:
+                create_values = _fallback_values(preview.values, selected_values)
+                fields = self._build_fields_from_values(
+                    config,
+                    original_text,
+                    create_values,
+                    field_map=effective_field_map,
+                    image_html=image_html,
+                )
+                add_future = self.service.add_note(config.deck, config.model, fields)
 
-            def _on_add(done: Future[AnkiAddResult]) -> None:
+                def _on_add(done: Future[AnkiAddResult]) -> None:
+                    if completion.cancelled() or completion.done():
+                        return
+                    if done.cancelled():
+                        completion.cancel()
+                        return
+                    try:
+                        add_result = done.result()
+                    except Exception as exc:
+                        completion.set_result(
+                            _result_for_error(str(exc) or "Failed to add card.")
+                        )
+                        return
+                    if add_result.success:
+                        completion.set_result(AnkiResult(outcome=AnkiOutcome.SUCCESS))
+                        return
+                    message = add_result.error or "Failed to add card."
+                    completion.set_result(_result_for_error(message))
+
+                add_future.add_done_callback(_on_add)
+                return
+
+            match_map = {match.note_id: match for match in preview.matches}
+            target_note_ids = tuple(dict.fromkeys(decision.target_note_ids))
+            updates: list[tuple[int, dict[str, str]]] = []
+            for note_id in target_note_ids:
+                match = match_map.get(note_id)
+                if match is None:
+                    continue
+                update_fields = self._build_update_fields(
+                    config=config,
+                    original_text=original_text,
+                    match=match,
+                    decision=decision,
+                    selected=selected_values,
+                    field_map=effective_field_map,
+                    image_html=image_html,
+                )
+                if update_fields:
+                    updates.append((note_id, update_fields))
+
+            if not updates:
+                completion.set_result(AnkiResult(outcome=AnkiOutcome.UNCHANGED))
+                return
+
+            pending = len(updates)
+            failures: list[str] = []
+
+            def _done() -> None:
                 if completion.cancelled() or completion.done():
                     return
-                if done.cancelled():
-                    completion.cancel()
+                if failures:
+                    completion.set_result(_result_for_error(failures[0]))
                     return
-                try:
-                    add_result = done.result()
-                except Exception as exc:
-                    completion.set_result(
-                        _result_for_error(str(exc) or "Failed to add card.")
-                    )
-                    return
-                if add_result.success:
-                    completion.set_result(AnkiResult(outcome=AnkiOutcome.SUCCESS))
-                    return
-                message = add_result.error or "Failed to add card."
-                completion.set_result(_result_for_error(message))
+                completion.set_result(AnkiResult(outcome=AnkiOutcome.UPDATED))
 
-            add_future.add_done_callback(_on_add)
+            def _on_update(done: Future[AnkiUpdateResult]) -> None:
+                nonlocal pending
+                if completion.cancelled() or completion.done():
+                    return
+                if not done.cancelled():
+                    try:
+                        update_result = done.result()
+                        if not update_result.success:
+                            failures.append(
+                                update_result.error or "Failed to update card."
+                            )
+                    except Exception as exc:
+                        failures.append(str(exc) or "Failed to update card.")
+                pending -= 1
+                if pending <= 0:
+                    _done()
+
+            for note_id, fields in updates:
+                update_future = self.service.update_note_fields(note_id, fields)
+                update_future.add_done_callback(_on_update)
+
+        if prepared_image is None:
+            _apply_with_image(None)
             return completion
 
-        match_map = {match.note_id: match for match in preview.matches}
-        target_note_ids = tuple(dict.fromkeys(decision.target_note_ids))
-        updates: list[tuple[int, dict[str, str]]] = []
-        for note_id in target_note_ids:
-            match = match_map.get(note_id)
-            if match is None:
-                continue
-            update_fields = self._build_update_fields(
-                config=config,
-                original_text=original_text,
-                match=match,
-                decision=decision,
-                selected=selected_values,
-                field_map=effective_field_map,
-            )
-            if update_fields:
-                updates.append((note_id, update_fields))
+        media_future = self.service.store_media_path(
+            prepared_image.local_path,
+            prepared_image.media_filename,
+        )
 
-        if not updates:
-            completion.set_result(AnkiResult(outcome=AnkiOutcome.UNCHANGED))
-            return completion
-
-        pending = len(updates)
-        failures: list[str] = []
-
-        def _done() -> None:
+        def _on_media_stored(done: Future[AnkiUpdateResult]) -> None:
             if completion.cancelled() or completion.done():
                 return
-            if failures:
-                completion.set_result(_result_for_error(failures[0]))
+            if done.cancelled():
+                completion.cancel()
                 return
-            completion.set_result(AnkiResult(outcome=AnkiOutcome.UPDATED))
-
-        def _on_update(done: Future[AnkiUpdateResult]) -> None:
-            nonlocal pending
-            if completion.cancelled() or completion.done():
+            try:
+                result = done.result()
+            except Exception as exc:
+                completion.set_result(
+                    _result_for_error(str(exc) or "Failed to store image.")
+                )
                 return
-            if not done.cancelled():
-                try:
-                    update_result = done.result()
-                    if not update_result.success:
-                        failures.append(update_result.error or "Failed to update card.")
-                except Exception as exc:
-                    failures.append(str(exc) or "Failed to update card.")
-            pending -= 1
-            if pending <= 0:
-                _done()
+            if not result.success:
+                completion.set_result(
+                    _result_for_error(result.error or "Failed to store image.")
+                )
+                return
+            _apply_with_image(prepared_image.html_tag)
 
-        for note_id, fields in updates:
-            update_future = self.service.update_note_fields(note_id, fields)
-            update_future.add_done_callback(_on_update)
+        media_future.add_done_callback(_on_media_stored)
         return completion
 
     def create_model(
@@ -343,7 +408,9 @@ class AnkiFlow:
             completion.set_result(result)
 
         def _start_create() -> None:
-            create_future = self.service.create_model(model_name, fields, front, back, css)
+            create_future = self.service.create_model(
+                model_name, fields, front, back, css
+            )
 
             def _on_create(done_create: Future[AnkiCreateModelResult]) -> None:
                 if completion.cancelled() or completion.done():
@@ -391,11 +458,11 @@ class AnkiFlow:
                     )
                     return
                 if not delete_result.success:
-                    message = delete_result.error or "Failed to delete legacy Anki model."
+                    message = (
+                        delete_result.error or "Failed to delete legacy Anki model."
+                    )
                     if not _is_delete_model_non_fatal(message):
-                        _set_result(
-                            AnkiCreateModelResult(success=False, error=message)
-                        )
+                        _set_result(AnkiCreateModelResult(success=False, error=message))
                         return
                 _delete_models(candidates)
 
@@ -422,7 +489,9 @@ class AnkiFlow:
                     AnkiCreateModelResult(success=False, error=names_result.error)
                 )
                 return
-            delete_candidates = _owned_models_for_cleanup(names_result.items, model_name)
+            delete_candidates = _owned_models_for_cleanup(
+                names_result.items, model_name
+            )
             _delete_models(delete_candidates)
 
         model_names_future.add_done_callback(_on_model_names)
@@ -434,6 +503,7 @@ class AnkiFlow:
         original_text: str,
         values: AnkiUpsertValues,
         field_map: AnkiFieldMap,
+        image_html: str | None = None,
     ) -> dict[str, str]:
         fields = field_map
         highlight_spec = build_highlight_spec(original_text)
@@ -442,7 +512,11 @@ class AnkiFlow:
         payload[fields.definitions_en] = _format_definitions_html(
             values.definitions_en, highlight_spec
         )
-        payload[fields.example_en] = _format_ranked_html(values.examples_en, highlight_spec)
+        payload[fields.example_en] = _format_ranked_html(
+            values.examples_en, highlight_spec
+        )
+        if fields.image.strip() and image_html is not None:
+            payload[fields.image] = image_html
         return payload
 
     def _build_update_fields(
@@ -454,6 +528,7 @@ class AnkiFlow:
         decision: AnkiUpsertDecision,
         selected: AnkiUpsertValues,
         field_map: AnkiFieldMap,
+        image_html: str | None = None,
     ) -> dict[str, str]:
         fields = field_map
         highlight_spec = build_highlight_spec(original_text)
@@ -490,6 +565,15 @@ class AnkiFlow:
             update_fields[fields.example_en] = _format_ranked_html(
                 tuple(next_examples), highlight_spec
             )
+        if (
+            fields.image.strip()
+            and image_html is not None
+            and decision.image_action is AnkiImageAction.REPLACE_WITH_SELECTED
+        ):
+            existing_image = _normalize_spaces(match.image)
+            incoming_image = _normalize_spaces(image_html)
+            if incoming_image and existing_image != incoming_image:
+                update_fields[fields.image] = image_html
         return update_fields
 
     def _handle_add_result(
@@ -523,6 +607,7 @@ def _values_from_result(result: TranslationResult) -> AnkiUpsertValues:
         translations=tuple(translations),
         definitions_en=tuple(definitions),
         examples_en=tuple(examples),
+        image_path=None,
     )
 
 
@@ -534,6 +619,7 @@ def _selected_values(decision: AnkiUpsertDecision) -> AnkiUpsertValues:
         translations=tuple(translations),
         definitions_en=tuple(definitions),
         examples_en=tuple(examples),
+        image_path=decision.image_path,
     )
 
 
@@ -545,6 +631,7 @@ def _fallback_values(
         translations=selected.translations or defaults.translations,
         definitions_en=selected.definitions_en or defaults.definitions_en,
         examples_en=selected.examples_en or defaults.examples_en,
+        image_path=selected.image_path or defaults.image_path,
     )
 
 
@@ -576,10 +663,11 @@ def _fill_merge_defaults(
         translations=translations,
         definitions_en=definitions,
         examples_en=examples,
+        image_path=selected.image_path or defaults.image_path,
     )
 
 
-def _collect_available_fields(details: list[object]) -> tuple[str, ...]:
+def _collect_available_fields(details: Sequence[object]) -> tuple[str, ...]:
     names: list[str] = []
     seen: set[str] = set()
     for item in details:
@@ -619,6 +707,7 @@ def _required_field_names(fields: AnkiFieldMap) -> tuple[str, ...]:
         fields.translation.strip(),
         fields.example_en.strip(),
         fields.definitions_en.strip(),
+        fields.image.strip(),
     )
     return tuple(value for value in required if value)
 
@@ -773,6 +862,49 @@ def _normalize_spaces(value: str) -> str:
 
 def _normalize_token(value: str) -> str:
     return _normalize_spaces(value).casefold()
+
+
+def _prepare_image_for_upsert(
+    *, original_text: str, image_path: str | None
+) -> tuple[PreparedImage | None, str | None]:
+    if not image_path:
+        return None, None
+    path = Path(image_path).expanduser()
+    try:
+        stat = path.stat()
+    except OSError:
+        return None, "Image file is not accessible."
+    if not path.is_file():
+        return None, "Image path is not a file."
+    extension = path.suffix.lower()
+    if extension not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        return None, "Unsupported image format."
+    if stat.st_size <= 0:
+        return None, "Image file is empty."
+    if stat.st_size > _MAX_IMAGE_BYTES:
+        return None, "Image file is too large (max 5 MB)."
+    base = _normalize_token(original_text) or _normalize_token(path.stem) or "image"
+    safe_base = _NON_FILE_CHARS_RE.sub("_", base).strip("._-")
+    if not safe_base:
+        safe_base = "image"
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    digest_source = f"{resolved}:{stat.st_mtime_ns}:{stat.st_size}"
+    digest = hashlib.sha1(digest_source.encode("utf-8")).hexdigest()[:10]
+    media_filename = f"{safe_base[:40]}_{digest}{extension}"
+    alt = html.escape(_normalize_spaces(original_text) or "image", quote=True)
+    src = html.escape(media_filename, quote=True)
+    html_tag = f'<img src="{src}" alt="{alt}">'
+    return (
+        PreparedImage(
+            local_path=str(path),
+            media_filename=media_filename,
+            html_tag=html_tag,
+        ),
+        None,
+    )
 
 
 def _format_translation_html(values: tuple[str, ...]) -> str:

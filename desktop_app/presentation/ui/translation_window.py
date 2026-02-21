@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import importlib
+from pathlib import Path
+import time
+from typing import Any
+from urllib.parse import quote_plus
+import webbrowser
 
 from desktop_app.application.use_cases.anki_upsert import (
     AnkiFieldAction,
+    AnkiImageAction,
     AnkiUpsertDecision,
     AnkiUpsertPreview,
 )
@@ -13,14 +19,21 @@ from desktop_app.infrastructure.notifications import BannerHost, Notification
 from desktop_app.presentation.ui.drag import attach_window_drag
 from desktop_app.presentation.ui.theme import apply_theme
 from desktop_app import gtk_types
-from translate_logic.shared.highlight import build_highlight_spec, highlight_to_pango_markup
+from translate_logic.shared.highlight import (
+    build_highlight_spec,
+    highlight_to_pango_markup,
+)
 
 gi = importlib.import_module("gi")
 require_version = getattr(gi, "require_version", None)
 if callable(require_version):
     require_version("Gdk", "4.0")
+    require_version("Gio", "2.0")
+    require_version("GLib", "2.0")
     require_version("Gtk", "4.0")
 Gdk = importlib.import_module("gi.repository.Gdk")
+Gio = importlib.import_module("gi.repository.Gio")
+GLib = importlib.import_module("gi.repository.GLib")
 Gtk = importlib.import_module("gi.repository.Gtk")
 
 
@@ -31,6 +44,11 @@ class TranslationWindow:
     _MAX_WINDOW_WIDTH = 760
     _MAX_WINDOW_HEIGHT = 760
     _BASE_LABEL_CHARS = 52
+    _IMAGE_MAX_BYTES = 5 * 1024 * 1024
+    _IMAGE_AUTOCATCH_TIMEOUT_S = 60.0
+    _IMAGE_MIN_AGE_S = 0.8
+    _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    _IMAGE_TEMP_SUFFIXES = (".part", ".crdownload", ".tmp")
 
     def __init__(
         self,
@@ -135,7 +153,8 @@ class TranslationWindow:
 
         self._window = window
         self._rendered_state: TranslationViewState | None = None
-        self._upsert_popover: object | None = None
+        self._upsert_popover: Any | None = None
+        self._upsert_cleanup: Callable[[], None] | None = None
         self._last_target_size = (
             self._DEFAULT_WINDOW_WIDTH,
             self._DEFAULT_WINDOW_HEIGHT,
@@ -179,6 +198,7 @@ class TranslationWindow:
 
     def show_anki_upsert(
         self,
+        query_text: str,
         preview: AnkiUpsertPreview,
         on_apply: Callable[[AnkiUpsertDecision], None],
         on_cancel: Callable[[], None],
@@ -213,7 +233,7 @@ class TranslationWindow:
         create_new_check.set_active(not bool(preview.matches))
         content.append(create_new_check)
 
-        note_checks: list[tuple[int, object]] = []
+        note_checks: list[tuple[int, gtk_types.Gtk.CheckButton]] = []
         if preview.matches:
             notes_title = Gtk.Label(label="Existing cards:")
             notes_title.set_xalign(0.0)
@@ -228,10 +248,12 @@ class TranslationWindow:
         translation_combo = self._build_action_combo()
         definitions_combo = self._build_action_combo()
         examples_combo = self._build_action_combo()
+        image_combo = self._build_image_action_combo()
 
         content.append(self._labeled_row("Translation action:", translation_combo))
         content.append(self._labeled_row("Definitions action:", definitions_combo))
         content.append(self._labeled_row("Examples action:", examples_combo))
+        content.append(self._labeled_row("Image action:", image_combo))
 
         translation_checks = self._build_value_checks(
             title="Translations:",
@@ -248,6 +270,215 @@ class TranslationWindow:
             values=preview.values.examples_en,
             parent=content,
         )
+
+        image_title = Gtk.Label(label="Image:")
+        image_title.set_xalign(0.0)
+        content.append(image_title)
+
+        image_controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        find_image_button = Gtk.Button(label="Find Image")
+        select_image_button = Gtk.Button(label="Select File")
+        clear_image_button = Gtk.Button(label="Clear")
+        image_controls.append(find_image_button)
+        image_controls.append(select_image_button)
+        image_controls.append(clear_image_button)
+        content.append(image_controls)
+
+        image_status = Gtk.Label(label="No image selected.")
+        image_status.set_xalign(0.0)
+        image_status.set_wrap(True)
+        image_status.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        content.append(image_status)
+
+        preview_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        preview_picture: object | None = None
+        picture_cls = getattr(Gtk, "Picture", None)
+        if picture_cls is not None:
+            try:
+                preview_picture = picture_cls()
+                if hasattr(preview_picture, "set_size_request"):
+                    preview_picture.set_size_request(240, 140)
+                if hasattr(preview_picture, "set_content_fit") and hasattr(
+                    Gtk, "ContentFit"
+                ):
+                    preview_picture.set_content_fit(Gtk.ContentFit.COVER)
+                preview_wrap.append(preview_picture)
+            except Exception:
+                preview_picture = None
+        if preview_picture is None:
+            no_preview = Gtk.Label(label="Image preview is unavailable.")
+            no_preview.set_xalign(0.0)
+            preview_wrap.append(no_preview)
+        content.append(preview_wrap)
+
+        selected_image_path: str | None = preview.values.image_path
+        autocatch_started_at = 0.0
+        downloads_monitor: Any | None = None
+        downloads_monitor_handler: int | None = None
+        downloads_dir = self._downloads_dir()
+
+        def _stop_autocatch() -> None:
+            nonlocal downloads_monitor, downloads_monitor_handler
+            if downloads_monitor is None:
+                return
+            try:
+                if downloads_monitor_handler is not None:
+                    disconnect = getattr(downloads_monitor, "disconnect", None)
+                    if callable(disconnect):
+                        disconnect(downloads_monitor_handler)
+            except Exception:
+                pass
+            try:
+                cancel = getattr(downloads_monitor, "cancel", None)
+                if callable(cancel):
+                    cancel()
+            except Exception:
+                pass
+            downloads_monitor = None
+            downloads_monitor_handler = None
+
+        def _set_preview(path: str | None, message: str) -> None:
+            nonlocal selected_image_path
+            selected_image_path = path
+            image_status.set_text(message)
+            if preview_picture is None:
+                return
+            try:
+                if hasattr(preview_picture, "set_filename"):
+                    preview_picture.set_filename(path or "")
+            except Exception:
+                pass
+
+        if selected_image_path:
+            _set_preview(
+                selected_image_path,
+                f"Selected: {Path(selected_image_path).name}",
+            )
+
+        def _capture_download_candidate() -> bool:
+            candidate = self._first_download_candidate(
+                downloads_dir,
+                autocatch_started_at,
+            )
+            if candidate is None:
+                return False
+            ok, error_message = self._validate_image_path(
+                candidate,
+                min_age_s=self._IMAGE_MIN_AGE_S,
+            )
+            if not ok:
+                if error_message == "too_recent":
+                    return False
+                return False
+            _set_preview(str(candidate), f"Auto-selected: {candidate.name}")
+            _stop_autocatch()
+            return True
+
+        def _on_downloads_changed(
+            _monitor: Any,
+            _file: Any,
+            _other_file: Any,
+            _event_type: Any,
+        ) -> None:
+            _capture_download_candidate()
+
+        def _on_find_image(_button: object) -> None:
+            nonlocal autocatch_started_at, downloads_monitor, downloads_monitor_handler
+            normalized_query = " ".join(query_text.split())
+            if not normalized_query:
+                image_status.set_text("Empty query text.")
+                return
+            search_url = (
+                "https://duckduckgo.com/?q="
+                f"{quote_plus(normalized_query)}&iax=images&ia=images"
+            )
+            try:
+                webbrowser.open(search_url)
+            except Exception:
+                image_status.set_text("Failed to open browser.")
+                return
+            _stop_autocatch()
+            autocatch_started_at = time.time()
+            if _capture_download_candidate():
+                return
+
+            try:
+                directory = Gio.File.new_for_path(str(downloads_dir))
+                flags = getattr(getattr(Gio, "FileMonitorFlags", None), "NONE", 0)
+                monitor = directory.monitor_directory(flags, None)
+                connect = getattr(monitor, "connect", None)
+                if not callable(connect):
+                    raise RuntimeError("monitor_connect_unavailable")
+                handler_id = connect("changed", _on_downloads_changed)
+                downloads_monitor = monitor
+                downloads_monitor_handler = (
+                    int(handler_id) if isinstance(handler_id, int) else None
+                )
+                image_status.set_text("Waiting for downloaded image...")
+            except Exception:
+                _stop_autocatch()
+                image_status.set_text("Auto-catch is unavailable. Use Select File.")
+
+        def _on_select_image(_button: object) -> None:
+            chooser = Gtk.FileChooserNative.new(
+                "Select image",
+                self._window,
+                Gtk.FileChooserAction.OPEN,
+                "Select",
+                "Cancel",
+            )
+
+            def _on_response(
+                dialog: gtk_types.Gtk.FileChooserNative, response_id: int
+            ) -> None:
+                try:
+                    accepted = {
+                        Gtk.ResponseType.ACCEPT,
+                        Gtk.ResponseType.OK,
+                    }
+                    if response_id not in accepted:
+                        return
+                    get_file = getattr(dialog, "get_file", None)
+                    if not callable(get_file):
+                        image_status.set_text("Failed to resolve selected file.")
+                        return
+                    file_obj = get_file()
+                    get_path = (
+                        getattr(file_obj, "get_path", None)
+                        if file_obj is not None
+                        else None
+                    )
+                    if not callable(get_path):
+                        image_status.set_text("Failed to resolve selected file.")
+                        return
+                    selected_path = get_path() or ""
+                    if not selected_path:
+                        image_status.set_text("Failed to resolve selected file.")
+                        return
+                    ok, error_message = self._validate_image_path(
+                        Path(selected_path),
+                        min_age_s=0.0,
+                    )
+                    if not ok:
+                        image_status.set_text(error_message)
+                        return
+                    _stop_autocatch()
+                    _set_preview(selected_path, f"Selected: {Path(selected_path).name}")
+                finally:
+                    destroy = getattr(dialog, "destroy", None)
+                    if callable(destroy):
+                        destroy()
+
+            chooser.connect("response", _on_response)
+            chooser.show()
+
+        def _on_clear_image(_button: object) -> None:
+            _stop_autocatch()
+            _set_preview(None, "No image selected.")
+
+        find_image_button.connect("clicked", _on_find_image)
+        select_image_button.connect("clicked", _on_select_image)
+        clear_image_button.connect("clicked", _on_clear_image)
 
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         apply_button = Gtk.Button(label="Apply")
@@ -279,52 +510,71 @@ class TranslationWindow:
             on_cancel()
 
         def _apply(_button: object) -> None:
+            def _check_active(check: Any) -> bool:
+                getter = getattr(check, "get_active", None)
+                if not callable(getter):
+                    return False
+                try:
+                    return bool(getter())
+                except Exception:
+                    return False
+
             selected_translations = tuple(
-                value
-                for value, check in translation_checks
-                if bool(check.get_active())
+                value for value, check in translation_checks if _check_active(check)
             )
             selected_definitions = tuple(
-                value for value, check in definition_checks if bool(check.get_active())
+                value for value, check in definition_checks if _check_active(check)
             )
             selected_examples = tuple(
-                value for value, check in example_checks if bool(check.get_active())
+                value for value, check in example_checks if _check_active(check)
             )
             target_note_ids = tuple(
-                note_id for note_id, check in note_checks if bool(check.get_active())
+                note_id for note_id, check in note_checks if _check_active(check)
             )
             decision = AnkiUpsertDecision(
-                create_new=bool(create_new_check.get_active()),
+                create_new=_check_active(create_new_check),
                 target_note_ids=target_note_ids,
                 translation_action=self._action_from_combo(translation_combo),
                 definitions_action=self._action_from_combo(definitions_combo),
                 examples_action=self._action_from_combo(examples_combo),
+                image_action=self._image_action_from_combo(image_combo),
                 selected_translations=selected_translations,
                 selected_definitions_en=selected_definitions,
                 selected_examples_en=selected_examples,
+                image_path=selected_image_path,
             )
             self.hide_anki_upsert()
             on_apply(decision)
 
         cancel_button.connect("clicked", _cancel)
         apply_button.connect("clicked", _apply)
+        self._upsert_cleanup = _stop_autocatch
         self._upsert_popover = popover
         if hasattr(popover, "popup"):
             popover.popup()
 
     def hide_anki_upsert(self) -> None:
+        cleanup = self._upsert_cleanup
+        self._upsert_cleanup = None
+        if cleanup is not None:
+            try:
+                cleanup()
+            except Exception:
+                pass
         popover = self._upsert_popover
         self._upsert_popover = None
         if popover is None:
             return
         try:
-            if hasattr(popover, "popdown"):
-                popover.popdown()
+            popdown = getattr(popover, "popdown", None)
+            if callable(popdown):
+                popdown()
         except Exception:
             pass
         try:
-            if hasattr(popover, "unparent"):
-                popover.unparent()
+            unparent = getattr(popover, "unparent", None)
+            if callable(unparent):
+                unparent()
         except Exception:
             pass
 
@@ -493,7 +743,7 @@ class TranslationWindow:
     def _handle_copy_all_clicked(self, _button: gtk_types.Gtk.Button) -> None:
         self._on_copy_all()
 
-    def _build_action_combo(self) -> object:
+    def _build_action_combo(self) -> Any:
         combo = Gtk.ComboBoxText()
         combo.append("keep_existing", "Keep existing")
         combo.append("replace_with_selected", "Replace with selected")
@@ -501,15 +751,111 @@ class TranslationWindow:
         combo.set_active_id("merge_unique_selected")
         return combo
 
-    def _action_from_combo(self, combo: object) -> AnkiFieldAction:
+    def _action_from_combo(self, combo: Any) -> AnkiFieldAction:
         active_id = ""
-        if hasattr(combo, "get_active_id"):
-            active_id = combo.get_active_id() or ""
+        getter = getattr(combo, "get_active_id", None)
+        if callable(getter):
+            active_id = getter() or ""
         if active_id == "keep_existing":
             return AnkiFieldAction.KEEP_EXISTING
         if active_id == "replace_with_selected":
             return AnkiFieldAction.REPLACE_WITH_SELECTED
         return AnkiFieldAction.MERGE_UNIQUE_SELECTED
+
+    def _build_image_action_combo(self) -> Any:
+        combo = Gtk.ComboBoxText()
+        combo.append("replace_with_selected", "Replace with selected")
+        combo.append("keep_existing", "Keep existing")
+        combo.set_active_id("replace_with_selected")
+        return combo
+
+    def _image_action_from_combo(self, combo: Any) -> AnkiImageAction:
+        active_id = ""
+        getter = getattr(combo, "get_active_id", None)
+        if callable(getter):
+            active_id = getter() or ""
+        if active_id == "keep_existing":
+            return AnkiImageAction.KEEP_EXISTING
+        return AnkiImageAction.REPLACE_WITH_SELECTED
+
+    def _downloads_dir(self) -> Path:
+        try:
+            user_dir_enum = getattr(GLib, "UserDirectory", None)
+            if (
+                hasattr(GLib, "get_user_special_dir")
+                and user_dir_enum is not None
+                and hasattr(user_dir_enum, "DIRECTORY_DOWNLOAD")
+            ):
+                path = GLib.get_user_special_dir(user_dir_enum.DIRECTORY_DOWNLOAD)
+                if isinstance(path, str) and path.strip():
+                    return Path(path).expanduser()
+        except Exception:
+            pass
+        return Path.home() / "Downloads"
+
+    def _first_download_candidate(
+        self,
+        directory: Path,
+        started_at: float,
+    ) -> Path | None:
+        if not directory.exists() or not directory.is_dir():
+            return None
+        candidates: list[tuple[float, Path]] = []
+        try:
+            for entry in directory.iterdir():
+                if not entry.is_file():
+                    continue
+                suffix = entry.suffix.lower()
+                name = entry.name.casefold()
+                if suffix not in self._IMAGE_EXTENSIONS:
+                    continue
+                if name.endswith(self._IMAGE_TEMP_SUFFIXES):
+                    continue
+                try:
+                    stat = entry.stat()
+                except OSError:
+                    continue
+                if stat.st_mtime < started_at:
+                    continue
+                candidates.append((stat.st_mtime, entry))
+        except OSError:
+            return None
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
+
+    def _validate_image_path(self, path: Path, *, min_age_s: float) -> tuple[bool, str]:
+        if not path.exists() or not path.is_file():
+            return False, "Image file is not accessible."
+        suffix = path.suffix.lower()
+        if suffix not in self._IMAGE_EXTENSIONS:
+            return False, "Unsupported image format."
+        if path.name.casefold().endswith(self._IMAGE_TEMP_SUFFIXES):
+            return False, "Image is still downloading."
+        try:
+            stat = path.stat()
+        except OSError:
+            return False, "Image file is not accessible."
+        if stat.st_size <= 0:
+            return False, "Image file is empty."
+        if stat.st_size > self._IMAGE_MAX_BYTES:
+            return False, "Image is too large (max 5 MB)."
+        if min_age_s > 0.0 and (time.time() - stat.st_mtime) < min_age_s:
+            return False, "too_recent"
+        if not self._can_decode_image(path):
+            return False, "Invalid image file."
+        return True, ""
+
+    def _can_decode_image(self, path: Path) -> bool:
+        texture_type = getattr(Gdk, "Texture", None)
+        if texture_type is None or not hasattr(texture_type, "new_from_filename"):
+            return True
+        try:
+            texture_type.new_from_filename(str(path))
+        except Exception:
+            return False
+        return True
 
     def _labeled_row(self, title: str, widget: object) -> gtk_types.Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -546,7 +892,7 @@ class TranslationWindow:
         text = value.strip()
         if len(text) <= limit:
             return text
-        return f"{text[:limit - 1]}..."
+        return f"{text[: limit - 1]}..."
 
     def _autosize_window(self, state: TranslationViewState) -> None:
         target_width = self._estimate_window_width(state)
@@ -589,7 +935,8 @@ class TranslationWindow:
             for definition in state.definitions_items
         )
         lines += sum(
-            self._estimate_lines(example.en, chars_per_line) for example in state.examples
+            self._estimate_lines(example.en, chars_per_line)
+            for example in state.examples
         )
         lines += len(state.definitions_items) + len(state.examples)
         if state.loading:

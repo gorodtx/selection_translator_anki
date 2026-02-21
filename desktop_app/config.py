@@ -28,6 +28,7 @@ class AnkiFieldMap:
     translation: str
     example_en: str
     definitions_en: str = ""
+    image: str = "image"
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +99,7 @@ def _default_config() -> AppConfig:
                 translation="",
                 example_en="",
                 definitions_en="definitions_en",
+                image="image",
             ),
         ),
     )
@@ -126,6 +128,7 @@ def _parse_config(payload: JsonValue) -> AppConfig:
         definitions_en=_get_str(fields_data.get("definitions_en"), "definitions_en")
         if fields_data
         else "definitions_en",
+        image=_get_str(fields_data.get("image"), "image") if fields_data else "image",
     )
     anki = AnkiConfig(
         deck=_get_str(anki_data.get("deck"), "") if anki_data else "",
@@ -158,6 +161,7 @@ def _config_to_dict(config: AppConfig) -> dict[str, JsonValue]:
                 "translation": config.anki.fields.translation,
                 "example_en": config.anki.fields.example_en,
                 "definitions_en": config.anki.fields.definitions_en,
+                "image": config.anki.fields.image,
             },
         },
     }

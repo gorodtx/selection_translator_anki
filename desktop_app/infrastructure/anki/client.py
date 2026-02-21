@@ -146,6 +146,16 @@ class AnkiClient:
             return AnkiUpdateResult(success=False, error=response.error)
         return AnkiUpdateResult(success=True, error=None)
 
+    async def store_media_file(self, filename: str, data_b64: str) -> AnkiUpdateResult:
+        payload: dict[str, object] = {
+            "filename": filename,
+            "data": data_b64,
+        }
+        response = await self._request("storeMediaFile", payload)
+        if response.error is not None:
+            return AnkiUpdateResult(success=False, error=response.error)
+        return AnkiUpdateResult(success=True, error=None)
+
     async def add_field(self, model: str, field_name: str) -> AnkiUpdateResult:
         payload: dict[str, object] = {
             "modelName": model,

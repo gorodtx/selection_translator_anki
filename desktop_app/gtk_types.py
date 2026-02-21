@@ -338,6 +338,9 @@ class Gtk:
         def set_reveal_child(self, reveal: bool) -> None:
             raise NotImplementedError
 
+        def get_reveal_child(self) -> bool:
+            raise NotImplementedError
+
         def set_transition_duration(self, duration: int) -> None:
             raise NotImplementedError
 

@@ -21,13 +21,18 @@ const HISTORY_LABEL = "History";
 const SETTINGS_LABEL = "Settings";
 const DEFAULT_ICON_NAME = "accessories-dictionary-symbolic";
 const TEXT_FILTER = /^[.\s\d-]+$/;
-const DBUS_RETRY_ATTEMPTS = 10;
-const DBUS_RETRY_DELAY_MS = 120;
+const DBUS_RETRY_ATTEMPTS = 40;
+const DBUS_RETRY_DELAY_MS = 100;
 const MAX_TEXT_LEN = 200;
 const DBUS_RETRYABLE_ERRORS = [
   "org.freedesktop.DBus.Error.ServiceUnknown",
   "org.freedesktop.DBus.Error.UnknownObject",
   "org.freedesktop.DBus.Error.UnknownMethod",
+  "org.freedesktop.DBus.Error.NoReply",
+  "org.freedesktop.DBus.Error.Timeout",
+  "org.freedesktop.DBus.Error.TimedOut",
+  "Gio.IOErrorEnum.TimedOut",
+  "Gio.IOErrorEnum.Cancelled",
 ];
 
 const TranslatorIndicator = GObject.registerClass(

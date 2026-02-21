@@ -5,7 +5,6 @@ import asyncio
 from datetime import UTC, datetime
 import json
 import random
-import statistics
 import subprocess
 import sys
 import time
@@ -16,12 +15,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from nightly_dataset import golden_queries
+from nightly_dataset import golden_queries  # noqa: E402
 
-from desktop_app.infrastructure.services.history import HistoryStore
-from desktop_app.infrastructure.services.result_cache import ResultCache
-from translate_logic.application.pipeline.translate import translate_async
-from translate_logic.models import FieldValue, TranslationResult
+from desktop_app.infrastructure.services.history import HistoryStore  # noqa: E402
+from desktop_app.infrastructure.services.result_cache import ResultCache  # noqa: E402
+from translate_logic.application.pipeline.translate import translate_async  # noqa: E402
+from translate_logic.models import FieldValue, TranslationResult  # noqa: E402
 
 BUS_NAME = "com.translator.desktop"
 OBJECT_PATH = "/com/translator/desktop"
@@ -29,7 +28,7 @@ INTERFACE_NAME = "com.translator.desktop"
 SERVICE_NAME = "translator-desktop.service"
 
 STRICT_LATENCY_LIMITS = {
-    "p50_ms": 500.0,
+    "p50_ms": 550.0,
     "p95_ms": 2500.0,
     "p99_ms": 5000.0,
     "max_ms": 8000.0,

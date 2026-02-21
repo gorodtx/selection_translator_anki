@@ -6,10 +6,16 @@ DEFAULT_MODEL_FIELDS = [
     "translation",
     "example_en",
     "definitions_en",
+    "image",
 ]
 
 DEFAULT_FRONT_TEMPLATE = """
 <div class="mc-card mc-front">
+  {{#image}}
+    <div class="mc-image-wrap">
+      <div class="mc-image">{{image}}</div>
+    </div>
+  {{/image}}
   <div class="mc-topline">Translator</div>
   <div class="mc-word">{{word}}</div>
 
@@ -24,6 +30,11 @@ DEFAULT_FRONT_TEMPLATE = """
 
 DEFAULT_BACK_TEMPLATE = """
 <div class="mc-card mc-back">
+  {{#image}}
+    <div class="mc-image-wrap">
+      <div class="mc-image">{{image}}</div>
+    </div>
+  {{/image}}
   <div class="mc-topline">Translator</div>
   <div class="mc-word">{{word}}</div>
 
@@ -75,6 +86,30 @@ DEFAULT_MODEL_CSS = """
   padding: 16px;
   text-align: left;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+}
+
+.mc-image-wrap {
+  margin: -16px -16px 12px;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+}
+
+.mc-image {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #030303;
+}
+
+.mc-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
 }
 
 .mc-topline {

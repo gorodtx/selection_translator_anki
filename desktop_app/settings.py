@@ -316,6 +316,7 @@ class SettingsWindow:
                 translation="translation",
                 example_en="example_en",
                 definitions_en="definitions_en",
+                image="image",
             )
             model = DEFAULT_MODEL_NAME
         else:
@@ -324,6 +325,7 @@ class SettingsWindow:
                 translation="",
                 example_en="",
                 definitions_en="",
+                image="",
             )
             model = ""
         self._pending_anki = AnkiConfig(
@@ -388,6 +390,7 @@ class SettingsWindow:
             translation="translation",
             example_en="example_en",
             definitions_en="definitions_en",
+            image="image",
         )
         self._pending_anki = AnkiConfig(
             deck=target_deck,
@@ -460,7 +463,7 @@ class SettingsWindow:
 
 def missing_required_fields(mapping: dict[str, str]) -> list[str]:
     missing: list[str] = []
-    for key in ("word", "translation", "example_en", "definitions_en"):
+    for key in ("word", "translation", "example_en", "definitions_en", "image"):
         value = mapping.get(key, "")
         if not value:
             missing.append(key)

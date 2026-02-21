@@ -12,16 +12,8 @@ from translate_logic.shared.translation import clean_translations
 GOOGLE_TRANSLATE_BASE_URL = "https://translate.googleapis.com/translate_a/single"
 GOOGLE_TRANSLATE_DT_PARAMS = (
     "bd",
-    "ex",
-    "ld",
     "md",
-    "rw",
-    "rm",
-    "ss",
     "t",
-    "at",
-    "gt",
-    "qca",
 )
 
 JsonValue: TypeAlias = (
@@ -45,12 +37,36 @@ def build_google_url(text: str, source_lang: str, target_lang: str) -> str:
     return f"{GOOGLE_TRANSLATE_BASE_URL}?{params}"
 
 
+def build_google_retry_url(
+    text: str,
+    source_lang: str,
+    target_lang: str,
+    *,
+    attempt_id: int,
+) -> str:
+    base_url = build_google_url(text, source_lang, target_lang)
+    return f"{base_url}&attempt={attempt_id}"
+
+
 async def translate_google(
-    text: str, source_lang: str, target_lang: str, fetcher: AsyncFetcher
+    text: str,
+    source_lang: str,
+    target_lang: str,
+    fetcher: AsyncFetcher,
+    *,
+    attempt_id: int | None = None,
 ) -> GoogleResult:
     if not text:
         return GoogleResult(translations=[], definitions_en=[])
-    url = build_google_url(text, source_lang, target_lang)
+    if attempt_id is None:
+        url = build_google_url(text, source_lang, target_lang)
+    else:
+        url = build_google_retry_url(
+            text,
+            source_lang,
+            target_lang,
+            attempt_id=attempt_id,
+        )
     try:
         payload = await fetcher(url)
     except FetchError:

@@ -22,21 +22,33 @@ from translate_logic.infrastructure.http.transport import (
     build_async_fetcher,
 )
 from translate_logic.infrastructure.language_base.base import LanguageBase
-from translate_logic.infrastructure.language_base.definitions_base import DefinitionsBase
+from translate_logic.infrastructure.language_base.definitions_base import (
+    DefinitionsBase,
+)
 from translate_logic.models import (
     Example,
     FieldValue,
     TranslationLimit,
     TranslationResult,
 )
-from translate_logic.infrastructure.providers.cambridge import CambridgeResult, translate_cambridge
-from translate_logic.infrastructure.providers.google import GoogleResult, translate_google
+from translate_logic.infrastructure.providers.cambridge import (
+    CambridgeResult,
+    translate_cambridge,
+)
+from translate_logic.infrastructure.providers.google import (
+    GoogleResult,
+    translate_google,
+)
 from translate_logic.application.pipeline.ranking import (
     RankedTranslation,
     extract_ranked_texts,
     rank_translation_candidates,
 )
-from translate_logic.shared.text import count_words, normalize_text, normalize_whitespace
+from translate_logic.shared.text import (
+    count_words,
+    normalize_text,
+    normalize_whitespace,
+)
 from translate_logic.shared.translation import (
     limit_translations,
     merge_translations,
@@ -45,7 +57,7 @@ from translate_logic.shared.translation import (
 )
 
 DEFAULT_CACHE = HttpCache()
-_POLICY = SourcePolicy()
+_POLICY = SourcePolicy(max_cambridge_words=0)
 _LANGUAGE_BASE_EXAMPLE_LIMIT = 4
 _LANGUAGE_BASE_EXECUTOR: Final[ThreadPoolExecutor] = ThreadPoolExecutor(
     max_workers=1,
@@ -61,9 +73,9 @@ _FAILURE_BACKOFF_STORE = FailureBackoffStore(
 
 @dataclass(frozen=True, slots=True)
 class ProviderBudget:
-    cambridge_en_timeout_s: float = 1.5
-    cambridge_en_ru_timeout_s: float = 2.0
-    google_timeout_s: float = 2.2
+    cambridge_en_timeout_s: float = 1.2
+    cambridge_en_ru_timeout_s: float = 1.6
+    google_timeout_s: float = 1.4
     overall_budget_s: float = 4.0
 
 
@@ -77,12 +89,15 @@ _PROVIDER_TIMEOUTS_BY_PATTERN: Final[tuple[tuple[str, float], ...]] = (
     ("datasetsearch=english", _PROVIDER_BUDGET.cambridge_en_timeout_s),
 )
 _HIGH_AMBIGUITY_TOKENS: Final[set[str]] = {"a", "i", "x"}
-_GOOGLE_AUGMENT_TIMEOUT_S: Final[float] = 0.35
-_GOOGLE_RECOVERY_TIMEOUT_S: Final[float] = 2.2
-_CAMBRIDGE_PRIMARY_WAIT_S: Final[float] = 0.25
+_GOOGLE_AUGMENT_TIMEOUT_S: Final[float] = 0.3
+_GOOGLE_RECOVERY_TIMEOUT_S: Final[float] = 0.35
+_GOOGLE_SECOND_RECOVERY_TIMEOUT_S: Final[float] = 0.75
+_CAMBRIDGE_PRIMARY_WAIT_S: Final[float] = 0.02
+_CAMBRIDGE_EMPTY_RECOVERY_WAIT_S: Final[float] = 0.25
 _DEFINITIONS_LIMIT: Final[int] = 5
 _DEFINITIONS_PRIMARY_LIMIT: Final[int] = 5
 _DEFINITIONS_QUERY_MAX_WORDS: Final[int] = 5
+_CAMBRIDGE_FALLBACK_MAX_WORDS: Final[int] = 5
 
 
 def build_latency_fetcher(
@@ -191,14 +206,62 @@ async def _translate_with_fetcher_async(
                 fetcher=fetcher,
                 current_translation=translation_ru,
                 secondary_translations=[],
+                attempt_id=2,
             )
+            if not translation_ru and word_count > _CAMBRIDGE_FALLBACK_MAX_WORDS:
+                translation_ru = await _recover_empty_translation_async(
+                    text=normalized_text,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    fetcher=fetcher,
+                    current_translation=translation_ru,
+                    secondary_translations=[],
+                    timeout_s=_GOOGLE_SECOND_RECOVERY_TIMEOUT_S,
+                    attempt_id=3,
+                )
+            can_use_cambridge_fallback = word_count <= _CAMBRIDGE_FALLBACK_MAX_WORDS
+            cambridge_google_fallback_result: CambridgeResult | None = None
+            if not translation_ru and can_use_cambridge_fallback:
+                cambridge_google_fallback_result = await _run_cambridge_with_budget(
+                    normalized_text,
+                    fetcher,
+                )
+                cambridge_candidates = select_translation_candidates(
+                    cambridge_google_fallback_result.translations
+                )
+                translation_ru = _compose_ranked_translation(
+                    query=normalized_text,
+                    target_lang=target_lang,
+                    cambridge_translations=cambridge_candidates,
+                    google_translations=[],
+                )
+                if not translation_ru:
+                    translation_ru = await _recover_empty_translation_async(
+                        text=normalized_text,
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                        fetcher=fetcher,
+                        current_translation=translation_ru,
+                        secondary_translations=cambridge_candidates,
+                        timeout_s=_GOOGLE_SECOND_RECOVERY_TIMEOUT_S,
+                        attempt_id=4,
+                    )
             _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
             examples_list = _merge_examples(
-                primary=filter_examples([]),
+                primary=filter_examples(
+                    cambridge_google_fallback_result.examples
+                    if cambridge_google_fallback_result is not None
+                    else []
+                ),
                 fallback=language_base_examples,
             )
             network_definitions = _merge_definition_sources(
-                google_result.definitions_en
+                (
+                    cambridge_google_fallback_result.definitions_en
+                    if cambridge_google_fallback_result is not None
+                    else []
+                ),
+                google_result.definitions_en,
             )
             return _build_result(
                 translation_ru,
@@ -224,27 +287,53 @@ async def _translate_with_fetcher_async(
             prefetched_google_result = await _await_google_prefetch(
                 google_prefetch_task
             )
+            cambridge_empty_recovery_result: CambridgeResult | None = None
+            google_empty = (
+                prefetched_google_result is None
+                or not prefetched_google_result.translations
+            )
+            if google_empty:
+                cambridge_empty_recovery_result = await _await_cambridge_prefetch(
+                    cambridge_task,
+                    timeout_s=_CAMBRIDGE_EMPTY_RECOVERY_WAIT_S,
+                )
             if not cambridge_task.done():
                 cambridge_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await cambridge_task
+            cambridge_recovery_translations = (
+                select_translation_candidates(
+                    cambridge_empty_recovery_result.translations
+                )
+                if cambridge_empty_recovery_result is not None
+                else []
+            )
             translation_ru = await _compose_translation_with_google_fallback_async(
                 text=normalized_text,
                 source_lang=source_lang,
                 target_lang=target_lang,
                 fetcher=fetcher,
-                cambridge_translations=[],
+                cambridge_translations=cambridge_recovery_translations,
                 prefetched_google_result=prefetched_google_result,
             )
             _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
             examples_list = _merge_examples(
-                primary=filter_examples([]),
+                primary=filter_examples(
+                    cambridge_empty_recovery_result.examples
+                    if cambridge_empty_recovery_result is not None
+                    else []
+                ),
                 fallback=language_base_examples,
             )
             network_definitions = _merge_definition_sources(
+                (
+                    cambridge_empty_recovery_result.definitions_en
+                    if cambridge_empty_recovery_result is not None
+                    else []
+                ),
                 prefetched_google_result.definitions_en
                 if prefetched_google_result is not None
-                else []
+                else [],
             )
             return _build_result(
                 translation_ru,
@@ -259,16 +348,16 @@ async def _translate_with_fetcher_async(
             cambridge_result.translations
         )
         google_result_for_defs: GoogleResult | None = None
-        google_candidates: list[str] = []
+        google_ranked_candidates: list[str] = []
         if _needs_more_variants(cambridge_non_meta):
-            google_result = await _await_google_prefetch(
+            google_augment_result = await _await_google_prefetch(
                 google_prefetch_task,
                 timeout_s=_GOOGLE_AUGMENT_TIMEOUT_S,
             )
-            if google_result is not None:
-                google_result_for_defs = google_result
-                google_candidates = select_translation_candidates(
-                    google_result.translations
+            if google_augment_result is not None:
+                google_result_for_defs = google_augment_result
+                google_ranked_candidates = select_translation_candidates(
+                    google_augment_result.translations
                 )
         else:
             google_prefetch_task.cancel()
@@ -281,7 +370,7 @@ async def _translate_with_fetcher_async(
             cambridge_translations=merge_translations(
                 cambridge_non_meta, cambridge_meta
             ),
-            google_translations=google_candidates,
+            google_translations=google_ranked_candidates,
         )
         translation_ru = await _recover_empty_translation_async(
             text=normalized_text,
@@ -466,6 +555,8 @@ async def _await_google_prefetch(
         with suppress(asyncio.CancelledError):
             await task
         return None
+    except asyncio.CancelledError:
+        return None
     except Exception:
         return None
 
@@ -478,6 +569,8 @@ async def _await_cambridge_prefetch(
     try:
         return await asyncio.wait_for(task, timeout=timeout_s)
     except TimeoutError:
+        return None
+    except asyncio.CancelledError:
         return None
     except Exception:
         return None
@@ -543,15 +636,24 @@ async def _recover_empty_translation_async(
     fetcher: AsyncFetcher,
     current_translation: str | None,
     secondary_translations: list[str] | None,
+    allow_retry: bool = True,
+    timeout_s: float = _GOOGLE_RECOVERY_TIMEOUT_S,
+    attempt_id: int = 2,
 ) -> str | None:
-    if current_translation:
+    if current_translation or not allow_retry:
         return current_translation
     started = time.perf_counter()
     timed_out = False
     try:
         recovery = await asyncio.wait_for(
-            translate_google(text, source_lang, target_lang, fetcher),
-            timeout=_GOOGLE_RECOVERY_TIMEOUT_S,
+            translate_google(
+                text,
+                source_lang,
+                target_lang,
+                fetcher,
+                attempt_id=attempt_id,
+            ),
+            timeout=timeout_s,
         )
     except TimeoutError:
         timed_out = True

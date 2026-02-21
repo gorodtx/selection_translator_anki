@@ -29,6 +29,7 @@ class TranslationWindowProtocol(Protocol):
 
     def show_anki_upsert(
         self,
+        query_text: str,
         preview: AnkiUpsertPreview,
         on_apply: Callable[[AnkiUpsertDecision], None],
         on_cancel: Callable[[], None],
@@ -121,11 +122,13 @@ class TranslationViewCoordinator:
 
     def show_anki_upsert(
         self,
+        query_text: str,
         preview: AnkiUpsertPreview,
         on_apply: Callable[[AnkiUpsertDecision], None],
         on_cancel: Callable[[], None],
     ) -> None:
         self._window.show_anki_upsert(
+            query_text=query_text,
             preview=preview,
             on_apply=on_apply,
             on_cancel=on_cancel,
