@@ -242,7 +242,7 @@ resolve_manifest_path() {
   local manifest_url
   manifest_url="$(manifest_download_url)"
   local tmp_manifest
-  tmp_manifest="$(safe_mktemp)"
+  tmp_manifest="$(safe_mktemp)" || fail "cannot create temporary file for manifest"
   TMP_FILES+=("${tmp_manifest}")
   download_file "${manifest_url}" "${tmp_manifest}"
   [[ -s "${tmp_manifest}" ]] || fail "downloaded manifest is empty: ${manifest_url}"
@@ -445,7 +445,7 @@ ensure_release_venv() {
   fi
 
   local tmp_requirements
-  tmp_requirements="$(safe_mktemp)"
+  tmp_requirements="$(safe_mktemp)" || fail "cannot create temporary file for requirements"
   TMP_FILES+=("${tmp_requirements}")
   prepare_runtime_requirements "${tmp_requirements}"
 
