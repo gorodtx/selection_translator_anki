@@ -26,7 +26,7 @@ DBUS_FILE="${DBUS_DIR}/${APP_ID}.service"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SYSTEMD_UNIT_FILE="${SYSTEMD_USER_DIR}/translator-desktop.service"
 
-RELEASE_REPO="${TRANSLATOR_RELEASE_REPO:-igor3204/selection_translator_anki}"
+RELEASE_REPO="${TRANSLATOR_RELEASE_REPO:-gorodtx/selection_translator_anki}"
 RELEASE_TAG="${TRANSLATOR_RELEASE_TAG:-}"
 ASSETS_BASE_URL="${TRANSLATOR_ASSETS_BASE_URL:-}"
 ASSETS_MANIFEST_ASSET="${TRANSLATOR_ASSETS_MANIFEST_ASSET:-release-assets.sha256}"
@@ -82,6 +82,20 @@ copy_tree() {
   rm -rf "${dst}"
   mkdir -p "${dst}"
   cp -a "${src}/." "${dst}/"
+}
+
+safe_mktemp() {
+  local file=""
+  if file="$(mktemp 2>/dev/null)"; then
+    printf "%s" "${file}"
+    return
+  fi
+  mkdir -p "${CACHE_DIR}"
+  if file="$(mktemp "${CACHE_DIR}/tmp.XXXXXX" 2>/dev/null)"; then
+    printf "%s" "${file}"
+    return
+  fi
+  fail "cannot create temporary file"
 }
 
 release_assets_base_url() {
@@ -228,7 +242,7 @@ resolve_manifest_path() {
   local manifest_url
   manifest_url="$(manifest_download_url)"
   local tmp_manifest
-  tmp_manifest="$(mktemp)"
+  tmp_manifest="$(safe_mktemp)"
   TMP_FILES+=("${tmp_manifest}")
   download_file "${manifest_url}" "${tmp_manifest}"
   [[ -s "${tmp_manifest}" ]] || fail "downloaded manifest is empty: ${manifest_url}"
@@ -431,7 +445,7 @@ ensure_release_venv() {
   fi
 
   local tmp_requirements
-  tmp_requirements="$(mktemp)"
+  tmp_requirements="$(safe_mktemp)"
   TMP_FILES+=("${tmp_requirements}")
   prepare_runtime_requirements "${tmp_requirements}"
 
