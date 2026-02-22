@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import os
 import threading
 from typing import Any
 
@@ -20,7 +21,26 @@ _MODEL: Any | None = None
 _MODEL_UNAVAILABLE = False
 
 
+def _cache_size() -> int:
+    raw = os.environ.get("TRANSLATOR_HIGHLIGHT_CACHE_SIZE", "256")
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 256
+    return max(64, value)
+
+
+_TOKENIZE_CACHE_SIZE = _cache_size()
+
+
+def _spacy_highlight_enabled() -> bool:
+    value = os.environ.get("TRANSLATOR_ENABLE_SPACY_HIGHLIGHT", "0")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def is_available() -> bool:
+    if not _spacy_highlight_enabled():
+        return False
     return _load_model() is not None
 
 
@@ -38,8 +58,10 @@ def query_lemmas(query: str) -> tuple[str, ...]:
     return tuple(lemmas)
 
 
-@lru_cache(maxsize=1024)
+@lru_cache(maxsize=_TOKENIZE_CACHE_SIZE)
 def tokenize_lemmas(text: str) -> tuple[TokenLemma, ...]:
+    if not _spacy_highlight_enabled():
+        return ()
     model = _load_model()
     if model is None:
         return ()

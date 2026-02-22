@@ -521,6 +521,8 @@ write_systemd_service() {
   local current_root="${CURRENT_LINK}"
   local current_app="${current_root}/app"
   local current_venv="${current_root}/venv"
+  local memory_high="${TRANSLATOR_SYSTEMD_MEMORY_HIGH:-900M}"
+  local memory_max="${TRANSLATOR_SYSTEMD_MEMORY_MAX:-1300M}"
 
   cat > "${SYSTEMD_UNIT_FILE}" <<SERVICE
 [Unit]
@@ -542,6 +544,10 @@ ExecStart=${current_venv}/bin/python -m desktop_app.main
 Restart=on-failure
 RestartSec=1
 TimeoutStopSec=5
+MemoryAccounting=yes
+MemoryHigh=${memory_high}
+MemoryMax=${memory_max}
+OOMPolicy=kill
 
 [Install]
 WantedBy=default.target

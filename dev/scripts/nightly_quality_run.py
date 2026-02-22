@@ -61,7 +61,9 @@ def _percentile(values: list[float], percent: float) -> float:
     return ordered[index]
 
 
-def _run_command(cmd: list[str], *, timeout_s: float | None = None) -> subprocess.CompletedProcess[str]:
+def _run_command(
+    cmd: list[str], *, timeout_s: float | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
         check=False,
@@ -175,6 +177,19 @@ def _cpu_percent(pid: int) -> float:
         return 0.0
 
 
+def _rss_kib(pid: int) -> int:
+    if pid <= 0:
+        return 0
+    proc = _run_command(["ps", "-p", str(pid), "-o", "rss="])
+    if proc.returncode != 0:
+        return 0
+    value = proc.stdout.strip()
+    try:
+        return int(value)
+    except ValueError:
+        return 0
+
+
 def _static_guard_scan() -> list[dict[str, str]]:
     violations: list[dict[str, str]] = []
     for pattern in NON_NETWORK_TIMEOUT_PATTERNS:
@@ -227,9 +242,7 @@ def _cache_history_correctness_check() -> dict[str, Any]:
     cache_keys = list(cache._items.keys())  # noqa: SLF001
     history_items = list(history._items)  # noqa: SLF001
     cache_ok = (
-        len(cache_keys) == 100
-        and cache_keys[0] == "k25"
-        and cache_keys[-1] == "k124"
+        len(cache_keys) == 100 and cache_keys[0] == "k25" and cache_keys[-1] == "k124"
     )
     history_ok = (
         len(history_items) == 100
@@ -317,7 +330,9 @@ async def _provider_quality_run() -> dict[str, Any]:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _append_event(path: Path, payload: dict[str, Any]) -> None:
@@ -342,7 +357,10 @@ def _build_report(summary: dict[str, Any]) -> str:
         "## Soak",
         f"- fail_calls: `{soak['fail_calls']}`",
         f"- n_restarts_max: `{soak['n_restarts_max']}`",
-        f"- memory_growth_pct: `{soak['memory_growth_pct']:.2f}`",
+        f"- rss_growth_pct: `{soak['rss_growth_pct']:.2f}`",
+        f"- rss_peak_mb: `{soak['rss_peak_mb']:.1f}`",
+        f"- memory_current_growth_pct: `{soak['memory_growth_pct']:.2f}`",
+        f"- memory_current_peak_mb: `{soak['memory_peak_mb']:.1f}`",
         f"- cpu_p95_percent: `{soak['cpu_p95_percent']:.1f}`",
         f"- cpu_max_percent: `{soak['cpu_max_percent']:.1f}`",
         f"- translate_p95_ms: `{soak['translate_p95_ms']:.1f}`",
@@ -375,12 +393,15 @@ def _build_report(summary: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Nightly quality soak and guard runner.")
+    parser = argparse.ArgumentParser(
+        description="Nightly quality soak and guard runner."
+    )
     parser.add_argument("--duration-hours", type=float, default=8.0)
     parser.add_argument("--interval-sec", type=float, default=10.0)
     parser.add_argument("--burst-every-sec", type=float, default=300.0)
     parser.add_argument("--burst-size", type=int, default=80)
     parser.add_argument("--memory-sample-sec", type=float, default=60.0)
+    parser.add_argument("--warmup-skip-sec", type=float, default=120.0)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--skip-reload", action="store_true")
     args = parser.parse_args()
@@ -400,7 +421,9 @@ def main() -> int:
     _run_command(["systemctl", "--user", "start", SERVICE_NAME])
 
     ready = _wait_for_dbus_ready()
-    _append_event(events_path, {"ts": _now_iso(), "event": "dbus_ready", "ready": ready})
+    _append_event(
+        events_path, {"ts": _now_iso(), "event": "dbus_ready", "ready": ready}
+    )
     if not ready:
         summary = {
             "run_id": run_id,
@@ -409,10 +432,14 @@ def main() -> int:
             "gate": {"status": "failed", "reasons": ["dbus interface not ready"]},
         }
         _write_json(summary_path, summary)
-        report_path.write_text("# Nightly Quality Report\n\n- status: `failed`\n- reason: `dbus interface not ready`\n", encoding="utf-8")
+        report_path.write_text(
+            "# Nightly Quality Report\n\n- status: `failed`\n- reason: `dbus interface not ready`\n",
+            encoding="utf-8",
+        )
         return 1
 
-    soak_end = time.monotonic() + max(1.0, args.duration_hours * 3600.0)
+    soak_started = time.monotonic()
+    soak_end = soak_started + max(1.0, args.duration_hours * 3600.0)
     next_burst = time.monotonic()
     next_memory = time.monotonic()
     next_static_guard = time.monotonic()
@@ -422,6 +449,8 @@ def main() -> int:
     fail_calls = 0
     restart_samples: list[int] = []
     memory_samples: list[int] = []
+    rss_samples_kib: list[int] = []
+    rss_samples_kib_after_warmup: list[int] = []
     cpu_samples: list[float] = []
     static_guard_violations: list[dict[str, str]] = []
 
@@ -475,8 +504,12 @@ def main() -> int:
         if now >= next_memory:
             metrics = _systemctl_metrics()
             cpu_percent = _cpu_percent(metrics["main_pid"])
+            rss_kib = _rss_kib(metrics["main_pid"])
             restart_samples.append(metrics["n_restarts"])
             memory_samples.append(metrics["memory_current"])
+            rss_samples_kib.append(rss_kib)
+            if (now - soak_started) >= max(0.0, args.warmup_skip_sec):
+                rss_samples_kib_after_warmup.append(rss_kib)
             cpu_samples.append(cpu_percent)
             _append_event(
                 events_path,
@@ -484,6 +517,7 @@ def main() -> int:
                     "ts": _now_iso(),
                     "event": "service_metrics",
                     "cpu_percent": cpu_percent,
+                    "rss_kib": rss_kib,
                     **metrics,
                 },
             )
@@ -509,7 +543,20 @@ def main() -> int:
 
     memory_growth_pct = 0.0
     if memory_samples and memory_samples[0] > 0:
-        memory_growth_pct = ((max(memory_samples) - memory_samples[0]) / memory_samples[0]) * 100.0
+        memory_growth_pct = (
+            (max(memory_samples) - memory_samples[0]) / memory_samples[0]
+        ) * 100.0
+
+    rss_reference = rss_samples_kib_after_warmup or rss_samples_kib
+    rss_growth_pct = 0.0
+    if rss_reference and rss_reference[0] > 0:
+        rss_growth_pct = (
+            (max(rss_reference) - rss_reference[0]) / rss_reference[0]
+        ) * 100.0
+    rss_peak_mb = (max(rss_samples_kib) / 1024.0) if rss_samples_kib else 0.0
+    memory_peak_mb = (
+        (max(memory_samples) / (1024.0 * 1024.0)) if memory_samples else 0.0
+    )
 
     soak = {
         "fail_calls": fail_calls,
@@ -519,6 +566,9 @@ def main() -> int:
         "translate_max_ms": max(translate_latencies) if translate_latencies else 0.0,
         "n_restarts_max": max(restart_samples) if restart_samples else 0,
         "memory_growth_pct": memory_growth_pct,
+        "memory_peak_mb": memory_peak_mb,
+        "rss_growth_pct": rss_growth_pct,
+        "rss_peak_mb": rss_peak_mb,
         "cpu_p95_percent": _percentile(cpu_samples, 0.95),
         "cpu_max_percent": max(cpu_samples) if cpu_samples else 0.0,
     }
@@ -528,8 +578,10 @@ def main() -> int:
         reasons.append("NRestarts > 0")
     if soak["fail_calls"] > 0:
         reasons.append("fail_calls > 0")
-    if soak["memory_growth_pct"] > 20.0:
-        reasons.append("memory growth > 20%")
+    if soak["rss_growth_pct"] > 20.0:
+        reasons.append("rss growth > 20%")
+    if soak["rss_peak_mb"] > 700.0:
+        reasons.append("rss peak > 700MB")
     if soak["cpu_max_percent"] > STRICT_CPU_LIMIT_PERCENT:
         reasons.append("cpu max > strict limit")
     if quality["success_rate"] < 0.98:
