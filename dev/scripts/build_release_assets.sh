@@ -12,6 +12,7 @@ OFFLINE_BASE_FILES=(
   "definitions_pack.sqlite3"
 )
 ALLOW_DIRTY_RELEASE="${TRANSLATOR_RELEASE_ALLOW_DIRTY:-0}"
+RELEASE_TAG="${TRANSLATOR_RELEASE_TAG:-}"
 
 log() {
   echo "[release-build] $*"
@@ -20,6 +21,15 @@ log() {
 fail() {
   echo "[release-build] $*" >&2
   exit 1
+}
+
+validate_release_tag() {
+  if [[ -z "${RELEASE_TAG}" ]]; then
+    return
+  fi
+  if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+    fail "TRANSLATOR_RELEASE_TAG must match vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N"
+  fi
 }
 
 ensure_clean_tracked_tree() {
@@ -35,6 +45,18 @@ ensure_clean_tracked_tree() {
   fi
   if ! git -C "${ROOT_DIR}" diff --cached --quiet --ignore-submodules --; then
     fail "staged changes detected. Commit/stash before building release assets."
+  fi
+}
+
+ensure_release_tag_is_new() {
+  if [[ -z "${RELEASE_TAG}" ]]; then
+    return
+  fi
+  if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+    fail "release tag already exists locally: ${RELEASE_TAG} (immutable policy)"
+  fi
+  if git -C "${ROOT_DIR}" ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+    fail "release tag already exists on origin: ${RELEASE_TAG} (immutable policy)"
   fi
 }
 
@@ -147,7 +169,9 @@ build_manifest() {
 }
 
 main() {
+  validate_release_tag
   ensure_clean_tracked_tree
+  ensure_release_tag_is_new
   mkdir -p "${ASSETS_DIR}"
 
   build_app_archive

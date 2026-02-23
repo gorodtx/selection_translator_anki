@@ -7,9 +7,9 @@ import Gtk from "gi://Gtk";
 import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js";
 
 const HOTKEY_KEY = "hotkey";
-const BUS_NAME = "com.translator.desktop";
-const OBJECT_PATH = "/com/translator/desktop";
-const INTERFACE_NAME = "com.translator.desktop";
+const DEFAULT_BUS_NAME = "com.translator.desktop";
+const DEFAULT_OBJECT_PATH = "/com/translator/desktop";
+const DEFAULT_INTERFACE_NAME = "com.translator.desktop";
 let cssApplied = false;
 const MODIFIER_ONLY_KEYS = new Set([
   Gdk.KEY_Shift_L,
@@ -31,6 +31,10 @@ const MODIFIER_ONLY_KEYS = new Set([
 export default class TranslatorPrefs extends ExtensionPreferences {
   fillPreferencesWindow(window) {
     const settings = this.getSettings();
+
+    const busName = this.metadata["x-translator-bus-name"] ?? DEFAULT_BUS_NAME;
+    const objectPath = this.metadata["x-translator-object-path"] ?? DEFAULT_OBJECT_PATH;
+    const interfaceName = this.metadata["x-translator-dbus-interface"] ?? DEFAULT_INTERFACE_NAME;
 
     if (!cssApplied) {
       const cssProvider = new Gtk.CssProvider();
@@ -236,9 +240,9 @@ export default class TranslatorPrefs extends ExtensionPreferences {
       const cancellable = new Gio.Cancellable();
       activeCalls.add(cancellable);
       Gio.DBus.session.call(
-        BUS_NAME,
-        OBJECT_PATH,
-        INTERFACE_NAME,
+        busName,
+        objectPath,
+        interfaceName,
         method,
         parameters,
         null,

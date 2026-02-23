@@ -12,10 +12,15 @@ from desktop_app.presentation.controllers import (
     SettingsController,
     TranslationController,
 )
-from desktop_app.presentation.controllers.settings_controller import AnkiActionResult, AnkiStatus
+from desktop_app.presentation.controllers.settings_controller import (
+    AnkiActionResult,
+    AnkiStatus,
+)
 from desktop_app.application.use_cases.translation_executor import TranslationExecutor
+from desktop_app.platform import PlatformAdapter, resolve_platform_adapter
 from desktop_app.presentation.dbus.service import DbusService
 from desktop_app.infrastructure.services.container import AppServices
+from desktop_app.runtime_namespace import app_id
 from desktop_app import gtk_types
 
 gi = importlib.import_module("gi")
@@ -29,7 +34,7 @@ Gtk = importlib.import_module("gi.repository.Gtk")
 setattr(gtk_types.Gtk, "Application", getattr(Gtk, "Application"))
 
 
-APP_ID = "com.translator.desktop"
+APP_ID = app_id()
 
 
 class TranslatorApp(gtk_types.Gtk.Application):
@@ -37,6 +42,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         super().__init__(application_id=APP_ID)
         self._config = load_config()
         self._services = AppServices.create()
+        self._platform: PlatformAdapter = resolve_platform_adapter()
         self._clipboard_writer = ClipboardWriter()
         self._dbus_service: DbusService | None = None
         self._anki_controller: AnkiController | None = None
@@ -182,7 +188,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._translation_controller.show_history_window()
 
     def _open_settings(self) -> None:
-        return None
+        self._platform.open_settings()
 
     def _on_settings_saved(self, config: AppConfig) -> None:
         self._config = config

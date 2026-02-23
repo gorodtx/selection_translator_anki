@@ -703,6 +703,14 @@ dev/*
 dev/scripts/*
 !dev/scripts/nightly_quality_run.py
 !dev/scripts/build_release_assets.sh
+!dev/scripts/release_preflight.sh
+!dev/scripts/build_dev_extension.py
+!dev/scripts/bootstrap_dev_worktree.sh
+!dev/docs/
+dev/docs/*
+!dev/docs/release_gate.md
+!dev/docs/parallel_runtime.md
+!dev/run_dev_instance.sh
 test.py
 test.*
 **/test.py

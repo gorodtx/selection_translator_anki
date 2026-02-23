@@ -1,0 +1,155 @@
+name: ci-matrix-gate
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tag-policy:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate SemVer tag
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Invalid tag format: ${TAG}"
+            exit 1
+          fi
+
+  core-tests:
+    needs: [tag-policy]
+    if: always() && (needs.tag-policy.result == 'success' || needs.tag-policy.result == 'skipped')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Compile core modules
+        run: python -m compileall translate_logic desktop_app/platform
+
+      - name: Run platform adapter tests
+        run: pytest -q tests/test_platform_factory.py
+
+  package-linux:
+    needs: [core-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build Linux preview package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -czf dist/translator-linux-preview.tar.gz \
+            desktop_app \
+            translate_logic \
+            gnome_extension \
+            scripts/install.sh \
+            README.md
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-linux
+          path: dist/translator-linux-preview.tar.gz
+
+  package-windows:
+    needs: [core-tests]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build Windows preview package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path desktop_app,translate_logic,README.md -DestinationPath dist/translator-windows-preview.zip -Force
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: dist/translator-windows-preview.zip
+
+  package-macos:
+    needs: [core-tests]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build macOS preview package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -czf dist/translator-macos-preview.tar.gz \
+            desktop_app \
+            translate_logic \
+            README.md
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-macos
+          path: dist/translator-macos-preview.tar.gz
+
+  sign-windows:
+    needs: [package-windows]
+    runs-on: windows-latest
+    steps:
+      - name: Download Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: package-windows
+          path: dist
+
+      - name: Native sign step (enabled only with secrets)
+        if: ${{ secrets.WINDOWS_CODESIGN_CERT_BASE64 != '' && secrets.WINDOWS_CODESIGN_CERT_PASSWORD != '' }}
+        shell: pwsh
+        run: |
+          Write-Host "Signing placeholder: integrate signtool with cert secrets."
+
+      - name: Skip sign step
+        if: ${{ !(secrets.WINDOWS_CODESIGN_CERT_BASE64 != '' && secrets.WINDOWS_CODESIGN_CERT_PASSWORD != '') }}
+        shell: pwsh
+        run: |
+          Write-Host "Skipping Windows signing: no code-sign secrets configured."
+
+  notarize-macos:
+    needs: [package-macos]
+    runs-on: macos-latest
+    steps:
+      - name: Download macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: package-macos
+          path: dist
+
+      - name: Native notarize step (enabled only with secrets)
+        if: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+        run: |
+          echo "Notarize placeholder: integrate notarytool once .app bundle packaging is added."
+
+      - name: Skip notarize step
+        if: ${{ !(secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '') }}
+        run: |
+          echo "Skipping macOS notarization: no Apple notarization secrets configured."
+

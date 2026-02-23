@@ -3,6 +3,11 @@
   "name": "Translator",
   "description": "Translate primary selection via a Python D-Bus backend.",
   "version": 1,
-  "shell-version": ["49"],
-  "settings-schema": "org.gnome.shell.extensions.translator"
+  "shell-version": [
+    "49"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.translator",
+  "x-translator-bus-name": "com.translator.desktop",
+  "x-translator-dbus-interface": "com.translator.desktop",
+  "x-translator-object-path": "/com/translator/desktop"
 }

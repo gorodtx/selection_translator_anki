@@ -7,6 +7,7 @@ import sys
 
 from desktop_app.app import TranslatorApp
 from desktop_app.config import config_path
+from desktop_app.runtime_namespace import runtime_namespace
 
 _lock_handle: io.TextIOWrapper | None = None
 
@@ -23,10 +24,11 @@ def _reset_if_requested() -> None:
         pass
     try:
         base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-        pid_path = base / "translator" / "app.pid"
+        ns = runtime_namespace()
+        pid_path = base / ns / "app.pid"
         if pid_path.exists():
             pid_path.unlink()
-        lock_path = base / "translator" / "app.lock"
+        lock_path = base / ns / "app.lock"
         if lock_path.exists():
             lock_path.unlink()
     except OSError:
@@ -35,7 +37,7 @@ def _reset_if_requested() -> None:
 
 def _lock_path() -> Path:
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "translator" / "app.lock"
+    return base / runtime_namespace() / "app.lock"
 
 
 def _acquire_single_instance_lock() -> bool:

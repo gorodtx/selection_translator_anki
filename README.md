@@ -20,7 +20,8 @@ Offline-first selection translator for Linux GNOME with fast popup UI, D-Bus bac
 [English](#english) | [Русский](#русский)
 
 Supported now: **Linux GNOME (Wayland/X11)**.  
-Planned (not supported yet): **macOS / Windows**.
+In progress: **Windows prep (no production adapter yet)**.  
+Out of scope for current cycle: **macOS**.
 
 [![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![GTK4](https://img.shields.io/badge/GTK-4-7FE719?logo=gtk&logoColor=black)](https://www.gtk.org/)
@@ -29,6 +30,7 @@ Planned (not supported yet): **macOS / Windows**.
 [![aiohttp](https://img.shields.io/badge/aiohttp-async%20http-2C5BB4)](https://docs.aiohttp.org/)
 [![GitHub Release](https://img.shields.io/github/v/release/gorodtx/selection_translator_anki?label=Release)](https://github.com/gorodtx/selection_translator_anki/releases/latest)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20GNOME-2ea44f)](https://github.com/gorodtx/selection_translator_anki/releases/latest)
+[![CI Matrix](https://img.shields.io/badge/CI-matrix%20(3%20OS)-0a66c2)](.github/workflows/ci-matrix.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Quick Install / Быстрая установка
@@ -84,7 +86,14 @@ gdbus call --session --dest com.translator.desktop --object-path /com/translator
 3. Python backend runs translation pipeline and updates GTK window.
 4. Results are cached and stored for history reuse.
 
-### 3) Runtime and installer contract
+### 3) Platform architecture (current)
+
+- `core`: translation flow, contracts, cache, history.
+- `linux-gnome adapter`: GNOME extension + D-Bus + GTK runtime.
+- `windows adapter`: prep contract only (not enabled in production).
+- `mac adapter`: prep stub only (not enabled in production).
+
+### 4) Runtime and installer contract
 
 - Installer deploys:
   - app runtime (`translator-app.tar.gz`)
@@ -104,7 +113,7 @@ bash scripts/install.sh remove
 bash scripts/install.sh healthcheck
 ```
 
-### 4) Troubleshooting
+### 5) Troubleshooting
 
 - Extension not visible after install:
   - log out and log in again, then run `gnome-extensions enable translator@com.translator.desktop`.
@@ -115,17 +124,20 @@ bash scripts/install.sh healthcheck
 - If hotkey does nothing:
   - run installer healthcheck, then re-run `install` or `update`.
 
-### 5) Release flow (maintainers)
+### 6) Release flow (maintainers)
 
 Release guardrails (hard fail by default):
 - Build only from a clean tracked git state (no unstaged/staged tracked changes).
 - `translator-app.tar.gz` is created from `git archive HEAD` (tracked files only).
 - `.sqlite3` inside app archive is blocked; offline DB ships only as separate release assets.
+- Immutable release policy: existing tag/release must not be modified.
 - Optional override for emergency/debug only: `TRANSLATOR_RELEASE_ALLOW_DIRTY=1`.
+- Channel policy:
+  - `vX.Y.Z-rc.N` for cross-platform matrix rehearsal.
+  - `vX.Y.Z` only after green matrix and Linux production gate.
 
 ```bash
-dev/scripts/build_release_assets.sh
-(cd dev/dist/release/assets && sha256sum -c release-assets.sha256)
+dev/scripts/release_preflight.sh vX.Y.Z
 ```
 
 ```bash
@@ -145,6 +157,27 @@ gh release create vX.Y.Z \
   dev/dist/release/assets/primary.sqlite3 \
   dev/dist/release/assets/fallback.sqlite3 \
   dev/dist/release/assets/definitions_pack.sqlite3
+```
+
+Detailed gate checklist: `dev/docs/release_gate.md`.
+
+Parallel stable+dev runtime runbook: `dev/docs/parallel_runtime.md`.
+
+Dev isolation bootstrap (from stable checkout):
+
+```bash
+# creates ~/dev/translator-dev and moves local dirty changes there
+dev/scripts/bootstrap_dev_worktree.sh ~/dev/translator-dev
+```
+
+Dev runtime control (inside dev worktree):
+
+```bash
+cd ~/dev/translator-dev
+dev/run_dev_instance.sh setup
+dev/run_dev_instance.sh sync-bases
+dev/run_dev_instance.sh status
+dev/run_dev_instance.sh switch-to-dev
 ```
 
 ---
@@ -166,7 +199,14 @@ gh release create vX.Y.Z \
 3. Python backend запускает pipeline перевода и обновляет GTK-окно.
 4. Результаты кэшируются и сохраняются в историю.
 
-### 3) Контракт рантайма и инсталлятора
+### 3) Платформенная архитектура (текущее состояние)
+
+- `core`: translation flow, контракты, кэш, история.
+- `linux-gnome adapter`: GNOME extension + D-Bus + GTK runtime.
+- `windows adapter`: только prep-контракт (в production не включён).
+- `mac adapter`: только prep-stub (в production не включён).
+
+### 4) Контракт рантайма и инсталлятора
 
 - Инсталлятор ставит:
   - runtime приложения (`translator-app.tar.gz`)
@@ -186,7 +226,7 @@ bash scripts/install.sh remove
 bash scripts/install.sh healthcheck
 ```
 
-### 4) Troubleshooting / Диагностика
+### 5) Troubleshooting / Диагностика
 
 - После установки extension не появился:
   - сделай logout/login, затем `gnome-extensions enable translator@com.translator.desktop`.
@@ -197,17 +237,20 @@ bash scripts/install.sh healthcheck
 - Хоткей не срабатывает:
   - запусти healthcheck инсталлятора, затем повтори `install` или `update`.
 
-### 5) Релизный цикл (для мейнтейнеров)
+### 6) Релизный цикл (для мейнтейнеров)
 
 Защита релиза (по умолчанию жёсткий fail):
 - Сборка только из чистого tracked-состояния git (без staged/unstaged tracked-изменений).
 - `translator-app.tar.gz` собирается через `git archive HEAD` (только tracked файлы).
 - `.sqlite3` внутри app-архива запрещены; офлайн-базы идут только отдельными release-ассетами.
+- Immutable policy: уже опубликованный тег/релиз не изменяется.
 - Обход только для аварий/дебага: `TRANSLATOR_RELEASE_ALLOW_DIRTY=1`.
+- Политика каналов:
+  - `vX.Y.Z-rc.N` для кроссплатформенного прогона matrix.
+  - `vX.Y.Z` только после зелёной matrix и Linux production gate.
 
 ```bash
-dev/scripts/build_release_assets.sh
-(cd dev/dist/release/assets && sha256sum -c release-assets.sha256)
+dev/scripts/release_preflight.sh vX.Y.Z
 ```
 
 ```bash
@@ -227,6 +270,27 @@ gh release create vX.Y.Z \
   dev/dist/release/assets/primary.sqlite3 \
   dev/dist/release/assets/fallback.sqlite3 \
   dev/dist/release/assets/definitions_pack.sqlite3
+```
+
+Полный gate-чеклист: `dev/docs/release_gate.md`.
+
+Runbook параллельного stable+dev режима: `dev/docs/parallel_runtime.md`.
+
+Bootstrap из stable checkout для dev-изоляции:
+
+```bash
+# создаёт ~/dev/translator-dev и переносит туда текущий dirty state
+dev/scripts/bootstrap_dev_worktree.sh ~/dev/translator-dev
+```
+
+Управление dev-рантаймом (внутри dev worktree):
+
+```bash
+cd ~/dev/translator-dev
+dev/run_dev_instance.sh setup
+dev/run_dev_instance.sh sync-bases
+dev/run_dev_instance.sh status
+dev/run_dev_instance.sh switch-to-dev
 ```
 
 ## License

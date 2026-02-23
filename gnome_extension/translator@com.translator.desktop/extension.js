@@ -12,9 +12,9 @@ import { Button } from "resource:///org/gnome/shell/ui/panelMenu.js";
 import * as PopupMenu from "resource:///org/gnome/shell/ui/popupMenu.js";
 import * as Util from "resource:///org/gnome/shell/misc/util.js";
 
-const BUS_NAME = "com.translator.desktop";
-const OBJECT_PATH = "/com/translator/desktop";
-const INTERFACE_NAME = "com.translator.desktop";
+const DEFAULT_BUS_NAME = "com.translator.desktop";
+const DEFAULT_OBJECT_PATH = "/com/translator/desktop";
+const DEFAULT_INTERFACE_NAME = "com.translator.desktop";
 const HOTKEY_SETTING = "hotkey";
 const INDICATOR_NAME = "Translator";
 const HISTORY_LABEL = "History";
@@ -69,6 +69,9 @@ export default class TranslatorExtension extends Extension {
     this._clipboard = St.Clipboard.get_default();
     this._oldtext = null;
     this._proxy = null;
+    this._busName = this.metadata["x-translator-bus-name"] ?? DEFAULT_BUS_NAME;
+    this._objectPath = this.metadata["x-translator-object-path"] ?? DEFAULT_OBJECT_PATH;
+    this._interfaceName = this.metadata["x-translator-dbus-interface"] ?? DEFAULT_INTERFACE_NAME;
     this._hotkey = this._getHotkeyValue();
     this._hotkeyRegistered = false;
     this._settingsChangedId = this._settings.connect(
@@ -95,6 +98,9 @@ export default class TranslatorExtension extends Extension {
     this._clipboard = null;
     this._settings = null;
     this._proxy = null;
+    this._busName = DEFAULT_BUS_NAME;
+    this._objectPath = DEFAULT_OBJECT_PATH;
+    this._interfaceName = DEFAULT_INTERFACE_NAME;
     this._hotkey = "";
     this._hotkeyRegistered = false;
   }
@@ -197,9 +203,9 @@ export default class TranslatorExtension extends Extension {
         Gio.BusType.SESSION,
         Gio.DBusProxyFlags.NONE,
         null,
-        BUS_NAME,
-        OBJECT_PATH,
-        INTERFACE_NAME,
+        this._busName,
+        this._objectPath,
+        this._interfaceName,
         null,
       );
     } catch (error) {

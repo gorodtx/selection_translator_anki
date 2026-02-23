@@ -5,7 +5,11 @@ from dataclasses import dataclass
 import importlib
 
 from desktop_app import gtk_types
-from desktop_app.presentation.controllers.settings_controller import AnkiActionResult, AnkiStatus
+from desktop_app.runtime_namespace import app_id, dbus_interface, dbus_object_path
+from desktop_app.presentation.controllers.settings_controller import (
+    AnkiActionResult,
+    AnkiStatus,
+)
 from desktop_app.infrastructure.anki import AnkiListResult
 
 gi = importlib.import_module("gi")
@@ -17,11 +21,12 @@ Gio = importlib.import_module("gi.repository.Gio")
 GLib = importlib.import_module("gi.repository.GLib")
 VariantType: type[gtk_types.GLib.Variant] = getattr(GLib, "Variant")
 
-BUS_NAME = "com.translator.desktop"
-OBJECT_PATH = "/com/translator/desktop"
-INTERFACE_XML = """
+BUS_NAME = app_id()
+OBJECT_PATH = dbus_object_path()
+DBUS_INTERFACE = dbus_interface()
+INTERFACE_XML = f"""
 <node>
-  <interface name="com.translator.desktop">
+  <interface name="{DBUS_INTERFACE}">
     <method name="Translate">
       <arg type="s" name="text" direction="in"/>
     </method>
