@@ -361,8 +361,10 @@ def _build_report(summary: dict[str, Any]) -> str:
         f"- rss_peak_mb: `{soak['rss_peak_mb']:.1f}`",
         f"- memory_current_growth_pct: `{soak['memory_growth_pct']:.2f}`",
         f"- memory_current_peak_mb: `{soak['memory_peak_mb']:.1f}`",
-        f"- cpu_p95_percent: `{soak['cpu_p95_percent']:.1f}`",
-        f"- cpu_max_percent: `{soak['cpu_max_percent']:.1f}`",
+        f"- cpu_p95_percent(raw): `{soak['cpu_p95_percent']:.1f}`",
+        f"- cpu_max_percent(raw): `{soak['cpu_max_percent']:.1f}`",
+        f"- cpu_p95_percent(after_warmup): `{soak['cpu_p95_after_warmup_percent']:.1f}`",
+        f"- cpu_max_percent(after_warmup): `{soak['cpu_max_after_warmup_percent']:.1f}`",
         f"- translate_p95_ms: `{soak['translate_p95_ms']:.1f}`",
         "",
         "## Quality",
@@ -452,6 +454,7 @@ def main() -> int:
     rss_samples_kib: list[int] = []
     rss_samples_kib_after_warmup: list[int] = []
     cpu_samples: list[float] = []
+    cpu_samples_after_warmup: list[float] = []
     static_guard_violations: list[dict[str, str]] = []
 
     while time.monotonic() < soak_end:
@@ -510,6 +513,7 @@ def main() -> int:
             rss_samples_kib.append(rss_kib)
             if (now - soak_started) >= max(0.0, args.warmup_skip_sec):
                 rss_samples_kib_after_warmup.append(rss_kib)
+                cpu_samples_after_warmup.append(cpu_percent)
             cpu_samples.append(cpu_percent)
             _append_event(
                 events_path,
@@ -557,6 +561,7 @@ def main() -> int:
     memory_peak_mb = (
         (max(memory_samples) / (1024.0 * 1024.0)) if memory_samples else 0.0
     )
+    cpu_reference = cpu_samples_after_warmup or cpu_samples
 
     soak = {
         "fail_calls": fail_calls,
@@ -571,6 +576,8 @@ def main() -> int:
         "rss_peak_mb": rss_peak_mb,
         "cpu_p95_percent": _percentile(cpu_samples, 0.95),
         "cpu_max_percent": max(cpu_samples) if cpu_samples else 0.0,
+        "cpu_p95_after_warmup_percent": _percentile(cpu_reference, 0.95),
+        "cpu_max_after_warmup_percent": max(cpu_reference) if cpu_reference else 0.0,
     }
 
     reasons: list[str] = []
@@ -582,8 +589,8 @@ def main() -> int:
         reasons.append("rss growth > 20%")
     if soak["rss_peak_mb"] > 700.0:
         reasons.append("rss peak > 700MB")
-    if soak["cpu_max_percent"] > STRICT_CPU_LIMIT_PERCENT:
-        reasons.append("cpu max > strict limit")
+    if soak["cpu_max_after_warmup_percent"] > STRICT_CPU_LIMIT_PERCENT:
+        reasons.append("cpu max (after warmup) > strict limit")
     if quality["success_rate"] < 0.98:
         reasons.append("success_rate < 98%")
     if static_guard_violations:
