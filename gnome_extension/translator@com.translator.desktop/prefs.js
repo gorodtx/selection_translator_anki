@@ -11,6 +11,22 @@ const BUS_NAME = "com.translator.desktop";
 const OBJECT_PATH = "/com/translator/desktop";
 const INTERFACE_NAME = "com.translator.desktop";
 let cssApplied = false;
+const MODIFIER_ONLY_KEYS = new Set([
+  Gdk.KEY_Shift_L,
+  Gdk.KEY_Shift_R,
+  Gdk.KEY_Control_L,
+  Gdk.KEY_Control_R,
+  Gdk.KEY_Alt_L,
+  Gdk.KEY_Alt_R,
+  Gdk.KEY_Meta_L,
+  Gdk.KEY_Meta_R,
+  Gdk.KEY_Super_L,
+  Gdk.KEY_Super_R,
+  Gdk.KEY_Hyper_L,
+  Gdk.KEY_Hyper_R,
+  Gdk.KEY_ISO_Level3_Shift,
+  Gdk.KEY_ISO_Level5_Shift,
+]);
 
 export default class TranslatorPrefs extends ExtensionPreferences {
   fillPreferencesWindow(window) {
@@ -62,7 +78,7 @@ export default class TranslatorPrefs extends ExtensionPreferences {
 
     const hotkeyButtonsRow = new Adw.PreferencesRow();
     hotkeyButtonsRow.set_margin_bottom(0);
-    const resetButton = new Gtk.Button({ label: "Reset", hexpand: true });
+    const resetButton = new Gtk.Button({ label: "Set hotkey", hexpand: true });
     resetButton.set_halign(Gtk.Align.FILL);
     hotkeyButtonsRow.set_child(resetButton);
     group.add(hotkeyButtonsRow);
@@ -152,24 +168,51 @@ export default class TranslatorPrefs extends ExtensionPreferences {
     const startCapture = () => {
       state.capturing = true;
       state.pending = null;
-      valueLabel.set_label("Press keys...");
+      valueLabel.set_label("Press shortcut (Esc to cancel)...");
     };
     resetButton.connect("clicked", startCapture);
 
+    const commitHotkey = (accel) => {
+      try {
+        settings.set_strv(HOTKEY_KEY, [accel]);
+        state.pending = null;
+        updateLabel();
+        showMessage("Hotkey updated.");
+      } catch (error) {
+        const text = error?.message
+          ? `Failed to save hotkey: ${error.message}`
+          : "Failed to save hotkey.";
+        showMessage(text);
+      }
+    };
+
     const keyController = new Gtk.EventControllerKey();
+    keyController.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
     keyController.connect("key-pressed", (_ctrl, keyval, _keycode, stateMask) => {
       if (!state.capturing) {
         return Gdk.EVENT_PROPAGATE;
       }
-      const accel = Gtk.accelerator_name(keyval, stateMask);
-      if (!Gtk.accelerator_valid(keyval, stateMask)) {
+
+      if (keyval === Gdk.KEY_Escape) {
+        state.capturing = false;
+        state.pending = null;
+        updateLabel();
+        showMessage("Hotkey update cancelled.");
         return Gdk.EVENT_STOP;
       }
+
+      if (MODIFIER_ONLY_KEYS.has(keyval)) {
+        return Gdk.EVENT_STOP;
+      }
+
+      const modMask = stateMask & Gtk.accelerator_get_default_mod_mask();
+      const normalizedKey = Gdk.keyval_to_lower(keyval);
+      if (!Gtk.accelerator_valid(normalizedKey, modMask)) {
+        return Gdk.EVENT_STOP;
+      }
+      const accel = Gtk.accelerator_name(normalizedKey, modMask);
       state.capturing = false;
-      settings.set_strv(HOTKEY_KEY, [accel]);
-      state.pending = null;
-      updateLabel();
-      showMessage("Hotkey updated.");
+      commitHotkey(accel);
       return Gdk.EVENT_STOP;
     });
     window.add_controller(keyController);
