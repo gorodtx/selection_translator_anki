@@ -117,6 +117,12 @@ bash scripts/install.sh healthcheck
 
 ### 5) Release flow (maintainers)
 
+Release guardrails (hard fail by default):
+- Build only from a clean tracked git state (no unstaged/staged tracked changes).
+- `translator-app.tar.gz` is created from `git archive HEAD` (tracked files only).
+- `.sqlite3` inside app archive is blocked; offline DB ships only as separate release assets.
+- Optional override for emergency/debug only: `TRANSLATOR_RELEASE_ALLOW_DIRTY=1`.
+
 ```bash
 dev/scripts/build_release_assets.sh
 (cd dev/dist/release/assets && sha256sum -c release-assets.sha256)
@@ -192,6 +198,12 @@ bash scripts/install.sh healthcheck
   - запусти healthcheck инсталлятора, затем повтори `install` или `update`.
 
 ### 5) Релизный цикл (для мейнтейнеров)
+
+Защита релиза (по умолчанию жёсткий fail):
+- Сборка только из чистого tracked-состояния git (без staged/unstaged tracked-изменений).
+- `translator-app.tar.gz` собирается через `git archive HEAD` (только tracked файлы).
+- `.sqlite3` внутри app-архива запрещены; офлайн-базы идут только отдельными release-ассетами.
+- Обход только для аварий/дебага: `TRANSLATOR_RELEASE_ALLOW_DIRTY=1`.
 
 ```bash
 dev/scripts/build_release_assets.sh

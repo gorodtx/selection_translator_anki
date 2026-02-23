@@ -11,6 +11,7 @@ OFFLINE_BASE_FILES=(
   "fallback.sqlite3"
   "definitions_pack.sqlite3"
 )
+ALLOW_DIRTY_RELEASE="${TRANSLATOR_RELEASE_ALLOW_DIRTY:-0}"
 
 log() {
   echo "[release-build] $*"
@@ -19,6 +20,22 @@ log() {
 fail() {
   echo "[release-build] $*" >&2
   exit 1
+}
+
+ensure_clean_tracked_tree() {
+  if [[ "${ALLOW_DIRTY_RELEASE}" == "1" ]]; then
+    log "dirty tracked tree is allowed by TRANSLATOR_RELEASE_ALLOW_DIRTY=1"
+    return
+  fi
+  if ! git -C "${ROOT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    fail "not a git work tree: ${ROOT_DIR}"
+  fi
+  if ! git -C "${ROOT_DIR}" diff --quiet --ignore-submodules HEAD --; then
+    fail "tracked changes detected. Commit/stash before building release assets."
+  fi
+  if ! git -C "${ROOT_DIR}" diff --cached --quiet --ignore-submodules --; then
+    fail "staged changes detected. Commit/stash before building release assets."
+  fi
 }
 
 sha256_of_file() {
@@ -64,11 +81,17 @@ resolve_local_base_path() {
 build_app_archive() {
   local app_archive="${ASSETS_DIR}/translator-app.tar.gz"
   rm -f "${app_archive}"
-  tar -czf "${app_archive}" -C "${ROOT_DIR}" \
-    desktop_app \
-    translate_logic \
-    icons \
-    scripts/runtime-requirements.txt
+  (
+    cd "${ROOT_DIR}"
+    git archive --format=tar.gz --output "${app_archive}" HEAD \
+      desktop_app \
+      translate_logic \
+      icons \
+      scripts/runtime-requirements.txt
+  )
+  if tar -tzf "${app_archive}" | rg -q "\\.sqlite3$"; then
+    fail "translator-app.tar.gz contains .sqlite3 files; release build aborted"
+  fi
   log "built ${app_archive}"
 }
 
@@ -124,6 +147,7 @@ build_manifest() {
 }
 
 main() {
+  ensure_clean_tracked_tree
   mkdir -p "${ASSETS_DIR}"
 
   build_app_archive
