@@ -37,6 +37,8 @@ EXT_ASSET="${TRANSLATOR_EXTENSION_ASSET:-translator-extension.zip}"
 
 FORCE_RELEASE_ASSETS="${TRANSLATOR_FORCE_RELEASE_ASSETS:-0}"
 SKIP_HEALTHCHECK="${TRANSLATOR_SKIP_HEALTHCHECK:-0}"
+INSTALL_MODE="${TRANSLATOR_INSTALL_MODE:-stable}"
+ALLOW_LOCAL_SOURCE="${TRANSLATOR_ALLOW_LOCAL_SOURCE:-0}"
 
 RUNTIME_REQUIREMENTS_FILE="${ROOT_DIR}/scripts/runtime-requirements.txt"
 
@@ -59,6 +61,31 @@ log() {
 fail() {
   echo "[installer] $*" >&2
   exit 1
+}
+
+require_linux_host() {
+  local uname_s
+  uname_s="$(uname -s 2>/dev/null || echo unknown)"
+  if [[ "${uname_s}" != "Linux" ]]; then
+    fail "installer supports Linux hosts only (detected: ${uname_s})"
+  fi
+}
+
+validate_install_mode() {
+  case "${INSTALL_MODE}" in
+    stable|dev)
+      ;;
+    *)
+      fail "TRANSLATOR_INSTALL_MODE must be stable or dev (got: ${INSTALL_MODE})"
+      ;;
+  esac
+  if [[ "${INSTALL_MODE}" == "stable" && "${ALLOW_LOCAL_SOURCE}" == "1" ]]; then
+    fail "TRANSLATOR_ALLOW_LOCAL_SOURCE=1 is not allowed in stable mode"
+  fi
+}
+
+local_source_allowed() {
+  [[ "${INSTALL_MODE}" == "dev" && "${ALLOW_LOCAL_SOURCE}" == "1" ]]
 }
 
 cleanup_tmp_files() {
@@ -234,7 +261,7 @@ resolve_manifest_path() {
   fi
 
   local local_manifest="${ROOT_DIR}/scripts/release-assets.sha256"
-  if [[ -s "${local_manifest}" ]] && has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]]; then
+  if [[ -s "${local_manifest}" ]] && has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]] && local_source_allowed; then
     printf "%s" "${local_manifest}"
     return
   fi
@@ -410,7 +437,7 @@ install_offline_bases() {
     local local_src
     local_src="$(resolve_local_base_path "${filename}")"
 
-    if [[ -n "${local_src}" ]] && is_checksum_match "${local_src}" "${filename}" "${manifest}"; then
+    if local_source_allowed && [[ -n "${local_src}" ]] && is_checksum_match "${local_src}" "${filename}" "${manifest}"; then
       install -m 644 "${local_src}" "${dst}"
       require_checksum_match "${dst}" "${filename}" "${manifest}"
       log "offline base: ${filename} (local, verified)"
@@ -669,7 +696,7 @@ install_app_tree() {
   rm -rf "${app_dir}"
   mkdir -p "${app_dir}"
 
-  if has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]]; then
+  if has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]] && local_source_allowed; then
     copy_tree "${ROOT_DIR}/desktop_app" "${app_dir}/desktop_app"
     copy_tree "${ROOT_DIR}/translate_logic" "${app_dir}/translate_logic"
     copy_tree "${ROOT_DIR}/icons" "${app_dir}/icons"
@@ -687,7 +714,7 @@ install_app_tree() {
 install_extension_tree() {
   local manifest="$1"
 
-  if has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]]; then
+  if has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]] && local_source_allowed; then
     copy_tree "${ROOT_DIR}/gnome_extension/${EXT_UUID}" "${EXT_DIR}"
     log "installed extension from local repository"
   else
@@ -846,20 +873,29 @@ Environment overrides:
   TRANSLATOR_EXTENSION_ASSET=translator-extension.zip
   TRANSLATOR_FORCE_RELEASE_ASSETS=1
   TRANSLATOR_SKIP_HEALTHCHECK=1
+  TRANSLATOR_INSTALL_MODE=stable|dev
+  TRANSLATOR_ALLOW_LOCAL_SOURCE=1   # only with TRANSLATOR_INSTALL_MODE=dev
 USAGE
 }
 
 case "${ACTION}" in
   install|update)
+    require_linux_host
+    validate_install_mode
     install_or_update
     ;;
   remove)
+    require_linux_host
     remove_all
     ;;
   rollback)
+    require_linux_host
+    validate_install_mode
     rollback_release
     ;;
   healthcheck)
+    require_linux_host
+    validate_install_mode
     run_dbus_healthcheck
     ;;
   *)

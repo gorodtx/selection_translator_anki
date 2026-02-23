@@ -121,11 +121,11 @@ Release guardrails (hard fail by default):
 - Build only from a clean tracked git state (no unstaged/staged tracked changes).
 - `translator-app.tar.gz` is created from `git archive HEAD` (tracked files only).
 - `.sqlite3` inside app archive is blocked; offline DB ships only as separate release assets.
+- Immutable policy: existing tag/release must not be modified.
 - Optional override for emergency/debug only: `TRANSLATOR_RELEASE_ALLOW_DIRTY=1`.
 
 ```bash
-dev/scripts/build_release_assets.sh
-(cd dev/dist/release/assets && sha256sum -c release-assets.sha256)
+dev/scripts/release_preflight.sh vX.Y.Z
 ```
 
 ```bash
@@ -146,6 +146,8 @@ gh release create vX.Y.Z \
   dev/dist/release/assets/fallback.sqlite3 \
   dev/dist/release/assets/definitions_pack.sqlite3
 ```
+
+Detailed gate checklist: `dev/docs/release_gate.md`.
 
 ---
 
@@ -203,11 +205,11 @@ bash scripts/install.sh healthcheck
 - Сборка только из чистого tracked-состояния git (без staged/unstaged tracked-изменений).
 - `translator-app.tar.gz` собирается через `git archive HEAD` (только tracked файлы).
 - `.sqlite3` внутри app-архива запрещены; офлайн-базы идут только отдельными release-ассетами.
+- Immutable policy: уже опубликованный тег/релиз не изменяется.
 - Обход только для аварий/дебага: `TRANSLATOR_RELEASE_ALLOW_DIRTY=1`.
 
 ```bash
-dev/scripts/build_release_assets.sh
-(cd dev/dist/release/assets && sha256sum -c release-assets.sha256)
+dev/scripts/release_preflight.sh vX.Y.Z
 ```
 
 ```bash
@@ -228,6 +230,8 @@ gh release create vX.Y.Z \
   dev/dist/release/assets/fallback.sqlite3 \
   dev/dist/release/assets/definitions_pack.sqlite3
 ```
+
+Полный gate-чеклист: `dev/docs/release_gate.md`.
 
 ## License
 

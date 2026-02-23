@@ -703,6 +703,10 @@ dev/*
 dev/scripts/*
 !dev/scripts/nightly_quality_run.py
 !dev/scripts/build_release_assets.sh
+!dev/scripts/release_preflight.sh
+!dev/docs/
+dev/docs/*
+!dev/docs/release_gate.md
 test.py
 test.*
 **/test.py
