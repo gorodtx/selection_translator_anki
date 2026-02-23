@@ -724,3 +724,9 @@ test.*
 .venv-desktop
 .npm-cache
 .venv-desktop
+
+# Local offline DB assets (installed from GitHub Releases, never committed)
+offline_language_base/*.sqlite3
+offline_language_base/*.sqlite3-*
+translate_logic/infrastructure/language_base/offline_language_base/*.sqlite3
+translate_logic/infrastructure/language_base/offline_language_base/*.sqlite3-*
