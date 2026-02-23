@@ -433,7 +433,6 @@ prepare_runtime_requirements() {
   fi
   cat > "${output_file}" <<'REQ'
 aiohttp==3.13.2
-spacy==3.8.11
 REQ
 }
 
