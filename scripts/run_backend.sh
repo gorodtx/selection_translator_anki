@@ -5,13 +5,50 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DESKTOP_VENV="${TRANSLATOR_BACKEND_VENV:-${ROOT_DIR}/.venv-desktop}"
 HEALTHCHECK_MODE="${1:-}"
 
-if [[ -z "${XDG_CONFIG_HOME:-}" ]]; then
-  export XDG_CONFIG_HOME="${ROOT_DIR}/.config"
-fi
+import_systemd_session_environment() {
+  command -v systemctl >/dev/null 2>&1 || return 0
+  local line=""
+  local key=""
+  local value=""
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "${key}" in
+      DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XDG_CURRENT_DESKTOP|XAUTHORITY)
+        if [[ -z "${!key:-}" && -n "${value}" ]]; then
+          export "${key}=${value}"
+        fi
+        ;;
+    esac
+  done < <(systemctl --user show-environment 2>/dev/null || true)
+}
+
+wait_for_session_environment() {
+  local deadline=$((SECONDS + 20))
+  while (( SECONDS < deadline )); do
+    import_systemd_session_environment
+    if [[ -n "${XDG_RUNTIME_DIR:-}" && ( -n "${WAYLAND_DISPLAY:-}" || -n "${DISPLAY:-}" ) ]]; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
+prepare_runtime_environment() {
+  if [[ -z "${XDG_CONFIG_HOME:-}" ]]; then
+    export XDG_CONFIG_HOME="${HOME}/.config"
+  fi
+  wait_for_session_environment
+}
 
 run_healthcheck() {
   if [[ ! -x "${DESKTOP_VENV}/bin/python" ]]; then
     echo "missing backend venv: ${DESKTOP_VENV}" >&2
+    return 1
+  fi
+  if ! prepare_runtime_environment; then
+    echo "session environment is not ready (DISPLAY/WAYLAND_DISPLAY/XDG_RUNTIME_DIR)" >&2
     return 1
   fi
   if ! "${DESKTOP_VENV}/bin/python" - <<'PY' >/dev/null 2>&1

@@ -42,6 +42,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._anki_controller: AnkiController | None = None
         self._settings_controller: SettingsController | None = None
         self._translation_controller: TranslationController | None = None
+        self._startup_retry_source_id: int | None = None
         self.connect("startup", self._on_startup)
         self.connect("activate", self._on_activate)
         self.connect("shutdown", self._on_shutdown)
@@ -49,16 +50,22 @@ class TranslatorApp(gtk_types.Gtk.Application):
     def _on_startup(self, _app: gtk_types.Gtk.Application) -> None:
         self.hold()
         self._services.start()
-        self._build_controllers()
         self._reset_settings_if_requested()
         GLib.set_application_name("Translator")
         GLib.set_prgname("translator")
-        self._register_dbus_service()
+        if not self._initialize_startup_components():
+            self._schedule_startup_retry()
 
     def _on_activate(self, _app: gtk_types.Gtk.Application) -> None:
         return None
 
     def _on_shutdown(self, _app: gtk_types.Gtk.Application) -> None:
+        if self._startup_retry_source_id is not None:
+            try:
+                GLib.source_remove(self._startup_retry_source_id)
+            except Exception:
+                pass
+            self._startup_retry_source_id = None
         if self._dbus_service is not None:
             self._dbus_service.close()
             self._dbus_service = None
@@ -68,6 +75,8 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self.release()
 
     def _register_dbus_service(self) -> None:
+        if self._dbus_service is not None:
+            return
         if not self._ensure_controllers_ready():
             return
         self._dbus_service = DbusService.register(
@@ -81,6 +90,25 @@ class TranslatorApp(gtk_types.Gtk.Application):
             on_select_deck=self._on_dbus_select_deck,
             on_save_settings=self._on_dbus_save_settings,
         )
+
+    def _initialize_startup_components(self) -> bool:
+        if not self._ensure_controllers_ready():
+            return False
+        self._register_dbus_service()
+        return self._dbus_service is not None
+
+    def _schedule_startup_retry(self) -> None:
+        if self._startup_retry_source_id is not None:
+            return
+        self._startup_retry_source_id = GLib.timeout_add(
+            1000, self._retry_startup_components
+        )
+
+    def _retry_startup_components(self) -> bool:
+        if self._initialize_startup_components():
+            self._startup_retry_source_id = None
+            return False
+        return True
 
     def _on_dbus_translate(self, text: str) -> None:
         if not self._ensure_controllers_ready():
