@@ -533,11 +533,44 @@ Exec=/usr/bin/systemctl --user start translator-desktop.service
 SERVICE
   chmod 644 "${DBUS_FILE}"
 
+  sync_user_session_environment
+
   if command -v gdbus >/dev/null 2>&1; then
     gdbus call --session \
       --dest org.freedesktop.DBus \
       --object-path /org/freedesktop/DBus \
       --method org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
+  fi
+}
+
+sync_user_session_environment() {
+  local keys=(
+    DISPLAY
+    WAYLAND_DISPLAY
+    XDG_RUNTIME_DIR
+    DBUS_SESSION_BUS_ADDRESS
+    XDG_CURRENT_DESKTOP
+    XAUTHORITY
+  )
+  local names=()
+  local pairs=()
+  local key=""
+  local value=""
+  for key in "${keys[@]}"; do
+    value="${!key:-}"
+    if [[ -z "${value}" ]]; then
+      continue
+    fi
+    names+=("${key}")
+    pairs+=("${key}=${value}")
+  done
+
+  if [[ ${#names[@]} -gt 0 ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl --user import-environment "${names[@]}" >/dev/null 2>&1 || true
+  fi
+
+  if [[ ${#pairs[@]} -gt 0 ]] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    dbus-update-activation-environment --systemd "${pairs[@]}" >/dev/null 2>&1 || true
   fi
 }
 
@@ -554,6 +587,7 @@ write_systemd_service() {
 [Unit]
 Description=Translator desktop backend
 After=graphical-session.target network.target
+PartOf=graphical-session.target
 StartLimitIntervalSec=0
 
 [Service]
@@ -576,12 +610,13 @@ MemoryMax=${memory_max}
 OOMPolicy=kill
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
 SERVICE
 
   chmod 644 "${SYSTEMD_UNIT_FILE}"
 
   if command -v systemctl >/dev/null 2>&1; then
+    sync_user_session_environment
     systemctl --user daemon-reload >/dev/null 2>&1 || true
     systemctl --user enable translator-desktop.service >/dev/null 2>&1 || true
   fi
@@ -736,6 +771,7 @@ restart_runtime_service() {
   if ! command -v systemctl >/dev/null 2>&1; then
     return
   fi
+  sync_user_session_environment
   systemctl --user restart translator-desktop.service >/dev/null 2>&1 || true
 }
 
@@ -756,6 +792,7 @@ wait_for_dbus_method() {
 run_dbus_healthcheck() {
   command -v gdbus >/dev/null 2>&1 || fail "gdbus not found; cannot run healthcheck"
   if command -v systemctl >/dev/null 2>&1; then
+    sync_user_session_environment
     systemctl --user start translator-desktop.service >/dev/null 2>&1 || true
   fi
 
