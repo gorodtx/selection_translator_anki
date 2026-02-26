@@ -39,6 +39,7 @@ FORCE_RELEASE_ASSETS="${TRANSLATOR_FORCE_RELEASE_ASSETS:-0}"
 SKIP_HEALTHCHECK="${TRANSLATOR_SKIP_HEALTHCHECK:-0}"
 INSTALL_MODE="${TRANSLATOR_INSTALL_MODE:-stable}"
 ALLOW_LOCAL_SOURCE="${TRANSLATOR_ALLOW_LOCAL_SOURCE:-0}"
+OFFLINE_BASES_FALLBACK_TAG="${TRANSLATOR_OFFLINE_BASES_FALLBACK_TAG:-v0.2.1}"
 
 RUNTIME_REQUIREMENTS_FILE="${ROOT_DIR}/scripts/runtime-requirements.txt"
 
@@ -183,15 +184,25 @@ download_file() {
   rm -f "${tmp}"
 
   if command -v curl >/dev/null 2>&1; then
-    curl --fail --location --retry 3 --connect-timeout 20 --output "${tmp}" "${url}"
+    if ! curl --fail --location --retry 3 --connect-timeout 20 --output "${tmp}" "${url}"; then
+      rm -f "${tmp}"
+      return 1
+    fi
   elif command -v wget >/dev/null 2>&1; then
-    wget -O "${tmp}" "${url}"
+    if ! wget -O "${tmp}" "${url}"; then
+      rm -f "${tmp}"
+      return 1
+    fi
   else
     fail "curl/wget not found; cannot download ${url}"
   fi
 
-  [[ -s "${tmp}" ]] || fail "downloaded file is empty: ${url}"
+  if [[ ! -s "${tmp}" ]]; then
+    rm -f "${tmp}"
+    return 1
+  fi
   mv "${tmp}" "${dest}"
+  return 0
 }
 
 manifest_checksum() {
@@ -271,7 +282,9 @@ resolve_manifest_path() {
   local tmp_manifest
   tmp_manifest="$(safe_mktemp)" || fail "cannot create temporary file for manifest"
   TMP_FILES+=("${tmp_manifest}")
-  download_file "${manifest_url}" "${tmp_manifest}"
+  if ! download_file "${manifest_url}" "${tmp_manifest}"; then
+    fail "failed to download manifest: ${manifest_url}"
+  fi
   [[ -s "${tmp_manifest}" ]] || fail "downloaded manifest is empty: ${manifest_url}"
   printf "%s" "${tmp_manifest}"
 }
@@ -280,6 +293,24 @@ asset_cache_path() {
   local filename="$1"
   mkdir -p "${CACHE_DIR}"
   printf "%s/%s" "${CACHE_DIR}" "${filename}"
+}
+
+is_offline_base_file() {
+  local filename="$1"
+  local item
+  for item in "${OFFLINE_BASE_FILES[@]}"; do
+    if [[ "${item}" == "${filename}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+offline_bases_fallback_base_url() {
+  if [[ -z "${OFFLINE_BASES_FALLBACK_TAG}" ]]; then
+    return 1
+  fi
+  printf "https://github.com/%s/releases/download/%s" "${RELEASE_REPO}" "${OFFLINE_BASES_FALLBACK_TAG}"
 }
 
 ensure_asset_downloaded() {
@@ -296,8 +327,19 @@ ensure_asset_downloaded() {
   local base_url
   base_url="$(release_assets_base_url)"
   local url="${base_url}/${filename}"
+  local fallback_base=""
   log "downloading ${filename}"
-  download_file "${url}" "${path}"
+  if ! download_file "${url}" "${path}"; then
+    if is_offline_base_file "${filename}" && fallback_base="$(offline_bases_fallback_base_url 2>/dev/null)"; then
+      local fallback_url="${fallback_base}/${filename}"
+      log "primary release is missing ${filename}, trying fallback tag ${OFFLINE_BASES_FALLBACK_TAG}"
+      if ! download_file "${fallback_url}" "${path}"; then
+        fail "failed to download ${filename} from ${url} and fallback ${fallback_url}"
+      fi
+    else
+      fail "failed to download ${filename} from ${url}"
+    fi
+  fi
   require_checksum_match "${path}" "${filename}" "${manifest}"
   printf "%s" "${path}"
 }
