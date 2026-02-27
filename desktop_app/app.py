@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
+import time
 from collections.abc import Callable
 
 from desktop_app.infrastructure.adapters.clipboard_writer import ClipboardWriter
@@ -12,7 +14,10 @@ from desktop_app.presentation.controllers import (
     SettingsController,
     TranslationController,
 )
-from desktop_app.presentation.controllers.settings_controller import AnkiActionResult, AnkiStatus
+from desktop_app.presentation.controllers.settings_controller import (
+    AnkiActionResult,
+    AnkiStatus,
+)
 from desktop_app.application.use_cases.translation_executor import TranslationExecutor
 from desktop_app.presentation.dbus.service import DbusService
 from desktop_app.infrastructure.services.container import AppServices
@@ -30,6 +35,7 @@ setattr(gtk_types.Gtk, "Application", getattr(Gtk, "Application"))
 
 
 APP_ID = "com.translator.desktop"
+logger = logging.getLogger(__name__)
 
 
 class TranslatorApp(gtk_types.Gtk.Application):
@@ -43,12 +49,17 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._settings_controller: SettingsController | None = None
         self._translation_controller: TranslationController | None = None
         self._startup_retry_source_id: int | None = None
+        self._startup_retry_attempts: int = 0
+        self._startup_started_at: float = 0.0
+        self._startup_ready_timeout_seconds: float = _startup_ready_timeout()
         self.connect("startup", self._on_startup)
         self.connect("activate", self._on_activate)
         self.connect("shutdown", self._on_shutdown)
 
     def _on_startup(self, _app: gtk_types.Gtk.Application) -> None:
         self.hold()
+        self._startup_retry_attempts = 0
+        self._startup_started_at = time.monotonic()
         self._services.start()
         self._reset_settings_if_requested()
         GLib.set_application_name("Translator")
@@ -79,17 +90,21 @@ class TranslatorApp(gtk_types.Gtk.Application):
             return
         if not self._ensure_controllers_ready():
             return
-        self._dbus_service = DbusService.register(
-            app=self,
-            on_translate=self._on_dbus_translate,
-            on_show_settings=self._open_settings,
-            on_show_history=self._show_history,
-            on_get_anki_status=self._on_dbus_get_anki_status,
-            on_create_model=self._on_dbus_create_model,
-            on_list_decks=self._on_dbus_list_decks,
-            on_select_deck=self._on_dbus_select_deck,
-            on_save_settings=self._on_dbus_save_settings,
-        )
+        try:
+            self._dbus_service = DbusService.register(
+                app=self,
+                on_translate=self._on_dbus_translate,
+                on_show_settings=self._open_settings,
+                on_show_history=self._show_history,
+                on_get_anki_status=self._on_dbus_get_anki_status,
+                on_create_model=self._on_dbus_create_model,
+                on_list_decks=self._on_dbus_list_decks,
+                on_select_deck=self._on_dbus_select_deck,
+                on_save_settings=self._on_dbus_save_settings,
+            )
+        except Exception:
+            logger.exception("failed to register D-Bus service")
+            self._dbus_service = None
 
     def _initialize_startup_components(self) -> bool:
         if not self._ensure_controllers_ready():
@@ -108,12 +123,28 @@ class TranslatorApp(gtk_types.Gtk.Application):
         if self._initialize_startup_components():
             self._startup_retry_source_id = None
             return False
+        self._startup_retry_attempts += 1
+        if self._startup_retry_attempts % 5 == 0:
+            logger.warning(
+                "startup components are still not ready (attempt=%s, elapsed=%.1fs)",
+                self._startup_retry_attempts,
+                max(time.monotonic() - self._startup_started_at, 0.0),
+            )
+        if self._startup_retry_expired():
+            logger.critical(
+                "startup readiness timeout exceeded (%.1fs), forcing restart",
+                self._startup_ready_timeout_seconds,
+            )
+            self._force_restart()
+            return False
         return True
 
     def _on_dbus_translate(self, text: str) -> None:
         if not self._ensure_controllers_ready():
+            self._maybe_force_restart_on_unready()
             return
         if self._translation_controller is None:
+            self._maybe_force_restart_on_unready()
             return
         self._translation_controller.trigger_text(
             text,
@@ -125,15 +156,18 @@ class TranslatorApp(gtk_types.Gtk.Application):
 
     def _on_dbus_get_anki_status(self, reply: Callable[[AnkiStatus], None]) -> None:
         if not self._ensure_controllers_ready():
+            self._maybe_force_restart_on_unready()
             reply(self._fallback_anki_status())
             return
         if self._settings_controller is None:
+            self._maybe_force_restart_on_unready()
             reply(self._fallback_anki_status())
             return
         self._settings_controller.get_anki_status(reply)
 
     def _on_dbus_create_model(self, reply: Callable[[AnkiActionResult], None]) -> None:
         if not self._ensure_controllers_ready():
+            self._maybe_force_restart_on_unready()
             reply(
                 AnkiActionResult(
                     message="Settings controller is not ready.",
@@ -142,6 +176,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
             )
             return
         if self._settings_controller is None:
+            self._maybe_force_restart_on_unready()
             reply(
                 AnkiActionResult(
                     message="Settings controller is not ready.",
@@ -153,9 +188,11 @@ class TranslatorApp(gtk_types.Gtk.Application):
 
     def _on_dbus_list_decks(self, reply: Callable[[AnkiListResult], None]) -> None:
         if not self._ensure_controllers_ready():
+            self._maybe_force_restart_on_unready()
             reply(AnkiListResult(items=[], error="Settings controller is not ready."))
             return
         if self._settings_controller is None:
+            self._maybe_force_restart_on_unready()
             reply(AnkiListResult(items=[], error="Settings controller is not ready."))
             return
         self._settings_controller.list_decks(reply)
@@ -164,6 +201,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self, deck: str, reply: Callable[[AnkiActionResult], None]
     ) -> None:
         if not self._ensure_controllers_ready():
+            self._maybe_force_restart_on_unready()
             del deck
             reply(
                 AnkiActionResult(
@@ -173,6 +211,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
             )
             return
         if self._settings_controller is None:
+            self._maybe_force_restart_on_unready()
             del deck
             reply(
                 AnkiActionResult(
@@ -185,6 +224,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
 
     def _on_dbus_save_settings(self, reply: Callable[[AnkiActionResult], None]) -> None:
         if not self._ensure_controllers_ready():
+            self._maybe_force_restart_on_unready()
             reply(
                 AnkiActionResult(
                     message="Settings controller is not ready.",
@@ -193,6 +233,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
             )
             return
         if self._settings_controller is None:
+            self._maybe_force_restart_on_unready()
             reply(
                 AnkiActionResult(
                     message="Settings controller is not ready.",
@@ -204,8 +245,10 @@ class TranslatorApp(gtk_types.Gtk.Application):
 
     def _show_history(self) -> None:
         if not self._ensure_controllers_ready():
+            self._maybe_force_restart_on_unready()
             return
         if self._translation_controller is None:
+            self._maybe_force_restart_on_unready()
             return
         self._translation_controller.show_history_window()
 
@@ -271,6 +314,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         try:
             self._build_controllers()
         except Exception:
+            logger.exception("failed to initialize controllers")
             return False
         return (
             self._translation_controller is not None
@@ -278,9 +322,39 @@ class TranslatorApp(gtk_types.Gtk.Application):
             and self._anki_controller is not None
         )
 
+    def _startup_retry_expired(self) -> bool:
+        if self._startup_started_at <= 0:
+            return False
+        return (
+            time.monotonic() - self._startup_started_at
+        ) >= self._startup_ready_timeout_seconds
+
+    def _maybe_force_restart_on_unready(self) -> None:
+        self._schedule_startup_retry()
+        if self._startup_retry_expired():
+            logger.critical(
+                "controllers are still unavailable after %.1fs, forcing restart",
+                self._startup_ready_timeout_seconds,
+            )
+            self._force_restart()
+
+    def _force_restart(self) -> None:
+        os._exit(1)
+
     def _fallback_anki_status(self) -> AnkiStatus:
         return AnkiStatus(
             model_status="Model not found",
             deck_status="Not selected",
             deck_name="",
         )
+
+
+def _startup_ready_timeout() -> float:
+    value = os.environ.get("TRANSLATOR_STARTUP_READY_TIMEOUT_SECONDS", "45")
+    try:
+        timeout = float(value)
+    except ValueError:
+        return 45.0
+    if timeout < 5:
+        return 5.0
+    return timeout
