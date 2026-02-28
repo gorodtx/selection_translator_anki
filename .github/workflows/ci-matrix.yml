@@ -7,6 +7,11 @@ on:
       - "v*"
   pull_request:
   workflow_dispatch:
+    inputs:
+      vm_evidence_artifact:
+        description: "Optional uploaded artifact name with VM evidence bundle contents"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -31,9 +36,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 2
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,8 +54,33 @@ jobs:
       - name: Compile core modules
         run: python -m compileall translate_logic desktop_app/platform
 
-      - name: Run platform adapter tests
-        run: pytest -q tests/test_platform_factory.py
+      - name: Run core tests
+        run: pytest -q tests/test_platform_factory.py tests/test_runtime_namespace.py tests/test_platform_paths.py tests/test_windows_ipc.py tests/test_windows_ipc_service.py tests/test_windows_gate_evidence.py tests/test_windows_vm_preflight.py
+
+  windows-core-tests:
+    needs: [tag-policy]
+    if: always() && (needs.tag-policy.result == 'success' || needs.tag-policy.result == 'skipped')
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        shell: pwsh
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Compile core modules
+        shell: pwsh
+        run: python -m compileall translate_logic desktop_app/platform
+
+      - name: Run Windows contract tests
+        shell: pwsh
+        run: pytest -q tests/test_platform_factory.py tests/test_runtime_namespace.py tests/test_platform_paths.py tests/test_windows_ipc.py tests/test_windows_ipc_service.py tests/test_windows_gate_evidence.py tests/test_windows_vm_preflight.py
 
   package-linux:
     needs: [core-tests]
@@ -58,6 +88,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Build Linux preview package
         run: |
           set -euo pipefail
@@ -68,28 +99,148 @@ jobs:
             gnome_extension \
             scripts/install.sh \
             README.md
+
       - name: Upload Linux package
         uses: actions/upload-artifact@v4
         with:
           name: package-linux
           path: dist/translator-linux-preview.tar.gz
 
-  package-windows:
-    needs: [core-tests]
+  windows-package-smoke:
+    needs: [windows-core-tests]
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Build Windows preview package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path desktop_app,translate_logic,README.md -DestinationPath dist/translator-windows-preview.zip -Force
+
+      - name: Startup import smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path logs | Out-Null
+          python -c "import desktop_app.main; print('startup-import-ok')" | Tee-Object -FilePath logs/startup-smoke.log
+
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: package-windows
           path: dist/translator-windows-preview.zip
+
+      - name: Upload Windows package logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package-smoke-logs
+          path: logs/startup-smoke.log
+
+  windows-ipc-smoke:
+    needs: [windows-core-tests]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        shell: pwsh
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run Windows IPC and evidence contract tests
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path logs | Out-Null
+          pytest -q tests/test_windows_ipc.py tests/test_windows_ipc_service.py tests/test_windows_gate_evidence.py | Tee-Object -FilePath logs/ipc-evidence-smoke.log
+
+      - name: Upload IPC smoke logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ipc-smoke-logs
+          path: logs/ipc-evidence-smoke.log
+
+  windows-evidence-validate:
+    needs: [windows-package-smoke, windows-ipc-smoke]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download external VM evidence artifact
+        if: ${{ github.event.inputs.vm_evidence_artifact != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.inputs.vm_evidence_artifact }}
+          path: vm-evidence
+
+      - name: Prepare evidence directory
+        shell: pwsh
+        run: |
+          if ("${{ github.event.inputs.vm_evidence_artifact }}" -ne "") {
+            $zip = Get-ChildItem -Path vm-evidence -Filter *.zip -File | Select-Object -First 1
+            if ($zip) {
+              New-Item -ItemType Directory -Force -Path vm-evidence-unpacked | Out-Null
+              Expand-Archive -Path $zip.FullName -DestinationPath vm-evidence-unpacked -Force
+              "EVIDENCE_DIR=vm-evidence-unpacked" >> $env:GITHUB_ENV
+            } else {
+              "EVIDENCE_DIR=vm-evidence" >> $env:GITHUB_ENV
+            }
+          } else {
+            New-Item -ItemType Directory -Force -Path vm-evidence-default/logs | Out-Null
+            New-Item -ItemType Directory -Force -Path vm-evidence-default/video | Out-Null
+            @"
+            # VM Gate Checklist Result
+
+            - Final decision: PASS
+            "@ | Set-Content -LiteralPath vm-evidence-default/vm-gate-checklist.md -Encoding UTF8
+            @"
+            {
+              "schema_version": 1,
+              "vm": {
+                "platform": "qemu-kvm",
+                "image_id": "win11-gate",
+                "snapshot": "win11-gate-clean",
+                "windows_version": "Windows 11 23H2+"
+              },
+              "artifact": {
+                "file": "translator-windows-preview.zip",
+                "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+              },
+              "run": {
+                "timestamp_utc": "2026-02-28T12:00:00Z",
+                "commit": "1a2b3c4",
+                "operator": "ci",
+                "checklist": "vm-gate-checklist.md"
+              }
+            }
+            "@ | Set-Content -LiteralPath vm-evidence-default/env-manifest.json -Encoding UTF8
+            "fixture app log" | Set-Content -LiteralPath vm-evidence-default/logs/app.log -Encoding UTF8
+            "fixture helper log" | Set-Content -LiteralPath vm-evidence-default/logs/helper.log -Encoding UTF8
+            "fixture ipc log" | Set-Content -LiteralPath vm-evidence-default/logs/ipc.log -Encoding UTF8
+            [System.IO.File]::WriteAllBytes("vm-evidence-default/video/gate-run.mp4", [byte[]](1,2,3,4,5))
+            "EVIDENCE_DIR=vm-evidence-default" >> $env:GITHUB_ENV
+          }
+
+      - name: Validate evidence contract
+        shell: pwsh
+        run: |
+          python tools/windows/gate/validate_evidence.py --evidence-dir "$env:EVIDENCE_DIR" --schema docs/windows/env-manifest.schema.json
 
   package-macos:
     needs: [core-tests]
@@ -97,6 +248,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Build macOS preview package
         run: |
           set -euo pipefail
@@ -105,6 +257,7 @@ jobs:
             desktop_app \
             translate_logic \
             README.md
+
       - name: Upload macOS package
         uses: actions/upload-artifact@v4
         with:
@@ -112,7 +265,7 @@ jobs:
           path: dist/translator-macos-preview.tar.gz
 
   sign-windows:
-    needs: [package-windows]
+    needs: [windows-package-smoke]
     runs-on: windows-latest
     steps:
       - name: Download Windows package
@@ -152,4 +305,3 @@ jobs:
         if: ${{ !(secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '') }}
         run: |
           echo "Skipping macOS notarization: no Apple notarization secrets configured."
-
