@@ -160,6 +160,9 @@ gh release create vX.Y.Z \
 ```
 
 Detailed gate checklist: `dev/docs/release_gate.md`.
+Windows VM gate runbook: `docs/windows/vm-gate.md`.
+Windows VM options fact-check: `docs/windows/vm-options-fact-check.md`.
+Windows VM checklist template: `docs/windows/vm-gate-checklist.md`.
 
 Parallel stable+dev runtime runbook: `dev/docs/parallel_runtime.md`.
 
@@ -273,6 +276,9 @@ gh release create vX.Y.Z \
 ```
 
 Полный gate-чеклист: `dev/docs/release_gate.md`.
+Runbook Windows VM gate: `docs/windows/vm-gate.md`.
+Факт-чек и сравнение вариантов VM: `docs/windows/vm-options-fact-check.md`.
+Шаблон чеклиста Windows VM: `docs/windows/vm-gate-checklist.md`.
 
 Runbook параллельного stable+dev режима: `dev/docs/parallel_runtime.md`.
 
