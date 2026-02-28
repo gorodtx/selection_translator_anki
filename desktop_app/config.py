@@ -4,7 +4,10 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Final
+
+from desktop_app.platform.paths import user_config_home
 
 CONFIG_DIR_NAME: Final[str] = "translator"
 CONFIG_FILE_NAME: Final[str] = "desktop_config.json"
@@ -45,24 +48,26 @@ class AppConfig:
 
 
 def config_path() -> Path:
-    default_base = Path.home() / ".config"
-    default_path = default_base / CONFIG_DIR_NAME / CONFIG_FILE_NAME
-    xdg_home = os.environ.get("XDG_CONFIG_HOME")
-    if not xdg_home:
-        return default_path
-    xdg_path = Path(xdg_home) / CONFIG_DIR_NAME / CONFIG_FILE_NAME
-    if xdg_path.exists() and default_path.exists():
-        try:
-            if xdg_path.stat().st_mtime >= default_path.stat().st_mtime:
+    if sys.platform.startswith("linux"):
+        default_base = Path.home() / ".config"
+        default_path = default_base / CONFIG_DIR_NAME / CONFIG_FILE_NAME
+        xdg_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        if not xdg_home:
+            return default_path
+        xdg_path = Path(xdg_home) / CONFIG_DIR_NAME / CONFIG_FILE_NAME
+        if xdg_path.exists() and default_path.exists():
+            try:
+                if xdg_path.stat().st_mtime >= default_path.stat().st_mtime:
+                    return xdg_path
+            except OSError:
                 return xdg_path
-        except OSError:
+            return default_path
+        if xdg_path.exists():
             return xdg_path
-        return default_path
-    if xdg_path.exists():
+        if default_path.exists():
+            return default_path
         return xdg_path
-    if default_path.exists():
-        return default_path
-    return xdg_path
+    return user_config_home() / CONFIG_DIR_NAME / CONFIG_FILE_NAME
 
 
 def load_config() -> AppConfig:
