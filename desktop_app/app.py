@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import os
 from collections.abc import Callable
+import sys
+import threading
 
 from desktop_app.infrastructure.adapters.clipboard_writer import ClipboardWriter
 from desktop_app.infrastructure.anki import AnkiListResult
@@ -17,7 +19,8 @@ from desktop_app.presentation.controllers.settings_controller import (
     AnkiStatus,
 )
 from desktop_app.application.use_cases.translation_executor import TranslationExecutor
-from desktop_app.platform import PlatformAdapter, resolve_platform_adapter
+from desktop_app.platform import PlatformAdapter, PlatformTarget, resolve_platform_adapter
+from desktop_app.platform.windows_ipc import PipeHandlers, WindowsIpcService
 from desktop_app.presentation.dbus.service import DbusService
 from desktop_app.infrastructure.services.container import AppServices
 from desktop_app.runtime_namespace import app_id
@@ -45,6 +48,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._platform: PlatformAdapter = resolve_platform_adapter()
         self._clipboard_writer = ClipboardWriter()
         self._dbus_service: DbusService | None = None
+        self._windows_ipc_service: WindowsIpcService | None = None
         self._anki_controller: AnkiController | None = None
         self._settings_controller: SettingsController | None = None
         self._translation_controller: TranslationController | None = None
@@ -60,6 +64,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         GLib.set_application_name("Translator")
         GLib.set_prgname("translator")
         self._register_dbus_service()
+        self._register_windows_ipc_service()
 
     def _on_activate(self, _app: gtk_types.Gtk.Application) -> None:
         return None
@@ -68,12 +73,17 @@ class TranslatorApp(gtk_types.Gtk.Application):
         if self._dbus_service is not None:
             self._dbus_service.close()
             self._dbus_service = None
+        if self._windows_ipc_service is not None:
+            self._windows_ipc_service.close()
+            self._windows_ipc_service = None
         if self._translation_controller is not None:
             self._translation_controller.cancel_tasks()
         self._services.stop()
         self.release()
 
     def _register_dbus_service(self) -> None:
+        if not self._platform.capabilities.dbus_transport:
+            return
         if not self._ensure_controllers_ready():
             return
         self._dbus_service = DbusService.register(
@@ -88,6 +98,17 @@ class TranslatorApp(gtk_types.Gtk.Application):
             on_save_settings=self._on_dbus_save_settings,
         )
 
+    def _register_windows_ipc_service(self) -> None:
+        if self._platform.target is not PlatformTarget.WINDOWS:
+            return
+        handlers = PipeHandlers(
+            on_translate=self._on_ipc_translate,
+            on_show_settings=self._on_ipc_show_settings,
+            on_show_history=self._on_ipc_show_history,
+            on_get_anki_status=self._on_ipc_get_anki_status,
+        )
+        self._windows_ipc_service = WindowsIpcService.register(handlers=handlers)
+
     def _on_dbus_translate(self, text: str) -> None:
         if not self._ensure_controllers_ready():
             return
@@ -100,6 +121,13 @@ class TranslatorApp(gtk_types.Gtk.Application):
             hotkey=True,
             source="dbus",
         )
+
+    def _on_ipc_translate(self, text: str) -> None:
+        GLib.idle_add(self._dispatch_ipc_translate, text)
+
+    def _dispatch_ipc_translate(self, text: str) -> bool:
+        self._on_dbus_translate(text)
+        return False
 
     def _on_dbus_get_anki_status(self, reply: Callable[[AnkiStatus], None]) -> None:
         if not self._ensure_controllers_ready():
@@ -187,8 +215,50 @@ class TranslatorApp(gtk_types.Gtk.Application):
             return
         self._translation_controller.show_history_window()
 
+    def _on_ipc_show_history(self) -> None:
+        GLib.idle_add(self._dispatch_ipc_show_history)
+
+    def _dispatch_ipc_show_history(self) -> bool:
+        self._show_history()
+        return False
+
     def _open_settings(self) -> None:
         self._platform.open_settings()
+
+    def _on_ipc_show_settings(self) -> None:
+        GLib.idle_add(self._dispatch_ipc_show_settings)
+
+    def _dispatch_ipc_show_settings(self) -> bool:
+        self._open_settings()
+        return False
+
+    def _on_ipc_get_anki_status(self) -> dict[str, str]:
+        fallback = self._fallback_anki_status()
+        payload = {
+            "model_status": fallback.model_status,
+            "deck_status": fallback.deck_status,
+            "deck_name": fallback.deck_name,
+        }
+        if not sys.platform.startswith("win"):
+            return payload
+        done = threading.Event()
+
+        def _reply(status: AnkiStatus) -> None:
+            payload["model_status"] = status.model_status
+            payload["deck_status"] = status.deck_status
+            payload["deck_name"] = status.deck_name
+            done.set()
+
+        def _request() -> bool:
+            try:
+                self._on_dbus_get_anki_status(_reply)
+            except Exception:
+                done.set()
+            return False
+
+        GLib.idle_add(_request)
+        done.wait()
+        return payload
 
     def _on_settings_saved(self, config: AppConfig) -> None:
         self._config = config
