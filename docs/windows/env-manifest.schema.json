@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Windows VM Gate Environment Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "vm",
+    "artifact",
+    "run"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "vm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "image_id",
+        "snapshot",
+        "windows_version"
+      ],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "qemu-kvm"
+          ]
+        },
+        "image_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshot": {
+          "type": "string",
+          "minLength": 1
+        },
+        "windows_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "sha256"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timestamp_utc",
+        "commit",
+        "operator",
+        "checklist"
+      ],
+      "properties": {
+        "timestamp_utc": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{7,40}$"
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checklist": {
+          "type": "string",
+          "const": "vm-gate-checklist.md"
+        }
+      }
+    }
+  }
+}
