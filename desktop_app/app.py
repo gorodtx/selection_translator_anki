@@ -35,12 +35,13 @@ setattr(gtk_types.Gtk, "Application", getattr(Gtk, "Application"))
 
 
 APP_ID = "com.translator.desktop"
+GTK_APP_ID = "com.translator.desktop.gtk"
 logger = logging.getLogger(__name__)
 
 
 class TranslatorApp(gtk_types.Gtk.Application):
     def __init__(self) -> None:
-        super().__init__(application_id=APP_ID)
+        super().__init__(application_id=GTK_APP_ID)
         self._config = load_config()
         self._services = AppServices.create()
         self._clipboard_writer = ClipboardWriter()
@@ -49,6 +50,7 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._settings_controller: SettingsController | None = None
         self._translation_controller: TranslationController | None = None
         self._startup_retry_source_id: int | None = None
+        self._controller_warmup_source_id: int | None = None
         self._startup_retry_attempts: int = 0
         self._startup_started_at: float = 0.0
         self._startup_ready_timeout_seconds: float = _startup_ready_timeout()
@@ -77,6 +79,12 @@ class TranslatorApp(gtk_types.Gtk.Application):
             except Exception:
                 pass
             self._startup_retry_source_id = None
+        if self._controller_warmup_source_id is not None:
+            try:
+                GLib.source_remove(self._controller_warmup_source_id)
+            except Exception:
+                pass
+            self._controller_warmup_source_id = None
         if self._dbus_service is not None:
             self._dbus_service.close()
             self._dbus_service = None
@@ -87,8 +95,6 @@ class TranslatorApp(gtk_types.Gtk.Application):
 
     def _register_dbus_service(self) -> None:
         if self._dbus_service is not None:
-            return
-        if not self._ensure_controllers_ready():
             return
         try:
             self._dbus_service = DbusService.register(
@@ -107,10 +113,11 @@ class TranslatorApp(gtk_types.Gtk.Application):
             self._dbus_service = None
 
     def _initialize_startup_components(self) -> bool:
-        if not self._ensure_controllers_ready():
-            return False
         self._register_dbus_service()
-        return self._dbus_service is not None
+        if self._dbus_service is None:
+            return False
+        self._schedule_controller_warmup()
+        return True
 
     def _schedule_startup_retry(self) -> None:
         if self._startup_retry_source_id is not None:
@@ -118,6 +125,20 @@ class TranslatorApp(gtk_types.Gtk.Application):
         self._startup_retry_source_id = GLib.timeout_add(
             1000, self._retry_startup_components
         )
+
+    def _schedule_controller_warmup(self) -> None:
+        if self._controller_warmup_source_id is not None:
+            return
+        self._controller_warmup_source_id = GLib.idle_add(
+            self._warmup_controllers_idle
+        )
+
+    def _warmup_controllers_idle(self) -> bool:
+        self._controller_warmup_source_id = None
+        if self._ensure_controllers_ready():
+            return False
+        self._schedule_startup_retry()
+        return False
 
     def _retry_startup_components(self) -> bool:
         if self._initialize_startup_components():
