@@ -12,7 +12,11 @@ import aiohttp
 from desktop_app.infrastructure.services.result_cache import ResultCache
 from desktop_app.infrastructure.services.runtime import AsyncRuntime
 from translate_logic.infrastructure.http.cache import HttpCache
-from translate_logic.application.pipeline.translate import build_latency_fetcher, translate_async
+from translate_logic.application.pipeline.translate import (
+    build_latency_fetcher,
+    translate_async,
+    warmup_pipeline_resources,
+)
 from translate_logic.infrastructure.http.transport import AsyncFetcher
 from translate_logic.infrastructure.language_base.base import LanguageBase
 from translate_logic.infrastructure.language_base.definitions_base import DefinitionsBase
@@ -66,6 +70,7 @@ class TranslationService:
     def translate(
         self,
         text: str,
+        lookup_text: str,
         source_lang: str,
         target_lang: str,
         on_partial: Callable[[TranslationResult], None] | None = None,
@@ -83,6 +88,7 @@ class TranslationService:
             generation = self._generation
         coro = self._translate_async(
             text,
+            lookup_text,
             source_lang,
             target_lang,
             generation=generation,
@@ -94,6 +100,11 @@ class TranslationService:
         self._register_inflight(cache_key, future)
         return future
 
+    def get_cached(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> TranslationResult | None:
+        return self.result_cache.get(_translation_key(text, source_lang, target_lang))
+
     def warmup(self) -> None:
         try:
             future = asyncio.run_coroutine_threadsafe(
@@ -101,32 +112,34 @@ class TranslationService:
             )
             future.add_done_callback(lambda done: done.exception())
             if _should_warmup_language_base():
-                language_base_future = asyncio.run_coroutine_threadsafe(
-                    asyncio.to_thread(self._language_base.warmup), self.runtime.loop
+                resources_future = asyncio.run_coroutine_threadsafe(
+                    warmup_pipeline_resources(
+                        language_base=self._language_base,
+                        definitions_base=self._definitions_base,
+                    ),
+                    self.runtime.loop,
                 )
-                language_base_future.add_done_callback(lambda done: done.exception())
-                definitions_future = asyncio.run_coroutine_threadsafe(
-                    asyncio.to_thread(self._definitions_base.warmup), self.runtime.loop
-                )
-                definitions_future.add_done_callback(lambda done: done.exception())
+                resources_future.add_done_callback(lambda done: done.exception())
         except Exception:
             return
 
     def cancel_active(self) -> None:
         with self._state_lock:
             self._generation += 1
+            active = list(self._active)
+            self._active.clear()
             inflight = list(self._inflight.values())
             self._inflight.clear()
-        for future in list(self._active):
+        for future in active:
             future.cancel()
         for future in inflight:
             future.cancel()
-        self._active.clear()
         asyncio.run_coroutine_threadsafe(self._abort_session(), self.runtime.loop)
 
     async def _translate_async(
         self,
         text: str,
+        lookup_text: str,
         source_lang: str,
         target_lang: str,
         *,
@@ -151,6 +164,7 @@ class TranslationService:
             text,
             source_lang,
             target_lang,
+            lookup_text=lookup_text,
             fetcher=fetcher,
             language_base=self._language_base,
             definitions_base=self._definitions_base,
@@ -183,8 +197,15 @@ class TranslationService:
         await self._abort_session()
 
     def _register_future(self, future: Future[TranslationResult]) -> None:
-        self._active.add(future)
-        future.add_done_callback(self._active.discard)
+        with self._state_lock:
+            self._active.add(future)
+
+        def _discard(done: Future[TranslationResult]) -> None:
+            del done
+            with self._state_lock:
+                self._active.discard(future)
+
+        future.add_done_callback(_discard)
 
     def _register_inflight(self, key: str, future: Future[TranslationResult]) -> None:
         with self._state_lock:
