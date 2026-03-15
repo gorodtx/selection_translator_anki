@@ -64,6 +64,7 @@ INTERFACE_XML = """
 class DbusService:
     connection: gtk_types.Gio.DBusConnection
     registration_id: int
+    owner_id: int
     on_translate: Callable[[str], None]
     on_show_settings: Callable[[], None]
     on_show_history: Callable[[], None]
@@ -97,6 +98,7 @@ class DbusService:
         service = cls(
             connection=connection,
             registration_id=0,
+            owner_id=0,
             on_translate=on_translate,
             on_show_settings=on_show_settings,
             on_show_history=on_show_history,
@@ -113,7 +115,18 @@ class DbusService:
         )
         if registration_id == 0:
             return None
+        owner_id = Gio.bus_own_name_on_connection(
+            connection,
+            BUS_NAME,
+            Gio.BusNameOwnerFlags.NONE,
+            None,
+            None,
+        )
+        if owner_id == 0:
+            connection.unregister_object(registration_id)
+            return None
         service.registration_id = registration_id
+        service.owner_id = owner_id
         return service
 
     def close(self) -> None:
@@ -121,6 +134,12 @@ class DbusService:
             self.connection.unregister_object(self.registration_id)
         except Exception:
             pass
+        if self.owner_id != 0:
+            try:
+                Gio.bus_unown_name(self.owner_id)
+            except Exception:
+                pass
+            self.owner_id = 0
 
     def _on_method_call(
         self,
