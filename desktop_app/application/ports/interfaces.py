@@ -17,9 +17,14 @@ from translate_logic.models import TranslationResult
 
 
 class TranslatorPort(Protocol):
+    def get_cached(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> TranslationResult | None: ...
+
     def translate(
         self,
         text: str,
+        lookup_text: str,
         source_lang: str,
         target_lang: str,
         on_partial: Callable[[TranslationResult], None] | None = None,
