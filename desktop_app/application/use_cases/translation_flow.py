@@ -22,14 +22,24 @@ class TranslationFlow:
 
     def translate(
         self,
-        query_text: str,
+        text: str,
+        lookup_text: str,
         source_lang: str,
         target_lang: str,
         on_partial: Callable[[TranslationResult], None] | None = None,
     ) -> Future[TranslationResult]:
         return self.translator.translate(
-            query_text, source_lang, target_lang, on_partial=on_partial
+            text,
+            lookup_text,
+            source_lang,
+            target_lang,
+            on_partial=on_partial,
         )
+
+    def get_cached(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> TranslationResult | None:
+        return self.translator.get_cached(text, source_lang, target_lang)
 
     def register_result(self, display_text: str, result: TranslationResult) -> None:
         if result.status is not TranslationStatus.SUCCESS:
