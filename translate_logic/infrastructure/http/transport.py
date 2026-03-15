@@ -13,7 +13,8 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_FAILURE_BACKOFF_SECONDS = 30.0
 MAX_FAILURE_BACKOFF_ENTRIES = 1024
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 6.1; Win64; x64)"
-_NOISE_QUERY_KEYS = frozenset({"client", "version", "v"})
+_NOISE_QUERY_KEYS = frozenset({"client", "v", "version"})
+_GOOGLE_NOISE_QUERY_KEYS = frozenset({"attempt"})
 
 AsyncFetcher = Callable[[str], Awaitable[str]]
 
@@ -83,8 +84,11 @@ async def fetch_text_async(
             timeout=timeout_config,
         ) as response:
             payload = await response.text(errors="replace")
-            if response.status == 429:
-                raise FetchStatusError(f"Failed to fetch {url}", status_code=429)
+            if response.status >= 400:
+                raise FetchStatusError(
+                    f"Failed to fetch {url}",
+                    status_code=response.status,
+                )
             return payload
     except FetchStatusError:
         raise
@@ -178,7 +182,9 @@ def normalize_url_cache_key(url: str) -> str:
     path = parsed.path
     pairs = parse_qsl(parsed.query, keep_blank_values=True)
     filtered = [
-        (key, value) for key, value in pairs if key.casefold() not in _NOISE_QUERY_KEYS
+        (key, value)
+        for key, value in pairs
+        if not _should_ignore_query_key(host, key)
     ]
     filtered.sort(key=lambda item: (item[0], item[1]))
     query = urlencode(filtered, doseq=True)
@@ -206,8 +212,17 @@ def _is_negative_candidate(error: FetchError) -> bool:
     if isinstance(error, FetchTimeoutError):
         return True
     if isinstance(error, FetchStatusError):
-        return error.status_code == 429
+        return error.status_code == 429 or error.status_code >= 500
     return isinstance(error, FetchError)
+
+
+def _should_ignore_query_key(host: str, key: str) -> bool:
+    normalized = key.casefold()
+    if normalized in _NOISE_QUERY_KEYS:
+        return True
+    if host == "translate.googleapis.com" and normalized in _GOOGLE_NOISE_QUERY_KEYS:
+        return True
+    return False
 
 
 def _resolve_timeout(
