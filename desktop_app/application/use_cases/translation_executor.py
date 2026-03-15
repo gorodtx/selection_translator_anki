@@ -14,7 +14,8 @@ from translate_logic.models import TranslationResult
 @dataclass(frozen=True, slots=True)
 class PreparedTranslation:
     display_text: str
-    query_text: str
+    network_text: str
+    lookup_text: str
     cached: TranslationResult | None
 
 
@@ -34,14 +35,21 @@ class TranslationExecutor:
         outcome = self.flow.prepare(text, languages.source, languages.target)
         if (
             outcome.display_text is None
-            or outcome.query_text is None
+            or outcome.network_text is None
+            or outcome.lookup_text is None
             or outcome.error is not None
         ):
             return None
+        cached = self.flow.get_cached(
+            outcome.network_text,
+            languages.source,
+            languages.target,
+        )
         return PreparedTranslation(
             display_text=outcome.display_text,
-            query_text=outcome.query_text,
-            cached=None,
+            network_text=outcome.network_text,
+            lookup_text=outcome.lookup_text,
+            cached=cached,
         )
 
     def register_result(self, display_text: str, result: TranslationResult) -> None:
@@ -50,7 +58,8 @@ class TranslationExecutor:
     def run(
         self,
         display_text: str,
-        query_text: str,
+        network_text: str,
+        lookup_text: str,
         *,
         on_start: Callable[[str], None],
         on_partial: Callable[[TranslationResult], None],
@@ -60,10 +69,13 @@ class TranslationExecutor:
         languages = self.config.languages
 
         def start_translation(
-            query: str, on_partial_result: Callable[[TranslationResult], None]
+            text: str,
+            lookup: str,
+            on_partial_result: Callable[[TranslationResult], None],
         ) -> Future[TranslationResult]:
             return self.flow.translate(
-                query,
+                text,
+                lookup,
                 languages.source,
                 languages.target,
                 on_partial=on_partial_result,
@@ -76,4 +88,4 @@ class TranslationExecutor:
             on_complete=on_complete,
             on_error=on_error,
         )
-        return session.run(display_text, query_text)
+        return session.run(display_text, network_text, lookup_text)
