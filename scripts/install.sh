@@ -644,7 +644,6 @@ Environment=XDG_CONFIG_HOME=%h/.config
 Environment=TRANSLATOR_WARMUP_MODEL_ON_START=0
 Environment=TRANSLATOR_OPUS_MT_INTER_THREADS=1
 Environment=TRANSLATOR_OPUS_MT_INTRA_THREADS=3
-ExecStartPre=${BACKEND_RUNNER} --healthcheck
 ExecStart=${BACKEND_RUNNER}
 Restart=always
 RestartSec=2
@@ -699,7 +698,7 @@ import_systemd_session_environment() {
   done < <(systemctl --user show-environment 2>/dev/null || true)
 }
 
-wait_for_session_environment() {
+ensure_session_environment() {
   local deadline=\$((SECONDS + SESSION_ENV_WAIT_SECONDS))
   while (( SECONDS < deadline )); do
     import_systemd_session_environment
@@ -715,7 +714,7 @@ prepare_runtime_environment() {
   if [[ -z "\${XDG_CONFIG_HOME:-}" ]]; then
     export XDG_CONFIG_HOME="\${HOME}/.config"
   fi
-  wait_for_session_environment
+  import_systemd_session_environment
 }
 
 validate_gtk_display() {
@@ -727,10 +726,11 @@ run_healthcheck() {
     echo "missing backend venv: \${VENV_DIR}" >&2
     return 1
   fi
-  if ! prepare_runtime_environment; then
+  if ! ensure_session_environment; then
     echo "session environment is not ready (DISPLAY/WAYLAND_DISPLAY/XDG_RUNTIME_DIR)" >&2
     return 1
   fi
+  prepare_runtime_environment
   if ! "\${VENV_DIR}/bin/python" -c "import importlib; importlib.import_module('gi')" >/dev/null 2>&1; then
     echo "backend venv is missing gi bindings" >&2
     return 1
@@ -747,7 +747,7 @@ if [[ "\${HEALTHCHECK_MODE}" == "--healthcheck" ]]; then
   exit \$?
 fi
 
-run_healthcheck
+prepare_runtime_environment
 export PYTHONPATH="\${APP_DIR}"
 exec "\${VENV_DIR}/bin/python" -m desktop_app.main
 RUNNER
