@@ -79,8 +79,10 @@ class TranslationController:
         self._view.hide()
 
     def cancel_tasks(self) -> None:
+        self._state.request.invalidate()
         if self._translation_future is not None:
             self._translation_future.cancel()
+            self._translation_future = None
         self._view.hide_anki_upsert()
         self._anki_controller.cancel_pending()
         self._cancel_active()
@@ -111,29 +113,41 @@ class TranslationController:
                 self._view.hide()
         # Recover Add-to-Anki button after temporary Anki unavailability.
         self.set_anki_available(True)
-        normalized = text.strip() if text else ""
-        if not normalized:
+        raw_text = text.strip() if text else ""
+        if not raw_text:
             return
-        if self._state.memory.can_reuse(normalized, loading=self._view.state.loading):
-            self._view.reset_original(text)
+        prepared = self._translation_executor.prepare(raw_text)
+        if prepared is None:
+            return
+        if self._state.memory.can_reuse(
+            prepared.display_text,
+            loading=self._view.state.loading,
+        ):
+            self._view.reset_original(prepared.display_text)
             if self._state.memory.result is not None:
                 self._view.apply_final(self._state.memory.result)
             self._present_window(force=True)
             return
         self.cancel_tasks()
         request_id = self._next_request_id()
-        if prepare and not silent:
-            self._prepare_request()
-        prepared = self._translation_executor.prepare(text)
-        if prepared is None:
-            return
         if prepared.cached is not None:
             self._state.memory.update(prepared.display_text, prepared.cached)
-            self._view.reset_original(prepared.display_text)
+            self._view.begin(prepared.display_text)
             self._view.apply_final(prepared.cached)
-            self._present_window()
+            self._present_window(force=should_raise or not silent)
             return
-        self._handle_text(request_id, prepared.display_text, prepared.query_text)
+        should_prepare_ui = prepare or should_raise or not silent
+        if should_prepare_ui:
+            self._begin_loading(
+                prepared.display_text,
+                force_present=should_raise or not silent,
+            )
+        self._handle_text(
+            request_id,
+            prepared.display_text,
+            prepared.network_text,
+            prepared.lookup_text,
+        )
 
     def set_anki_available(self, available: bool) -> None:
         self._view.set_anki_available(available)
@@ -152,24 +166,45 @@ class TranslationController:
         self._state.memory.reset()
         self._view.begin("")
 
-    def _handle_text(self, request_id: int, display_text: str, query_text: str) -> None:
+    def _begin_loading(self, display_text: str, *, force_present: bool) -> None:
+        self._state.memory.update(display_text, None)
+        self._view.begin(display_text)
+        if force_present:
+            self._present_window(force=True)
+
+    def _handle_text(
+        self,
+        request_id: int,
+        display_text: str,
+        network_text: str,
+        lookup_text: str,
+    ) -> None:
         if not self._state.request.is_active(request_id):
             return
         GLib.idle_add(
             self._start_translation_idle,
             request_id,
             display_text,
-            query_text,
+            network_text,
+            lookup_text,
         )
 
     def _start_translation_idle(
-        self, request_id: int, display_text: str, query_text: str
+        self,
+        request_id: int,
+        display_text: str,
+        network_text: str,
+        lookup_text: str,
     ) -> bool:
-        self._start_translation(request_id, display_text, query_text)
+        self._start_translation(request_id, display_text, network_text, lookup_text)
         return False
 
     def _start_translation(
-        self, request_id: int, display_text: str, query_text: str
+        self,
+        request_id: int,
+        display_text: str,
+        network_text: str,
+        lookup_text: str,
     ) -> None:
         if not self._state.request.is_active(request_id):
             return
@@ -177,8 +212,11 @@ class TranslationController:
         def on_start(display_text: str) -> None:
             if not self._state.request.is_active(request_id):
                 return
-            self._state.memory.update(display_text, None)
-            self._view.begin(display_text)
+            if (
+                self._state.memory.text != display_text
+                or not self._view.state.loading
+            ):
+                self._begin_loading(display_text, force_present=False)
 
         def on_partial(result: TranslationResult) -> None:
             GLib.idle_add(self._apply_partial_result, request_id, result)
@@ -191,7 +229,8 @@ class TranslationController:
 
         self._translation_future = self._translation_executor.run(
             display_text,
-            query_text,
+            network_text,
+            lookup_text,
             on_start=on_start,
             on_partial=on_partial,
             on_complete=on_complete,
@@ -213,6 +252,7 @@ class TranslationController:
     ) -> bool:
         if not self._state.request.is_active(request_id):
             return False
+        self._translation_future = None
         self._state.memory.update(self._state.memory.text, result)
         self._translation_executor.register_result(self._state.memory.text, result)
         if result.status is TranslationStatus.SUCCESS:
@@ -225,6 +265,7 @@ class TranslationController:
     def _apply_translation_error(self, request_id: int) -> bool:
         if not self._state.request.is_active(request_id):
             return False
+        self._translation_future = None
         self._view.mark_error()
         self._notify(notify_messages.translation_error())
         self._present_window()
