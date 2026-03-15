@@ -36,19 +36,27 @@ class TranslationMemory:
 @dataclass(slots=True)
 class TranslationRequest:
     current_id: int = 0
+    active_id: int | None = None
     _presented: bool = False
 
     def next_id(self) -> int:
         self.current_id += 1
+        self.active_id = self.current_id
+        self._presented = False
+        return self.current_id
+
+    def invalidate(self) -> int:
+        self.current_id += 1
+        self.active_id = None
         self._presented = False
         return self.current_id
 
     def is_active(self, request_id: int) -> bool:
-        return request_id == self.current_id
+        return request_id == self.active_id
 
     def should_present(self, is_visible: bool) -> bool:
         del is_visible
-        return not self._presented
+        return self.active_id is not None and not self._presented
 
     def mark_presented(self) -> None:
         self._presented = True
