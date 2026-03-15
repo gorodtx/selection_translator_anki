@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from functools import partial
 import logging
 import time
+from collections.abc import Coroutine
 from typing import Callable, Final
 
 import aiohttp
@@ -46,6 +47,7 @@ from translate_logic.application.pipeline.ranking import (
 )
 from translate_logic.shared.text import (
     count_words,
+    normalize_lookup_text,
     normalize_text,
     normalize_whitespace,
 )
@@ -57,7 +59,7 @@ from translate_logic.shared.translation import (
 )
 
 DEFAULT_CACHE = HttpCache()
-_POLICY = SourcePolicy(max_cambridge_words=0)
+_POLICY = SourcePolicy()
 _LANGUAGE_BASE_EXAMPLE_LIMIT = 4
 _LANGUAGE_BASE_EXECUTOR: Final[ThreadPoolExecutor] = ThreadPoolExecutor(
     max_workers=1,
@@ -120,6 +122,7 @@ async def translate_async(
     text: str,
     source_lang: str = "en",
     target_lang: str = "ru",
+    lookup_text: str | None = None,
     fetcher: AsyncFetcher | None = None,
     language_base: LanguageBase | None = None,
     definitions_base: DefinitionsBase | None = None,
@@ -130,6 +133,7 @@ async def translate_async(
             text,
             source_lang,
             target_lang,
+            lookup_text,
             fetcher,
             language_base,
             definitions_base,
@@ -141,6 +145,7 @@ async def translate_async(
             text,
             source_lang,
             target_lang,
+            lookup_text,
             async_fetcher,
             language_base,
             definitions_base,
@@ -152,40 +157,51 @@ async def _translate_with_fetcher_async(
     text: str,
     source_lang: str,
     target_lang: str,
+    lookup_text: str | None,
     fetcher: AsyncFetcher,
     language_base: LanguageBase | None = None,
     definitions_base: DefinitionsBase | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
     started = time.perf_counter()
+    language_base_task: asyncio.Task[list[Example]] | None = None
+    definitions_task: asyncio.Task[list[str]] | None = None
     try:
-        normalized_text = normalize_text(text)
-        if not normalized_text:
+        network_text = text.strip()
+        if not network_text:
             return TranslationResult.empty()
-        language_base_examples = await _language_base_examples_async(
-            text=normalized_text,
-            language_base=language_base,
+        resolved_lookup_text = normalize_lookup_text(lookup_text or network_text)
+        if not resolved_lookup_text:
+            return TranslationResult.empty()
+        language_base_task = _start_lookup_task(
+            _language_base_examples_async(
+                text=resolved_lookup_text,
+                language_base=language_base,
+            )
         )
-        definitions_base_defs = await _definitions_base_defs_async(
-            text=normalized_text,
-            definitions_base=definitions_base,
+        definitions_task = _start_lookup_task(
+            _definitions_base_defs_async(
+                text=resolved_lookup_text,
+                definitions_base=definitions_base,
+            )
         )
 
-        if _prefer_google_primary(normalized_text):
+        if _prefer_google_primary(resolved_lookup_text):
             return await _translate_google_primary_with_cambridge_best_effort_async(
-                normalized_text,
-                source_lang,
-                target_lang,
-                fetcher,
-                language_base_examples,
-                definitions_base_defs,
-                on_partial,
+                network_text=network_text,
+                lookup_text=resolved_lookup_text,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                fetcher=fetcher,
+                language_base_task=language_base_task,
+                definitions_task=definitions_task,
+                on_partial=on_partial,
             )
 
-        word_count = count_words(normalized_text)
+        word_count = count_words(resolved_lookup_text)
         if not _POLICY.use_cambridge(word_count):
             google_result = await _run_google_with_budget(
-                normalized_text,
+                network_text,
                 source_lang,
                 target_lang,
                 fetcher,
@@ -194,13 +210,14 @@ async def _translate_with_fetcher_async(
                 google_result.translations
             )
             translation_ru = _compose_ranked_translation(
-                query=normalized_text,
+                query=resolved_lookup_text,
                 target_lang=target_lang,
                 cambridge_translations=[],
                 google_translations=google_candidates,
             )
             translation_ru = await _recover_empty_translation_async(
-                text=normalized_text,
+                text=network_text,
+                ranking_query=resolved_lookup_text,
                 source_lang=source_lang,
                 target_lang=target_lang,
                 fetcher=fetcher,
@@ -210,7 +227,8 @@ async def _translate_with_fetcher_async(
             )
             if not translation_ru and word_count > _CAMBRIDGE_FALLBACK_MAX_WORDS:
                 translation_ru = await _recover_empty_translation_async(
-                    text=normalized_text,
+                    text=network_text,
+                    ranking_query=resolved_lookup_text,
                     source_lang=source_lang,
                     target_lang=target_lang,
                     fetcher=fetcher,
@@ -223,21 +241,22 @@ async def _translate_with_fetcher_async(
             cambridge_google_fallback_result: CambridgeResult | None = None
             if not translation_ru and can_use_cambridge_fallback:
                 cambridge_google_fallback_result = await _run_cambridge_with_budget(
-                    normalized_text,
+                    resolved_lookup_text,
                     fetcher,
                 )
                 cambridge_candidates = select_translation_candidates(
                     cambridge_google_fallback_result.translations
                 )
                 translation_ru = _compose_ranked_translation(
-                    query=normalized_text,
+                    query=resolved_lookup_text,
                     target_lang=target_lang,
                     cambridge_translations=cambridge_candidates,
                     google_translations=[],
                 )
                 if not translation_ru:
                     translation_ru = await _recover_empty_translation_async(
-                        text=normalized_text,
+                        text=network_text,
+                        ranking_query=resolved_lookup_text,
                         source_lang=source_lang,
                         target_lang=target_lang,
                         fetcher=fetcher,
@@ -247,13 +266,24 @@ async def _translate_with_fetcher_async(
                         attempt_id=4,
                     )
             _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+            _log_stage_elapsed("first_partial", _elapsed_ms(started))
+            fallback_examples = await _resolve_examples_fallback(
+                language_base_task,
+                primary_count=len(
+                    filter_examples(
+                        cambridge_google_fallback_result.examples
+                        if cambridge_google_fallback_result is not None
+                        else []
+                    )
+                ),
+            )
             examples_list = _merge_examples(
                 primary=filter_examples(
                     cambridge_google_fallback_result.examples
                     if cambridge_google_fallback_result is not None
                     else []
                 ),
-                fallback=language_base_examples,
+                fallback=fallback_examples,
             )
             network_definitions = _merge_definition_sources(
                 (
@@ -263,20 +293,24 @@ async def _translate_with_fetcher_async(
                 ),
                 google_result.definitions_en,
             )
+            fallback_definitions = await _resolve_definitions_fallback(
+                definitions_task,
+                primary_count=len(network_definitions),
+            )
             return _build_result(
                 translation_ru,
                 examples=examples_list,
                 definitions_en=_merge_definitions(
                     primary=network_definitions,
-                    fallback=definitions_base_defs,
+                    fallback=fallback_definitions,
                 ),
             )
 
         google_prefetch_task: asyncio.Task[GoogleResult] = asyncio.create_task(
-            _run_google_with_budget(normalized_text, source_lang, target_lang, fetcher)
+            _run_google_with_budget(network_text, source_lang, target_lang, fetcher)
         )
         cambridge_task: asyncio.Task[CambridgeResult] = asyncio.create_task(
-            _run_cambridge_with_budget(normalized_text, fetcher)
+            _run_cambridge_with_budget(resolved_lookup_text, fetcher)
         )
         cambridge_result = await _await_cambridge_prefetch(
             cambridge_task,
@@ -309,7 +343,8 @@ async def _translate_with_fetcher_async(
                 else []
             )
             translation_ru = await _compose_translation_with_google_fallback_async(
-                text=normalized_text,
+                network_text=network_text,
+                ranking_query=resolved_lookup_text,
                 source_lang=source_lang,
                 target_lang=target_lang,
                 fetcher=fetcher,
@@ -317,13 +352,24 @@ async def _translate_with_fetcher_async(
                 prefetched_google_result=prefetched_google_result,
             )
             _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+            _log_stage_elapsed("first_partial", _elapsed_ms(started))
+            fallback_examples = await _resolve_examples_fallback(
+                language_base_task,
+                primary_count=len(
+                    filter_examples(
+                        cambridge_empty_recovery_result.examples
+                        if cambridge_empty_recovery_result is not None
+                        else []
+                    )
+                ),
+            )
             examples_list = _merge_examples(
                 primary=filter_examples(
                     cambridge_empty_recovery_result.examples
                     if cambridge_empty_recovery_result is not None
                     else []
                 ),
-                fallback=language_base_examples,
+                fallback=fallback_examples,
             )
             network_definitions = _merge_definition_sources(
                 (
@@ -335,12 +381,16 @@ async def _translate_with_fetcher_async(
                 if prefetched_google_result is not None
                 else [],
             )
+            fallback_definitions = await _resolve_definitions_fallback(
+                definitions_task,
+                primary_count=len(network_definitions),
+            )
             return _build_result(
                 translation_ru,
                 examples=examples_list,
                 definitions_en=_merge_definitions(
                     primary=network_definitions,
-                    fallback=definitions_base_defs,
+                    fallback=fallback_definitions,
                 ),
             )
 
@@ -365,7 +415,7 @@ async def _translate_with_fetcher_async(
                 await google_prefetch_task
 
         translation_ru = _compose_ranked_translation(
-            query=normalized_text,
+            query=resolved_lookup_text,
             target_lang=target_lang,
             cambridge_translations=merge_translations(
                 cambridge_non_meta, cambridge_meta
@@ -373,7 +423,8 @@ async def _translate_with_fetcher_async(
             google_translations=google_ranked_candidates,
         )
         translation_ru = await _recover_empty_translation_async(
-            text=normalized_text,
+            text=network_text,
+            ranking_query=resolved_lookup_text,
             source_lang=source_lang,
             target_lang=target_lang,
             fetcher=fetcher,
@@ -381,10 +432,15 @@ async def _translate_with_fetcher_async(
             secondary_translations=cambridge_meta,
         )
         _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+        _log_stage_elapsed("first_partial", _elapsed_ms(started))
+        fallback_examples = await _resolve_examples_fallback(
+            language_base_task,
+            primary_count=len(filter_examples(cambridge_result.examples)),
+        )
 
         examples_list = _merge_examples(
             primary=filter_examples(cambridge_result.examples),
-            fallback=language_base_examples,
+            fallback=fallback_examples,
         )
         network_definitions = _merge_definition_sources(
             cambridge_result.definitions_en,
@@ -394,30 +450,41 @@ async def _translate_with_fetcher_async(
                 else []
             ),
         )
+        fallback_definitions = await _resolve_definitions_fallback(
+            definitions_task,
+            primary_count=len(network_definitions),
+        )
         return _build_result(
             translation_ru,
             examples=examples_list,
             definitions_en=_merge_definitions(
                 primary=network_definitions,
-                fallback=definitions_base_defs,
+                fallback=fallback_definitions,
             ),
         )
     finally:
+        await _cancel_lookup_task(language_base_task)
+        await _cancel_lookup_task(definitions_task)
         _log_total_elapsed(_elapsed_ms(started))
 
 
 async def _translate_google_primary_with_cambridge_best_effort_async(
-    text: str,
+    *,
+    network_text: str,
+    lookup_text: str,
     source_lang: str,
     target_lang: str,
     fetcher: AsyncFetcher,
-    language_base_examples: list[Example],
-    definitions_base_defs: list[str],
+    language_base_task: asyncio.Task[list[Example]] | None,
+    definitions_task: asyncio.Task[list[str]] | None,
     on_partial: Callable[[TranslationResult], None] | None = None,
 ) -> TranslationResult:
-    cambridge_task = asyncio.create_task(_run_cambridge_with_budget(text, fetcher))
+    started = time.perf_counter()
+    cambridge_task = asyncio.create_task(
+        _run_cambridge_with_budget(lookup_text, fetcher)
+    )
     google_result = await _run_google_with_budget(
-        text,
+        network_text,
         source_lang,
         target_lang,
         fetcher,
@@ -440,34 +507,44 @@ async def _translate_google_primary_with_cambridge_best_effort_async(
 
     cambridge_candidates = select_translation_candidates(cambridge_result.translations)
     translation_ru = _compose_ranked_translation(
-        query=text,
+        query=lookup_text,
         target_lang=target_lang,
         cambridge_translations=cambridge_candidates,
         google_translations=google_candidates,
     )
     _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+    _log_stage_elapsed("first_partial", _elapsed_ms(started))
+    fallback_examples = await _resolve_examples_fallback(
+        language_base_task,
+        primary_count=len(filter_examples(cambridge_result.examples)),
+    )
 
     examples_list = _merge_examples(
         primary=filter_examples(cambridge_result.examples),
-        fallback=language_base_examples,
+        fallback=fallback_examples,
     )
     network_definitions = _merge_definition_sources(
         cambridge_result.definitions_en,
         google_result.definitions_en,
+    )
+    fallback_definitions = await _resolve_definitions_fallback(
+        definitions_task,
+        primary_count=len(network_definitions),
     )
     return _build_result(
         translation_ru,
         examples=examples_list,
         definitions_en=_merge_definitions(
             primary=network_definitions,
-            fallback=definitions_base_defs,
+            fallback=fallback_definitions,
         ),
     )
 
 
 async def _compose_translation_with_google_fallback_async(
     *,
-    text: str,
+    network_text: str,
+    ranking_query: str,
     source_lang: str,
     target_lang: str,
     fetcher: AsyncFetcher,
@@ -477,20 +554,21 @@ async def _compose_translation_with_google_fallback_async(
     google_result = prefetched_google_result
     if google_result is None:
         google_result = await _run_google_with_budget(
-            text,
+            network_text,
             source_lang,
             target_lang,
             fetcher,
         )
     google_candidates = select_translation_candidates(google_result.translations)
     translation_ru = _compose_ranked_translation(
-        query=text,
+        query=ranking_query,
         target_lang=target_lang,
         cambridge_translations=cambridge_translations,
         google_translations=google_candidates,
     )
     return await _recover_empty_translation_async(
-        text=text,
+        text=network_text,
+        ranking_query=ranking_query,
         source_lang=source_lang,
         target_lang=target_lang,
         fetcher=fetcher,
@@ -631,6 +709,7 @@ async def _run_google_with_budget(
 async def _recover_empty_translation_async(
     *,
     text: str,
+    ranking_query: str,
     source_lang: str,
     target_lang: str,
     fetcher: AsyncFetcher,
@@ -665,7 +744,7 @@ async def _recover_empty_translation_async(
 
     recovery_candidates = select_translation_candidates(recovery.translations)
     recovered = _compose_ranked_translation(
-        query=text,
+        query=ranking_query,
         target_lang=target_lang,
         cambridge_translations=secondary_translations or [],
         google_translations=recovery_candidates,
@@ -689,6 +768,10 @@ def _log_provider_elapsed(name: str, elapsed_ms: float, timed_out: bool) -> None
 
 def _log_total_elapsed(elapsed_ms: float) -> None:
     _LOGGER.debug("translation.total.elapsed_ms=%.1f", elapsed_ms)
+
+
+def _log_stage_elapsed(name: str, elapsed_ms: float) -> None:
+    _LOGGER.debug("translation.%s.elapsed_ms=%.1f", name, elapsed_ms)
 
 
 def _emit_partial(
@@ -773,6 +856,63 @@ def _normalize_definitions(definitions: list[str] | None) -> tuple[str, ...]:
     return tuple(normalized_values)
 
 
+def _start_lookup_task[T](coroutine: Coroutine[object, object, T]) -> asyncio.Task[T]:
+    return asyncio.create_task(coroutine)
+
+
+async def _resolve_examples_fallback(
+    task: asyncio.Task[list[Example]] | None,
+    *,
+    primary_count: int,
+) -> list[Example]:
+    if task is None:
+        return []
+    if primary_count >= _LANGUAGE_BASE_EXAMPLE_LIMIT:
+        await _cancel_lookup_task(task)
+        return []
+    return await _resolve_lookup_task(task, default=[], label="examples")
+
+
+async def _resolve_definitions_fallback(
+    task: asyncio.Task[list[str]] | None,
+    *,
+    primary_count: int,
+) -> list[str]:
+    if task is None:
+        return []
+    if primary_count >= _DEFINITIONS_LIMIT:
+        await _cancel_lookup_task(task)
+        return []
+    return await _resolve_lookup_task(task, default=[], label="definitions")
+
+
+async def _resolve_lookup_task[T](
+    task: asyncio.Task[T] | None,
+    *,
+    default: T,
+    label: str,
+) -> T:
+    if task is None:
+        return default
+    started = time.perf_counter()
+    try:
+        return await task
+    except asyncio.CancelledError:
+        return default
+    except Exception:
+        return default
+    finally:
+        _log_stage_elapsed(f"lookup_{label}_wait", _elapsed_ms(started))
+
+
+async def _cancel_lookup_task(task: asyncio.Task[object] | None) -> None:
+    if task is None or task.done():
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+
 async def _language_base_examples_async(
     *,
     text: str,
@@ -831,5 +971,43 @@ def _merge_examples(
     return select_diverse_examples(
         merged_pool,
         limit=_LANGUAGE_BASE_EXAMPLE_LIMIT,
-        seed=f"merge:{time.time_ns()}",
+        seed=_merge_examples_seed(merged_pool),
     )
+
+
+async def warmup_pipeline_resources(
+    *,
+    language_base: LanguageBase | None,
+    definitions_base: DefinitionsBase | None,
+) -> None:
+    if language_base is None and definitions_base is None:
+        return
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        _LANGUAGE_BASE_EXECUTOR,
+        partial(
+            _warmup_pipeline_resources_sync,
+            language_base=language_base,
+            definitions_base=definitions_base,
+        ),
+    )
+
+
+def _warmup_pipeline_resources_sync(
+    *,
+    language_base: LanguageBase | None,
+    definitions_base: DefinitionsBase | None,
+) -> None:
+    if language_base is not None and language_base.is_available:
+        with suppress(Exception):
+            language_base.warmup()
+    if definitions_base is not None and definitions_base.is_available:
+        with suppress(Exception):
+            definitions_base.warmup()
+
+
+def _merge_examples_seed(examples: list[Example]) -> str:
+    if not examples:
+        return "merge:empty"
+    parts = [normalize_whitespace(example.en).casefold() for example in examples]
+    return "merge:" + "|".join(parts[:8])
