@@ -24,7 +24,7 @@ import_systemd_session_environment() {
   done < <(systemctl --user show-environment 2>/dev/null || true)
 }
 
-wait_for_session_environment() {
+ensure_session_environment() {
   local deadline=$((SECONDS + SESSION_ENV_WAIT_SECONDS))
   while (( SECONDS < deadline )); do
     import_systemd_session_environment
@@ -40,7 +40,7 @@ prepare_runtime_environment() {
   if [[ -z "${XDG_CONFIG_HOME:-}" ]]; then
     export XDG_CONFIG_HOME="${HOME}/.config"
   fi
-  wait_for_session_environment
+  import_systemd_session_environment
 }
 
 validate_gtk_display() {
@@ -52,10 +52,11 @@ run_healthcheck() {
     echo "missing backend venv: ${DESKTOP_VENV}" >&2
     return 1
   fi
-  if ! prepare_runtime_environment; then
+  if ! ensure_session_environment; then
     echo "session environment is not ready (DISPLAY/WAYLAND_DISPLAY/XDG_RUNTIME_DIR)" >&2
     return 1
   fi
+  prepare_runtime_environment
   if ! "${DESKTOP_VENV}/bin/python" -c "import importlib; importlib.import_module('gi')" >/dev/null 2>&1
   then
     echo "backend venv is missing gi bindings" >&2
@@ -73,6 +74,6 @@ if [[ "${HEALTHCHECK_MODE}" == "--healthcheck" ]]; then
   exit $?
 fi
 
-run_healthcheck
+prepare_runtime_environment
 export PYTHONPATH="${ROOT_DIR}"
 exec "${DESKTOP_VENV}/bin/python" -m desktop_app.main
