@@ -31,9 +31,12 @@ SYSTEMD_UNIT_FILE="${SYSTEMD_USER_DIR}/translator-desktop.service"
 RELEASE_REPO="${TRANSLATOR_RELEASE_REPO:-gorodtx/selection_translator_anki}"
 RELEASE_TAG="${TRANSLATOR_RELEASE_TAG:-}"
 ASSETS_BASE_URL="${TRANSLATOR_ASSETS_BASE_URL:-}"
-ASSETS_MANIFEST_ASSET="${TRANSLATOR_ASSETS_MANIFEST_ASSET:-release-assets.sha256}"
-ASSETS_MANIFEST_URL="${TRANSLATOR_ASSETS_MANIFEST_URL:-}"
-ASSETS_MANIFEST_PATH="${TRANSLATOR_ASSETS_MANIFEST_PATH:-}"
+RELEASE_MANIFEST_ASSET="${TRANSLATOR_RELEASE_MANIFEST_ASSET:-release-manifest.json}"
+RELEASE_MANIFEST_URL="${TRANSLATOR_RELEASE_MANIFEST_URL:-}"
+RELEASE_MANIFEST_PATH="${TRANSLATOR_RELEASE_MANIFEST_PATH:-}"
+CODE_MANIFEST_ASSET="${TRANSLATOR_CODE_MANIFEST_ASSET:-${TRANSLATOR_ASSETS_MANIFEST_ASSET:-release-assets.sha256}}"
+CODE_MANIFEST_URL="${TRANSLATOR_CODE_MANIFEST_URL:-${TRANSLATOR_ASSETS_MANIFEST_URL:-}}"
+CODE_MANIFEST_PATH="${TRANSLATOR_CODE_MANIFEST_PATH:-${TRANSLATOR_ASSETS_MANIFEST_PATH:-}}"
 APP_ASSET="${TRANSLATOR_APP_ASSET:-translator-app.tar.gz}"
 EXT_ASSET="${TRANSLATOR_EXTENSION_ASSET:-translator-extension.zip}"
 
@@ -41,9 +44,10 @@ FORCE_RELEASE_ASSETS="${TRANSLATOR_FORCE_RELEASE_ASSETS:-0}"
 SKIP_HEALTHCHECK="${TRANSLATOR_SKIP_HEALTHCHECK:-0}"
 INSTALL_MODE="${TRANSLATOR_INSTALL_MODE:-stable}"
 ALLOW_LOCAL_SOURCE="${TRANSLATOR_ALLOW_LOCAL_SOURCE:-0}"
-OFFLINE_BASES_FALLBACK_TAG="${TRANSLATOR_OFFLINE_BASES_FALLBACK_TAG:-v0.2.1}"
+DB_BUNDLE_LOCK_PATH="${TRANSLATOR_DB_BUNDLE_LOCK_PATH:-${ROOT_DIR}/scripts/db-bundle.lock.json}"
 
 RUNTIME_REQUIREMENTS_FILE="${ROOT_DIR}/scripts/runtime-requirements.txt"
+OFFLINE_BASE_STORE_DIR="${APP_ROOT}/offline_bases"
 
 OFFLINE_BASE_FILES=(
   "primary.sqlite3"
@@ -140,14 +144,27 @@ release_assets_base_url() {
   printf "https://github.com/%s/releases/latest/download" "${RELEASE_REPO}"
 }
 
-manifest_download_url() {
-  if [[ -n "${ASSETS_MANIFEST_URL}" ]]; then
-    printf "%s" "${ASSETS_MANIFEST_URL}"
+release_manifest_download_url() {
+  if [[ -n "${RELEASE_MANIFEST_URL}" ]]; then
+    printf "%s" "${RELEASE_MANIFEST_URL}"
     return
   fi
   local base_url
   base_url="$(release_assets_base_url)"
-  printf "%s/%s" "${base_url}" "${ASSETS_MANIFEST_ASSET}"
+  printf "%s/%s" "${base_url}" "${RELEASE_MANIFEST_ASSET}"
+}
+
+code_manifest_download_url() {
+  local release_manifest="$1"
+  if [[ -n "${CODE_MANIFEST_URL}" ]]; then
+    printf "%s" "${CODE_MANIFEST_URL}"
+    return
+  fi
+  local asset_name
+  asset_name="$(release_manifest_code_manifest_asset "${release_manifest}")"
+  local base_url
+  base_url="$(release_assets_base_url)"
+  printf "%s/%s" "${base_url}" "${asset_name}"
 }
 
 sha256_of_file() {
@@ -175,6 +192,70 @@ PY
     return
   fi
   fail "sha256 tool not found (need sha256sum, shasum, or python3)"
+}
+
+json_value() {
+  local file="$1"
+  local mode="$2"
+  local key="${3:-}"
+  python3 - "${file}" "${mode}" "${key}" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+mode = sys.argv[2]
+key = sys.argv[3]
+payload = json.loads(path.read_text(encoding="utf-8"))
+
+if mode == "code_manifest_asset":
+    print(payload.get("code_manifest_asset", "release-assets.sha256"))
+elif mode == "db_repo":
+    print(payload["db_bundle"].get("repo") or payload["release"]["repo"])
+elif mode == "db_tag":
+    print(payload["db_bundle"]["tag"])
+elif mode == "db_sha":
+    print(payload["db_bundle"]["assets"][key]["sha256"])
+else:
+    raise SystemExit(f"unknown json query mode: {mode}")
+PY
+}
+
+release_manifest_code_manifest_asset() {
+  json_value "$1" code_manifest_asset
+}
+
+release_manifest_db_bundle_repo() {
+  json_value "$1" db_repo
+}
+
+release_manifest_db_bundle_tag() {
+  json_value "$1" db_tag
+}
+
+release_manifest_db_sha() {
+  local release_manifest="$1"
+  local filename="$2"
+  json_value "${release_manifest}" db_sha "${filename}"
+}
+
+is_expected_sha() {
+  local file="$1"
+  local expected="$2"
+  [[ "${expected}" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+  local actual
+  actual="$(sha256_of_file "${file}" 2>/dev/null)" || return 1
+  [[ "${actual,,}" == "${expected,,}" ]]
+}
+
+require_expected_sha() {
+  local file="$1"
+  local label="$2"
+  local expected="$3"
+  [[ "${expected}" =~ ^[0-9a-fA-F]{64}$ ]] || fail "invalid checksum format for ${label}"
+  local actual
+  actual="$(sha256_of_file "${file}")"
+  [[ "${actual,,}" == "${expected,,}" ]] || fail "checksum mismatch for ${label}: expected ${expected}, got ${actual}"
 }
 
 download_file() {
@@ -266,28 +347,76 @@ has_local_source_tree() {
   return 0
 }
 
-resolve_manifest_path() {
-  if [[ -n "${ASSETS_MANIFEST_PATH}" ]]; then
-    [[ -s "${ASSETS_MANIFEST_PATH}" ]] || fail "manifest not found: ${ASSETS_MANIFEST_PATH}"
-    printf "%s" "${ASSETS_MANIFEST_PATH}"
+build_local_dev_release_manifest() {
+  [[ -s "${DB_BUNDLE_LOCK_PATH}" ]] || fail "db bundle lock not found: ${DB_BUNDLE_LOCK_PATH}"
+  local tmp_manifest
+  tmp_manifest="$(safe_mktemp)" || fail "cannot create temporary file for local release manifest"
+  TMP_FILES+=("${tmp_manifest}")
+  python3 - "${DB_BUNDLE_LOCK_PATH}" "${RELEASE_REPO}" "${RELEASE_TAG:-local}" "${tmp_manifest}" <<'PY'
+import json
+import pathlib
+import sys
+
+db_lock = pathlib.Path(sys.argv[1])
+repo = sys.argv[2]
+tag = sys.argv[3]
+out_path = pathlib.Path(sys.argv[4])
+payload = {
+    "format_version": 1,
+    "release": {
+        "repo": repo,
+        "tag": tag,
+    },
+    "code_manifest_asset": "release-assets.sha256",
+    "code_assets": {},
+    "db_bundle": json.loads(db_lock.read_text(encoding="utf-8")),
+}
+out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+  printf "%s" "${tmp_manifest}"
+}
+
+resolve_release_manifest_path() {
+  if [[ -n "${RELEASE_MANIFEST_PATH}" ]]; then
+    [[ -s "${RELEASE_MANIFEST_PATH}" ]] || fail "release manifest not found: ${RELEASE_MANIFEST_PATH}"
+    printf "%s" "${RELEASE_MANIFEST_PATH}"
     return
   fi
 
-  local local_manifest="${ROOT_DIR}/scripts/release-assets.sha256"
-  if [[ -s "${local_manifest}" ]] && has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]] && local_source_allowed; then
-    printf "%s" "${local_manifest}"
+  if [[ -s "${DB_BUNDLE_LOCK_PATH}" ]] && has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]] && local_source_allowed; then
+    build_local_dev_release_manifest
     return
   fi
 
   local manifest_url
-  manifest_url="$(manifest_download_url)"
+  manifest_url="$(release_manifest_download_url)"
   local tmp_manifest
-  tmp_manifest="$(safe_mktemp)" || fail "cannot create temporary file for manifest"
+  tmp_manifest="$(safe_mktemp)" || fail "cannot create temporary file for release manifest"
   TMP_FILES+=("${tmp_manifest}")
   if ! download_file "${manifest_url}" "${tmp_manifest}"; then
-    fail "failed to download manifest: ${manifest_url}"
+    fail "failed to download release manifest: ${manifest_url}"
   fi
-  [[ -s "${tmp_manifest}" ]] || fail "downloaded manifest is empty: ${manifest_url}"
+  [[ -s "${tmp_manifest}" ]] || fail "downloaded release manifest is empty: ${manifest_url}"
+  printf "%s" "${tmp_manifest}"
+}
+
+resolve_code_manifest_path() {
+  local release_manifest="$1"
+  if [[ -n "${CODE_MANIFEST_PATH}" ]]; then
+    [[ -s "${CODE_MANIFEST_PATH}" ]] || fail "code manifest not found: ${CODE_MANIFEST_PATH}"
+    printf "%s" "${CODE_MANIFEST_PATH}"
+    return
+  fi
+
+  local manifest_url
+  manifest_url="$(code_manifest_download_url "${release_manifest}")"
+  local tmp_manifest
+  tmp_manifest="$(safe_mktemp)" || fail "cannot create temporary file for code manifest"
+  TMP_FILES+=("${tmp_manifest}")
+  if ! download_file "${manifest_url}" "${tmp_manifest}"; then
+    fail "failed to download code manifest: ${manifest_url}"
+  fi
+  [[ -s "${tmp_manifest}" ]] || fail "downloaded code manifest is empty: ${manifest_url}"
   printf "%s" "${tmp_manifest}"
 }
 
@@ -297,31 +426,13 @@ asset_cache_path() {
   printf "%s/%s" "${CACHE_DIR}" "${filename}"
 }
 
-is_offline_base_file() {
-  local filename="$1"
-  local item
-  for item in "${OFFLINE_BASE_FILES[@]}"; do
-    if [[ "${item}" == "${filename}" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-offline_bases_fallback_base_url() {
-  if [[ -z "${OFFLINE_BASES_FALLBACK_TAG}" ]]; then
-    return 1
-  fi
-  printf "https://github.com/%s/releases/download/%s" "${RELEASE_REPO}" "${OFFLINE_BASES_FALLBACK_TAG}"
-}
-
 ensure_asset_downloaded() {
   local filename="$1"
-  local manifest="$2"
+  local code_manifest="$2"
 
   local path
   path="$(asset_cache_path "${filename}")"
-  if [[ -s "${path}" ]] && is_checksum_match "${path}" "${filename}" "${manifest}"; then
+  if [[ -s "${path}" ]] && is_checksum_match "${path}" "${filename}" "${code_manifest}"; then
     printf "%s" "${path}"
     return
   fi
@@ -329,20 +440,11 @@ ensure_asset_downloaded() {
   local base_url
   base_url="$(release_assets_base_url)"
   local url="${base_url}/${filename}"
-  local fallback_base=""
   log "downloading ${filename}"
   if ! download_file "${url}" "${path}"; then
-    if is_offline_base_file "${filename}" && fallback_base="$(offline_bases_fallback_base_url 2>/dev/null)"; then
-      local fallback_url="${fallback_base}/${filename}"
-      log "primary release is missing ${filename}, trying fallback tag ${OFFLINE_BASES_FALLBACK_TAG}"
-      if ! download_file "${fallback_url}" "${path}"; then
-        fail "failed to download ${filename} from ${url} and fallback ${fallback_url}"
-      fi
-    else
-      fail "failed to download ${filename} from ${url}"
-    fi
+    fail "failed to download ${filename} from ${url}"
   fi
-  require_checksum_match "${path}" "${filename}" "${manifest}"
+  require_checksum_match "${path}" "${filename}" "${code_manifest}"
   printf "%s" "${path}"
 }
 
@@ -468,9 +570,62 @@ resolve_local_base_path() {
   printf ""
 }
 
+offline_base_store_path() {
+  local filename="$1"
+  local expected_sha="$2"
+  mkdir -p "${OFFLINE_BASE_STORE_DIR}"
+  printf "%s/%s-%s" "${OFFLINE_BASE_STORE_DIR}" "${expected_sha}" "${filename}"
+}
+
+ensure_shared_offline_base() {
+  local release_manifest="$1"
+  local filename="$2"
+  local expected_sha
+  expected_sha="$(release_manifest_db_sha "${release_manifest}" "${filename}")"
+
+  local store_path
+  store_path="$(offline_base_store_path "${filename}" "${expected_sha}")"
+  if [[ -s "${store_path}" ]] && is_expected_sha "${store_path}" "${expected_sha}"; then
+    printf "%s" "${store_path}"
+    return
+  fi
+
+  local tmp_store="${store_path}.part"
+  rm -f "${tmp_store}"
+
+  local local_src
+  local_src="$(resolve_local_base_path "${filename}")"
+  if local_source_allowed && [[ -n "${local_src}" ]] && is_expected_sha "${local_src}" "${expected_sha}"; then
+    install -m 644 "${local_src}" "${tmp_store}"
+    mv "${tmp_store}" "${store_path}"
+    printf "%s" "${store_path}"
+    return
+  fi
+
+  local db_repo
+  db_repo="$(release_manifest_db_bundle_repo "${release_manifest}")"
+  local db_tag
+  db_tag="$(release_manifest_db_bundle_tag "${release_manifest}")"
+  local cache_key="${db_tag}-${filename}"
+  local cached_path
+  cached_path="$(asset_cache_path "${cache_key}")"
+  if [[ ! -s "${cached_path}" ]] || ! is_expected_sha "${cached_path}" "${expected_sha}"; then
+    local url="https://github.com/${db_repo}/releases/download/${db_tag}/${filename}"
+    log "downloading ${filename} from db bundle ${db_tag}"
+    if ! download_file "${url}" "${cached_path}"; then
+      fail "failed to download ${filename} from ${url}"
+    fi
+    require_expected_sha "${cached_path}" "${filename}" "${expected_sha}"
+  fi
+
+  install -m 644 "${cached_path}" "${tmp_store}"
+  mv "${tmp_store}" "${store_path}"
+  printf "%s" "${store_path}"
+}
+
 install_offline_bases() {
   local app_dir="$1"
-  local manifest="$2"
+  local release_manifest="$2"
 
   local bases_dir="${app_dir}/translate_logic/infrastructure/language_base/offline_language_base"
   mkdir -p "${bases_dir}"
@@ -478,21 +633,11 @@ install_offline_bases() {
   local filename
   for filename in "${OFFLINE_BASE_FILES[@]}"; do
     local dst="${bases_dir}/${filename}"
-    local local_src
-    local_src="$(resolve_local_base_path "${filename}")"
-
-    if local_source_allowed && [[ -n "${local_src}" ]] && is_checksum_match "${local_src}" "${filename}" "${manifest}"; then
-      install -m 644 "${local_src}" "${dst}"
-      require_checksum_match "${dst}" "${filename}" "${manifest}"
-      log "offline base: ${filename} (local, verified)"
-      continue
-    fi
-
-    local remote_src
-    remote_src="$(ensure_asset_downloaded "${filename}" "${manifest}")"
-    install -m 644 "${remote_src}" "${dst}"
-    require_checksum_match "${dst}" "${filename}" "${manifest}"
-    log "offline base: ${filename} (downloaded, verified)"
+    local shared_src
+    shared_src="$(ensure_shared_offline_base "${release_manifest}" "${filename}")"
+    rm -f "${dst}"
+    ln -sfn "${shared_src}" "${dst}"
+    log "offline base: ${filename} (shared, verified)"
   done
 }
 
@@ -940,11 +1085,17 @@ run_dbus_healthcheck() {
 }
 
 install_or_update() {
-  mkdir -p "${APP_ROOT}" "${RELEASES_DIR}" "${CACHE_DIR}"
+  mkdir -p "${APP_ROOT}" "${RELEASES_DIR}" "${CACHE_DIR}" "${OFFLINE_BASE_STORE_DIR}"
 
-  local manifest
-  manifest="$(resolve_manifest_path)"
-  log "checksum manifest: ${manifest}"
+  local release_manifest
+  release_manifest="$(resolve_release_manifest_path)"
+  log "release manifest: ${release_manifest}"
+
+  local code_manifest=""
+  if ! (has_local_source_tree && [[ "${FORCE_RELEASE_ASSETS}" != "1" ]] && local_source_allowed); then
+    code_manifest="$(resolve_code_manifest_path "${release_manifest}")"
+    log "code manifest: ${code_manifest}"
+  fi
 
   local release_id
   release_id="$(resolve_release_id)"
@@ -955,12 +1106,12 @@ install_or_update() {
   fi
   mkdir -p "${release_dir}"
 
-  install_app_tree "${release_dir}" "${manifest}"
-  install_offline_bases "${release_dir}/app" "${manifest}"
+  install_app_tree "${release_dir}" "${code_manifest}"
+  install_offline_bases "${release_dir}/app" "${release_manifest}"
   ensure_release_venv "${release_dir}"
   activate_release "${release_dir}"
 
-  install_extension_tree "${manifest}"
+  install_extension_tree "${code_manifest}"
   write_systemd_service
   write_dbus_service
   restart_runtime_service
@@ -1035,11 +1186,15 @@ Environment overrides:
   TRANSLATOR_RELEASE_REPO=owner/repo
   TRANSLATOR_RELEASE_TAG=vX.Y.Z
   TRANSLATOR_ASSETS_BASE_URL=https://.../download
-  TRANSLATOR_ASSETS_MANIFEST_ASSET=release-assets.sha256
-  TRANSLATOR_ASSETS_MANIFEST_URL=https://.../release-assets.sha256
-  TRANSLATOR_ASSETS_MANIFEST_PATH=/path/to/release-assets.sha256
+  TRANSLATOR_RELEASE_MANIFEST_ASSET=release-manifest.json
+  TRANSLATOR_RELEASE_MANIFEST_URL=https://.../release-manifest.json
+  TRANSLATOR_RELEASE_MANIFEST_PATH=/path/to/release-manifest.json
+  TRANSLATOR_CODE_MANIFEST_ASSET=release-assets.sha256
+  TRANSLATOR_CODE_MANIFEST_URL=https://.../release-assets.sha256
+  TRANSLATOR_CODE_MANIFEST_PATH=/path/to/release-assets.sha256
   TRANSLATOR_APP_ASSET=translator-app.tar.gz
   TRANSLATOR_EXTENSION_ASSET=translator-extension.zip
+  TRANSLATOR_DB_BUNDLE_LOCK_PATH=/path/to/db-bundle.lock.json
   TRANSLATOR_FORCE_RELEASE_ASSETS=1
   TRANSLATOR_SKIP_HEALTHCHECK=1
   TRANSLATOR_INSTALL_MODE=stable|dev
