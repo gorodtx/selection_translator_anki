@@ -64,6 +64,15 @@ def copy_success() -> Notification:
     return Notification("Copied to clipboard.", NotificationLevel.SUCCESS)
 
 
+def no_more_examples() -> Notification:
+    return Notification("No more examples available.", NotificationLevel.INFO)
+
+
+def examples_refresh_error(message: str) -> Notification:
+    text = message.strip() or "Failed to refresh examples."
+    return Notification(text, NotificationLevel.ERROR)
+
+
 def model_created(model_name: str) -> Notification:
     return Notification(
         f"Model created: {model_name}.",
