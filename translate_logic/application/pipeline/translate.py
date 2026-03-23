@@ -95,7 +95,6 @@ _GOOGLE_AUGMENT_TIMEOUT_S: Final[float] = 0.3
 _GOOGLE_RECOVERY_TIMEOUT_S: Final[float] = 0.35
 _GOOGLE_SECOND_RECOVERY_TIMEOUT_S: Final[float] = 0.75
 _CAMBRIDGE_PRIMARY_WAIT_S: Final[float] = 0.02
-_CAMBRIDGE_EMPTY_RECOVERY_WAIT_S: Final[float] = 0.25
 _DEFINITIONS_LIMIT: Final[int] = 5
 _DEFINITIONS_PRIMARY_LIMIT: Final[int] = 5
 _DEFINITIONS_QUERY_MAX_WORDS: Final[int] = 5
@@ -319,17 +318,66 @@ async def _translate_with_fetcher_async(
 
         if cambridge_result is None:
             prefetched_google_result = await _await_google_prefetch(
-                google_prefetch_task
+                google_prefetch_task,
+                timeout_s=_GOOGLE_AUGMENT_TIMEOUT_S,
             )
+            if prefetched_google_result is None:
+                cambridge_completed_result = await _await_cambridge_completion(
+                    cambridge_task
+                )
+                if (
+                    cambridge_completed_result is not None
+                    and cambridge_completed_result.translations
+                ):
+                    if not google_prefetch_task.done():
+                        google_prefetch_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await google_prefetch_task
+                    translation_ru = _compose_ranked_translation(
+                        query=resolved_lookup_text,
+                        target_lang=target_lang,
+                        cambridge_translations=select_translation_candidates(
+                            cambridge_completed_result.translations
+                        ),
+                        google_translations=[],
+                    )
+                    _emit_partial(on_partial, FieldValue.from_optional(translation_ru))
+                    _log_stage_elapsed("first_partial", _elapsed_ms(started))
+                    fallback_examples = await _resolve_examples_fallback(
+                        language_base_task,
+                        primary_count=len(
+                            filter_examples(cambridge_completed_result.examples)
+                        ),
+                    )
+                    examples_list = _merge_examples(
+                        primary=filter_examples(cambridge_completed_result.examples),
+                        fallback=fallback_examples,
+                    )
+                    fallback_definitions = await _resolve_definitions_fallback(
+                        definitions_task,
+                        primary_count=len(cambridge_completed_result.definitions_en),
+                    )
+                    return _build_result(
+                        translation_ru,
+                        examples=examples_list,
+                        definitions_en=_merge_definitions(
+                            primary=cambridge_completed_result.definitions_en,
+                            fallback=fallback_definitions,
+                        ),
+                    )
+                prefetched_google_result = await _await_google_prefetch(
+                    google_prefetch_task
+                )
             cambridge_empty_recovery_result: CambridgeResult | None = None
             google_empty = (
                 prefetched_google_result is None
                 or not prefetched_google_result.translations
             )
             if google_empty:
-                cambridge_empty_recovery_result = await _await_cambridge_prefetch(
-                    cambridge_task,
-                    timeout_s=_CAMBRIDGE_EMPTY_RECOVERY_WAIT_S,
+                # When Google contributes nothing, let Cambridge finish instead of
+                # cancelling the only remaining source of a word translation.
+                cambridge_empty_recovery_result = await _await_cambridge_completion(
+                    cambridge_task
                 )
             if not cambridge_task.done():
                 cambridge_task.cancel()
@@ -497,7 +545,12 @@ async def _translate_google_primary_with_cambridge_best_effort_async(
         examples=[],
         definitions_en=[],
     )
-    if cambridge_task.done():
+    google_empty = not google_result.translations
+    if google_empty:
+        awaited_cambridge = await _await_cambridge_completion(cambridge_task)
+        if awaited_cambridge is not None:
+            cambridge_result = awaited_cambridge
+    elif cambridge_task.done():
         with suppress(Exception):
             cambridge_result = cambridge_task.result()
     else:
@@ -645,9 +698,20 @@ async def _await_cambridge_prefetch(
     timeout_s: float,
 ) -> CambridgeResult | None:
     try:
-        return await asyncio.wait_for(task, timeout=timeout_s)
+        return await asyncio.wait_for(asyncio.shield(task), timeout=timeout_s)
     except TimeoutError:
         return None
+    except asyncio.CancelledError:
+        return None
+    except Exception:
+        return None
+
+
+async def _await_cambridge_completion(
+    task: asyncio.Task[CambridgeResult],
+) -> CambridgeResult | None:
+    try:
+        return await task
     except asyncio.CancelledError:
         return None
     except Exception:

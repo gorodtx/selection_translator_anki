@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from translate_logic.models import Example, TranslationResult, TranslationStatus
 
-WRAP_LIMIT = 85
+WRAP_LIMIT = 52
 
 
 @dataclass(frozen=True, slots=True)

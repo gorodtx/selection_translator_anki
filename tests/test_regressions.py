@@ -173,6 +173,48 @@ def test_translate_async_emits_partial_before_slow_offline_enrichment(
     assert result.examples == (Example("This is a slow example sentence."),)
 
 
+def test_translate_async_waits_for_cambridge_when_google_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_google(
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        fetcher: Any,
+    ) -> GoogleResult:
+        del text, source_lang, target_lang, fetcher
+        return GoogleResult(translations=[], definitions_en=[])
+
+    async def fake_cambridge(text: str, fetcher: Any) -> CambridgeResult:
+        del fetcher
+        await asyncio.sleep(0.35)
+        return CambridgeResult(
+            found=True,
+            translations=[f"{text}-ru"],
+            examples=[Example(f"{text} example.")],
+            definitions_en=[f"{text} definition"],
+        )
+
+    monkeypatch.setattr(pipeline, "_run_google_with_budget", fake_google)
+    monkeypatch.setattr(pipeline, "_run_cambridge_with_budget", fake_cambridge)
+
+    result = asyncio.run(
+        pipeline.translate_async(
+            "hello",
+            source_lang="en",
+            target_lang="ru",
+            lookup_text="hello",
+            fetcher=_unused_fetcher,
+            language_base=None,
+            definitions_base=None,
+        )
+    )
+
+    assert result.translation_ru.text == "hello-ru"
+    assert result.definitions_en == ("hello definition",)
+    assert result.examples == (Example("hello example."),)
+
+
 @dataclass
 class _FakeLanguageBase:
     examples: list[Example]
