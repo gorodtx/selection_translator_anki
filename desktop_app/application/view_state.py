@@ -20,6 +20,8 @@ class TranslationViewState:
     definitions_en: str
     definitions_items: tuple[str, ...]
     examples: tuple[ExampleViewItem, ...]
+    can_refresh_examples: bool
+    refreshing_examples: bool
     loading: bool
     can_add_anki: bool
 
@@ -32,6 +34,8 @@ class TranslationViewState:
             definitions_en="",
             definitions_items=(),
             examples=(),
+            can_refresh_examples=False,
+            refreshing_examples=False,
             loading=False,
             can_add_anki=False,
         )
@@ -54,6 +58,8 @@ class TranslationPresenter:
             definitions_en="",
             definitions_items=(),
             examples=(),
+            can_refresh_examples=False,
+            refreshing_examples=False,
             loading=True,
             can_add_anki=False,
         )
@@ -72,12 +78,21 @@ class TranslationPresenter:
             definitions_en="",
             definitions_items=(),
             examples=(),
+            can_refresh_examples=False,
+            refreshing_examples=False,
             loading=True,
             can_add_anki=False,
         )
         return self._state
 
-    def apply_final(self, result: TranslationResult) -> TranslationViewState:
+    def apply_final(
+        self,
+        result: TranslationResult,
+        *,
+        visible_examples: tuple[Example, ...] | None = None,
+        can_refresh_examples: bool = False,
+        refreshing_examples: bool = False,
+    ) -> TranslationViewState:
         translation = _wrap_text(result.translation_ru.text)
         loading = False
         can_add = self._can_add(translation=translation, loading=loading)
@@ -87,9 +102,56 @@ class TranslationPresenter:
             translation=translation,
             definitions_en=_format_definitions(result.definitions_en),
             definitions_items=tuple(result.definitions_en),
-            examples=_format_examples(result),
+            examples=_format_examples(
+                visible_examples
+                if visible_examples is not None
+                else tuple(result.examples)
+            ),
+            can_refresh_examples=can_refresh_examples,
+            refreshing_examples=refreshing_examples,
             loading=loading,
             can_add_anki=can_add,
+        )
+        return self._state
+
+    def update_examples(
+        self,
+        *,
+        examples: tuple[Example, ...],
+        can_refresh_examples: bool,
+        refreshing_examples: bool = False,
+    ) -> TranslationViewState:
+        self._state = TranslationViewState(
+            original=self._state.original,
+            original_raw=self._state.original_raw,
+            translation=self._state.translation,
+            definitions_en=self._state.definitions_en,
+            definitions_items=self._state.definitions_items,
+            examples=_format_examples(examples),
+            can_refresh_examples=can_refresh_examples,
+            refreshing_examples=refreshing_examples,
+            loading=self._state.loading,
+            can_add_anki=self._state.can_add_anki,
+        )
+        return self._state
+
+    def set_examples_refreshing(
+        self,
+        *,
+        refreshing_examples: bool,
+        can_refresh_examples: bool,
+    ) -> TranslationViewState:
+        self._state = TranslationViewState(
+            original=self._state.original,
+            original_raw=self._state.original_raw,
+            translation=self._state.translation,
+            definitions_en=self._state.definitions_en,
+            definitions_items=self._state.definitions_items,
+            examples=self._state.examples,
+            can_refresh_examples=can_refresh_examples,
+            refreshing_examples=refreshing_examples,
+            loading=self._state.loading,
+            can_add_anki=self._state.can_add_anki,
         )
         return self._state
 
@@ -103,6 +165,8 @@ class TranslationPresenter:
             definitions_en=self._state.definitions_en,
             definitions_items=self._state.definitions_items,
             examples=self._state.examples,
+            can_refresh_examples=self._state.can_refresh_examples,
+            refreshing_examples=False,
             loading=loading,
             can_add_anki=self._can_add(translation=translation, loading=loading),
         )
@@ -118,6 +182,8 @@ class TranslationPresenter:
             definitions_en=self._state.definitions_en,
             definitions_items=self._state.definitions_items,
             examples=self._state.examples,
+            can_refresh_examples=self._state.can_refresh_examples,
+            refreshing_examples=self._state.refreshing_examples,
             loading=self._state.loading,
             can_add_anki=self._can_add(
                 translation=translation, loading=self._state.loading
@@ -133,6 +199,8 @@ class TranslationPresenter:
             definitions_en=self._state.definitions_en,
             definitions_items=self._state.definitions_items,
             examples=self._state.examples,
+            can_refresh_examples=self._state.can_refresh_examples,
+            refreshing_examples=self._state.refreshing_examples,
             loading=self._state.loading,
             can_add_anki=self._state.can_add_anki,
         )
@@ -177,8 +245,7 @@ def _format_definitions(definitions: tuple[str, ...]) -> str:
     return "\n".join(lines)
 
 
-def _format_examples(result: TranslationResult) -> tuple[ExampleViewItem, ...]:
-    examples: list[Example] = list(result.examples)
+def _format_examples(examples: tuple[Example, ...]) -> tuple[ExampleViewItem, ...]:
     if not examples:
         return ()
     rows: list[ExampleViewItem] = []
