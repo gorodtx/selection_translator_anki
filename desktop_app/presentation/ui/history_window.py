@@ -147,7 +147,7 @@ class HistoryWindow:
             )
             row_data.examples = self._build_examples(
                 examples_row=examples_row,
-                examples=list(item.result.examples)[:3],
+                examples=list(item.examples_state.visible_examples),
                 query=item.text,
             )
             examples_row.set_visible(bool(row_data.examples))
