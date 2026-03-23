@@ -275,7 +275,11 @@ class TranslationController:
             return False
         if result.status is not TranslationStatus.SUCCESS:
             return False
-        self._state.memory.update(self._state.memory.text, result)
+        self._state.memory.update(
+            self._state.memory.text,
+            result,
+            lookup_text=self._state.memory.lookup_text,
+        )
         self._view.apply_partial(result)
         self._present_window()
         return False

@@ -8,11 +8,15 @@ from typing import Any, cast
 
 import pytest
 
+from desktop_app.application.examples_state import EntryExamplesState
 from desktop_app.application.history import HistoryItem
 from desktop_app.application.query import QueryError, QueryOutcome, prepare_query
 from desktop_app.application.use_cases.translation_executor import TranslationExecutor
 from desktop_app.application.use_cases.translation_flow import TranslationFlow
+from desktop_app.application.use_cases.translation_executor import PreparedTranslation
+from desktop_app.application.view_state import TranslationPresenter
 from desktop_app.config import AnkiConfig, AnkiFieldMap, AppConfig, LanguageConfig
+from desktop_app.presentation.controllers import translation_controller as controller_module
 from translate_logic.application.pipeline import translate as pipeline
 from translate_logic.infrastructure.http.transport import (
     FetchStatusError,
@@ -215,6 +219,63 @@ def test_translate_async_waits_for_cambridge_when_google_is_empty(
     assert result.examples == (Example("hello example."),)
 
 
+def test_partial_result_preserves_lookup_text_for_examples_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_view: _FakeViewCoordinator | None = None
+
+    def build_fake_view(**kwargs: Any) -> _FakeViewCoordinator:
+        del kwargs
+        nonlocal fake_view
+        fake_view = _FakeViewCoordinator()
+        return fake_view
+
+    def build_fake_history(**kwargs: Any) -> _FakeHistoryCoordinator:
+        del kwargs
+        return _FakeHistoryCoordinator()
+
+    monkeypatch.setattr(
+        controller_module,
+        "TranslationViewCoordinator",
+        build_fake_view,
+    )
+    monkeypatch.setattr(
+        controller_module,
+        "HistoryViewCoordinator",
+        build_fake_history,
+    )
+
+    executor = _ControllerExecutor()
+    controller = controller_module.TranslationController(
+        app=cast(Any, object()),
+        translation_executor=cast(Any, executor),
+        cancel_active=lambda: None,
+        config=_app_config(),
+        clipboard_writer=cast(Any, _FakeClipboardWriter()),
+        anki_controller=cast(Any, _FakeAnkiController()),
+        on_present_window=lambda window: None,
+        on_open_settings=lambda: None,
+    )
+    assert fake_view is not None
+
+    request_id = controller._state.request.next_id()
+    controller._state.memory.update("hello", None, lookup_text="hello")
+    fake_view.begin("hello")
+    result = TranslationResult(
+        translation_ru=FieldValue.present("привет"),
+        definitions_en=("hello definition",),
+        examples=(Example("hello example."),),
+    )
+
+    assert controller._apply_partial_result(request_id, result) is False
+    assert controller._state.memory.lookup_text == "hello"
+
+    assert controller._apply_translation_result(request_id, result) is False
+    assert executor.registered_lookup_text == "hello"
+    assert controller._state.memory.lookup_text == "hello"
+    assert fake_view.state.can_refresh_examples is True
+
+
 @dataclass
 class _FakeLanguageBase:
     examples: list[Example]
@@ -307,6 +368,199 @@ class _FakeHistory:
 
     def snapshot(self) -> list[HistoryItem]:
         return []
+
+
+class _FakeViewCoordinator:
+    def __init__(self) -> None:
+        self._presenter = TranslationPresenter()
+        self._visible = False
+
+    @property
+    def state(self):  # type: ignore[override]
+        return self._presenter.state
+
+    def begin(self, original: str) -> None:
+        self._presenter.begin(original)
+
+    def apply_partial(self, result: TranslationResult) -> None:
+        self._presenter.apply_partial(result)
+
+    def apply_final(
+        self,
+        result: TranslationResult,
+        *,
+        visible_examples: tuple[Example, ...] | None = None,
+        can_refresh_examples: bool = False,
+        refreshing_examples: bool = False,
+    ) -> None:
+        self._presenter.apply_final(
+            result,
+            visible_examples=visible_examples,
+            can_refresh_examples=can_refresh_examples,
+            refreshing_examples=refreshing_examples,
+        )
+
+    def update_examples(
+        self,
+        *,
+        examples: tuple[Example, ...],
+        can_refresh_examples: bool,
+        refreshing_examples: bool = False,
+    ) -> None:
+        self._presenter.update_examples(
+            examples=examples,
+            can_refresh_examples=can_refresh_examples,
+            refreshing_examples=refreshing_examples,
+        )
+
+    def set_examples_refreshing(
+        self,
+        *,
+        refreshing_examples: bool,
+        can_refresh_examples: bool,
+    ) -> None:
+        self._presenter.set_examples_refreshing(
+            refreshing_examples=refreshing_examples,
+            can_refresh_examples=can_refresh_examples,
+        )
+
+    def mark_error(self) -> None:
+        self._presenter.mark_error()
+
+    def set_anki_available(self, available: bool) -> None:
+        self._presenter.set_anki_available(available)
+
+    def reset_original(self, original: str) -> None:
+        self._presenter.reset_original(original)
+
+    def present(self, *, should_present: bool) -> bool:
+        self._visible = self._visible or should_present
+        return should_present
+
+    def hide(self) -> None:
+        self._visible = False
+
+    def is_visible(self) -> bool:
+        return self._visible
+
+    def window(self):
+        return None
+
+    def notify(self, notification: Any) -> None:
+        del notification
+
+    def clear_banner(self) -> None:
+        return None
+
+    def show_banner(self, notification: Any) -> None:
+        del notification
+
+    def show_anki_upsert(self, **kwargs: Any) -> None:
+        del kwargs
+
+    def hide_anki_upsert(self) -> None:
+        return None
+
+
+class _FakeHistoryCoordinator:
+    is_open = False
+
+    def show(self) -> None:
+        return None
+
+    def refresh(self) -> None:
+        return None
+
+
+class _ControllerExecutor:
+    def __init__(self) -> None:
+        self.registered_lookup_text: str | None = None
+
+    def update_config(self, config: AppConfig) -> None:
+        del config
+
+    def history_snapshot(self) -> list[HistoryItem]:
+        return []
+
+    def prepare(self, text: str) -> PreparedTranslation | None:
+        return PreparedTranslation(
+            display_text=text,
+            network_text=text,
+            lookup_text=text,
+            cached=None,
+        )
+
+    def register_result(
+        self,
+        display_text: str,
+        lookup_text: str,
+        result: TranslationResult,
+    ) -> HistoryItem:
+        del display_text
+        self.registered_lookup_text = lookup_text
+        return HistoryItem(
+            entry_id=1,
+            text="hello",
+            lookup_text=lookup_text,
+            result=result,
+            examples_state=EntryExamplesState.from_result(
+                lookup_text=lookup_text,
+                result=result,
+            ),
+        )
+
+    def refresh_examples(
+        self,
+        lookup_text: str,
+        *,
+        limit: int,
+    ) -> Future[tuple[Example, ...]]:
+        del lookup_text, limit
+        future: Future[tuple[Example, ...]] = Future()
+        future.set_result(())
+        return future
+
+    def update_entry_examples(
+        self,
+        entry_id: int,
+        examples_state: EntryExamplesState,
+    ) -> HistoryItem | None:
+        del entry_id, examples_state
+        return None
+
+    def run(
+        self,
+        display_text: str,
+        network_text: str,
+        lookup_text: str,
+        *,
+        on_start: Any,
+        on_partial: Any,
+        on_complete: Any,
+        on_error: Any,
+    ) -> Future[TranslationResult]:
+        del display_text, network_text, lookup_text, on_start, on_partial, on_complete, on_error
+        raise AssertionError("run should not be called in this test")
+
+
+class _FakeClipboardWriter:
+    def copy_text(self, text: str) -> None:
+        del text
+
+
+class _FakeAnkiController:
+    def cancel_pending(self) -> None:
+        return None
+
+    def is_config_ready(self, config: Any) -> bool:
+        del config
+        return True
+
+    def prepare_upsert(self, **kwargs: Any) -> None:
+        del kwargs
+
+    def apply_upsert(self, **kwargs: Any) -> None:
+        del kwargs
 
 
 class _FakeResponse:
