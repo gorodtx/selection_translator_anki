@@ -2,21 +2,45 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from desktop_app.application.examples_state import EntryExamplesState
+from desktop_app.application.history import HistoryItem
 from translate_logic.models import TranslationResult, TranslationStatus
 
 
 @dataclass(slots=True)
 class TranslationMemory:
     text: str = ""
+    lookup_text: str = ""
     result: TranslationResult | None = None
+    entry_id: int | None = None
+    examples_state: EntryExamplesState | None = None
 
     def reset(self) -> None:
         self.text = ""
+        self.lookup_text = ""
         self.result = None
+        self.entry_id = None
+        self.examples_state = None
 
-    def update(self, text: str, result: TranslationResult | None) -> None:
+    def update(
+        self,
+        text: str,
+        result: TranslationResult | None,
+        *,
+        lookup_text: str = "",
+    ) -> None:
         self.text = text
+        self.lookup_text = lookup_text
         self.result = result
+        self.entry_id = None
+        self.examples_state = None
+
+    def set_entry(self, item: HistoryItem) -> None:
+        self.text = item.text
+        self.lookup_text = item.lookup_text
+        self.result = item.result
+        self.entry_id = item.entry_id
+        self.examples_state = item.examples_state
 
     def can_reuse(self, text: str, *, loading: bool) -> bool:
         if loading:
