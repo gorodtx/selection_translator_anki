@@ -8,6 +8,7 @@ import hashlib
 import html
 from pathlib import Path
 import re
+from typing import cast
 
 from desktop_app.infrastructure.anki import (
     AnkiAddResult,
@@ -126,9 +127,11 @@ class AnkiFlow:
         config: AnkiConfig,
         original_text: str,
         result: TranslationResult,
+        *,
+        examples_override: tuple[str, ...] | None = None,
     ) -> Future[AnkiUpsertPreviewResult]:
         completion: Future[AnkiUpsertPreviewResult] = Future()
-        values = _values_from_result(result)
+        values = _values_from_result(result, examples_override=examples_override)
         expected_fields = _required_field_names(config.fields)
 
         def _fallback_preview() -> AnkiUpsertPreviewResult:
@@ -599,10 +602,17 @@ class AnkiFlow:
         on_done(mapped)
 
 
-def _values_from_result(result: TranslationResult) -> AnkiUpsertValues:
+def _values_from_result(
+    result: TranslationResult,
+    *,
+    examples_override: tuple[str, ...] | None = None,
+) -> AnkiUpsertValues:
     translations = _dedupe_list(_parse_translation_values(result.translation_ru.text))
     definitions = _dedupe_list(list(result.definitions_en))
-    examples = _dedupe_list([example.en for example in result.examples if example.en])
+    if examples_override is not None:
+        examples = _dedupe_list(list(examples_override))
+    else:
+        examples = _dedupe_list([example.en for example in result.examples if example.en])
     return AnkiUpsertValues(
         translations=tuple(translations),
         definitions_en=tuple(definitions),
@@ -674,9 +684,11 @@ def _collect_available_fields(details: Sequence[object]) -> tuple[str, ...]:
         fields = getattr(item, "fields", None)
         if not isinstance(fields, dict):
             continue
-        for field_name in fields.keys():
-            if not isinstance(field_name, str):
+        field_map = cast(dict[object, object], fields)
+        for field_name_obj in field_map.keys():
+            if not isinstance(field_name_obj, str):
                 continue
+            field_name = field_name_obj
             normalized = field_name.casefold()
             if normalized in seen:
                 continue
