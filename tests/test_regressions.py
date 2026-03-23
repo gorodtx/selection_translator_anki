@@ -236,10 +236,32 @@ class _FakeTranslator:
         del text, lookup_text, source_lang, target_lang, on_partial
         raise AssertionError("translate should not be called for cached prepare")
 
+    def refresh_examples(
+        self,
+        lookup_text: str,
+        *,
+        limit: int,
+    ) -> Future[tuple[Example, ...]]:
+        del lookup_text, limit
+        raise AssertionError("refresh_examples should not be called in this test")
+
 
 class _FakeHistory:
-    def add(self, text: str, result: TranslationResult) -> None:
-        del text, result
+    def add(self, text: str, lookup_text: str, result: TranslationResult) -> HistoryItem:
+        del text, lookup_text, result
+        raise AssertionError("history.add should not be called in this test")
+
+    def get(self, entry_id: int) -> HistoryItem | None:
+        del entry_id
+        return None
+
+    def find_by_text(self, text: str) -> HistoryItem | None:
+        del text
+        return None
+
+    def update_examples(self, entry_id: int, examples_state: Any) -> HistoryItem | None:
+        del entry_id, examples_state
+        return None
 
     def snapshot(self) -> list[HistoryItem]:
         return []
