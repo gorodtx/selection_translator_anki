@@ -10,7 +10,7 @@ from desktop_app.application.view_state import (
     TranslationViewState,
 )
 from desktop_app.infrastructure.notifications import Notification
-from translate_logic.models import TranslationResult
+from translate_logic.models import Example, TranslationResult
 
 
 class TranslationWindowProtocol(Protocol):
@@ -44,6 +44,7 @@ def _build_window(
     on_close: Callable[[], None],
     on_copy_all: Callable[[], None],
     on_add: Callable[[], None],
+    on_refresh_examples: Callable[[], None],
 ) -> TranslationWindowProtocol:
     from desktop_app.presentation.ui.translation_window import TranslationWindow
 
@@ -52,6 +53,7 @@ def _build_window(
         on_close=on_close,
         on_copy_all=on_copy_all,
         on_add=on_add,
+        on_refresh_examples=on_refresh_examples,
     )
 
 
@@ -63,12 +65,14 @@ class TranslationViewCoordinator:
         on_close: Callable[[], None],
         on_copy_all: Callable[[], None],
         on_add: Callable[[], None],
+        on_refresh_examples: Callable[[], None],
     ) -> None:
         self._window = _build_window(
             app=app,
             on_close=on_close,
             on_copy_all=on_copy_all,
             on_add=on_add,
+            on_refresh_examples=on_refresh_examples,
         )
         self._presenter = TranslationPresenter()
         self._visible = False
@@ -86,8 +90,50 @@ class TranslationViewCoordinator:
     def apply_partial(self, result: TranslationResult) -> None:
         self._apply_state(self._presenter.apply_partial(result))
 
-    def apply_final(self, result: TranslationResult) -> None:
-        self._apply_state(self._presenter.apply_final(result))
+    def apply_final(
+        self,
+        result: TranslationResult,
+        *,
+        visible_examples: tuple[Example, ...] | None = None,
+        can_refresh_examples: bool = False,
+        refreshing_examples: bool = False,
+    ) -> None:
+        self._apply_state(
+            self._presenter.apply_final(
+                result,
+                visible_examples=visible_examples,
+                can_refresh_examples=can_refresh_examples,
+                refreshing_examples=refreshing_examples,
+            )
+        )
+
+    def update_examples(
+        self,
+        *,
+        examples: tuple[Example, ...],
+        can_refresh_examples: bool,
+        refreshing_examples: bool = False,
+    ) -> None:
+        self._apply_state(
+            self._presenter.update_examples(
+                examples=examples,
+                can_refresh_examples=can_refresh_examples,
+                refreshing_examples=refreshing_examples,
+            )
+        )
+
+    def set_examples_refreshing(
+        self,
+        *,
+        refreshing_examples: bool,
+        can_refresh_examples: bool,
+    ) -> None:
+        self._apply_state(
+            self._presenter.set_examples_refreshing(
+                refreshing_examples=refreshing_examples,
+                can_refresh_examples=can_refresh_examples,
+            )
+        )
 
     def mark_error(self) -> None:
         self._apply_state(self._presenter.mark_error())
