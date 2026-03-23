@@ -57,10 +57,12 @@ class TranslationWindow:
         on_close: Callable[[], None],
         on_copy_all: Callable[[], None],
         on_add: Callable[[], None],
+        on_refresh_examples: Callable[[], None],
     ) -> None:
         self._on_close_cb = on_close
         self._on_copy_all = on_copy_all
         self._on_add = on_add
+        self._on_refresh_examples = on_refresh_examples
         self._max_label_chars = self._BASE_LABEL_CHARS
         window = Gtk.ApplicationWindow(application=app)
         window.set_title("Translator")
@@ -136,6 +138,18 @@ class TranslationWindow:
         )
         self._row_definitions = self._field_row(self._label_definitions)
         self._row_examples = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._examples_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._refresh_examples_button = Gtk.Button(label="Refresh examples")
+        self._refresh_examples_button.set_hexpand(True)
+        if hasattr(self._refresh_examples_button, "set_halign") and hasattr(
+            Gtk, "Align"
+        ):
+            self._refresh_examples_button.set_halign(Gtk.Align.FILL)
+        self._refresh_examples_button.connect(
+            "clicked", self._handle_refresh_examples_clicked
+        )
+        self._row_examples.append(self._examples_list)
+        self._row_examples.append(self._refresh_examples_button)
         self._sep_before_actions = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
 
         root.append(header)
@@ -291,18 +305,19 @@ class TranslationWindow:
         content.append(image_status)
 
         preview_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        preview_picture: object | None = None
+        preview_picture: Any | None = None
         picture_cls = getattr(Gtk, "Picture", None)
         if picture_cls is not None:
             try:
-                preview_picture = picture_cls()
-                if hasattr(preview_picture, "set_size_request"):
-                    preview_picture.set_size_request(240, 140)
-                if hasattr(preview_picture, "set_content_fit") and hasattr(
+                preview_widget: Any = picture_cls()
+                if hasattr(preview_widget, "set_size_request"):
+                    preview_widget.set_size_request(240, 140)
+                if hasattr(preview_widget, "set_content_fit") and hasattr(
                     Gtk, "ContentFit"
                 ):
-                    preview_picture.set_content_fit(Gtk.ContentFit.COVER)
-                preview_wrap.append(preview_picture)
+                    preview_widget.set_content_fit(Gtk.ContentFit.COVER)
+                preview_wrap.append(preview_widget)
+                preview_picture = preview_widget
             except Exception:
                 preview_picture = None
         if preview_picture is None:
@@ -451,10 +466,11 @@ class TranslationWindow:
                     if not callable(get_path):
                         image_status.set_text("Failed to resolve selected file.")
                         return
-                    selected_path = get_path() or ""
-                    if not selected_path:
+                    selected_path_obj = get_path()
+                    if not isinstance(selected_path_obj, str) or not selected_path_obj:
                         image_status.set_text("Failed to resolve selected file.")
                         return
+                    selected_path = selected_path_obj
                     ok, error_message = self._validate_image_path(
                         Path(selected_path),
                         min_age_s=0.0,
@@ -599,6 +615,18 @@ class TranslationWindow:
             or state.original_raw != previous.original_raw
         ):
             self._render_examples(state)
+        if (
+            previous is None
+            or state.can_refresh_examples != previous.can_refresh_examples
+            or state.refreshing_examples != previous.refreshing_examples
+        ):
+            self._refresh_examples_button.set_visible(state.can_refresh_examples)
+            self._refresh_examples_button.set_sensitive(
+                state.can_refresh_examples and not state.refreshing_examples
+            )
+            self._refresh_examples_button.set_label(
+                "Refreshing..." if state.refreshing_examples else "Refresh examples"
+            )
 
         if previous is None or state.loading != previous.loading:
             if state.loading:
@@ -619,6 +647,7 @@ class TranslationWindow:
         translation_visible = bool(state.translation.strip())
         definitions_visible = bool(state.definitions_items)
         examples_visible = bool(state.examples)
+        refresh_button_visible = state.can_refresh_examples
         previous_translation_visible = (
             None if previous is None else bool(previous.translation.strip())
         )
@@ -628,22 +657,33 @@ class TranslationWindow:
         previous_examples_visible = (
             None if previous is None else bool(previous.examples)
         )
+        previous_refresh_button_visible = (
+            None if previous is None else previous.can_refresh_examples
+        )
 
         if previous is None or translation_visible != previous_translation_visible:
             self._row_translation.set_visible(translation_visible)
         if previous is None or definitions_visible != previous_definitions_visible:
             self._row_definitions.set_visible(definitions_visible)
-        if previous is None or examples_visible != previous_examples_visible:
-            self._row_examples.set_visible(examples_visible)
+        if (
+            previous is None
+            or examples_visible != previous_examples_visible
+            or refresh_button_visible != previous_refresh_button_visible
+        ):
+            self._row_examples.set_visible(examples_visible or refresh_button_visible)
 
         sep_after_translation_visible = translation_visible and (
-            definitions_visible or examples_visible
+            definitions_visible or examples_visible or refresh_button_visible
         )
         previous_sep_after_translation_visible = (
             None
             if previous is None
             else bool(previous.translation.strip())
-            and (bool(previous.definitions_items) or bool(previous.examples))
+            and (
+                bool(previous.definitions_items)
+                or bool(previous.examples)
+                or previous.can_refresh_examples
+            )
         )
         if (
             previous is None
@@ -652,7 +692,10 @@ class TranslationWindow:
             self._sep_after_translation.set_visible(sep_after_translation_visible)
 
         sep_before_actions_visible = (
-            translation_visible or definitions_visible or examples_visible
+            translation_visible
+            or definitions_visible
+            or examples_visible
+            or refresh_button_visible
         )
         previous_sep_before_actions_visible = (
             None
@@ -660,6 +703,7 @@ class TranslationWindow:
             else bool(previous.translation.strip())
             or bool(previous.definitions_items)
             or bool(previous.examples)
+            or previous.can_refresh_examples
         )
         if (
             previous is None
@@ -687,7 +731,7 @@ class TranslationWindow:
         return row
 
     def _render_examples(self, state: TranslationViewState) -> None:
-        self._clear_children(self._row_examples)
+        self._clear_children(self._examples_list)
         spec = build_highlight_spec(state.original_raw)
         for item in state.examples:
             example_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -703,7 +747,7 @@ class TranslationWindow:
             en_label.set_markup(highlight_to_pango_markup(item.en, spec))
 
             example_box.append(en_label)
-            self._row_examples.append(example_box)
+            self._examples_list.append(example_box)
 
     def _render_definitions(self, state: TranslationViewState) -> None:
         if not state.definitions_items:
@@ -739,6 +783,9 @@ class TranslationWindow:
 
     def _handle_add_clicked(self, _button: gtk_types.Gtk.Button) -> None:
         self._on_add()
+
+    def _handle_refresh_examples_clicked(self, _button: gtk_types.Gtk.Button) -> None:
+        self._on_refresh_examples()
 
     def _handle_copy_all_clicked(self, _button: gtk_types.Gtk.Button) -> None:
         self._on_copy_all()
@@ -948,6 +995,8 @@ class TranslationWindow:
             estimated += 10
         if state.examples:
             estimated += 12
+        if state.can_refresh_examples:
+            estimated += 28
         if not state.translation and not state.definitions_items and not state.examples:
             estimated = self._DEFAULT_WINDOW_HEIGHT
         return max(
