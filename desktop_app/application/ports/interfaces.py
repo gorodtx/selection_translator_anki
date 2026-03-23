@@ -5,6 +5,7 @@ from concurrent.futures import Future
 from typing import Protocol
 
 from desktop_app.application.history import HistoryItem
+from desktop_app.application.examples_state import EntryExamplesState
 from desktop_app.infrastructure.anki import (
     AnkiAddResult,
     AnkiCreateModelResult,
@@ -13,7 +14,7 @@ from desktop_app.infrastructure.anki import (
     AnkiNoteDetailsResult,
     AnkiUpdateResult,
 )
-from translate_logic.models import TranslationResult
+from translate_logic.models import Example, TranslationResult
 
 
 class TranslatorPort(Protocol):
@@ -30,9 +31,31 @@ class TranslatorPort(Protocol):
         on_partial: Callable[[TranslationResult], None] | None = None,
     ) -> Future[TranslationResult]: ...
 
+    def refresh_examples(
+        self,
+        lookup_text: str,
+        *,
+        limit: int,
+    ) -> Future[tuple[Example, ...]]: ...
+
 
 class HistoryPort(Protocol):
-    def add(self, text: str, result: TranslationResult) -> None: ...
+    def add(
+        self,
+        text: str,
+        lookup_text: str,
+        result: TranslationResult,
+    ) -> HistoryItem: ...
+
+    def get(self, entry_id: int) -> HistoryItem | None: ...
+
+    def find_by_text(self, text: str) -> HistoryItem | None: ...
+
+    def update_examples(
+        self,
+        entry_id: int,
+        examples_state: EntryExamplesState,
+    ) -> HistoryItem | None: ...
 
     def snapshot(self) -> list[HistoryItem]: ...
 
