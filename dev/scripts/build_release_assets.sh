@@ -4,15 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXT_UUID="translator@com.translator.desktop"
 DIST_DIR="${ROOT_DIR}/dev/dist/release"
-ASSETS_DIR="${DIST_DIR}/assets"
+ASSETS_DIR="${DIST_DIR}"
 
-OFFLINE_BASE_FILES=(
-  "primary.sqlite3"
-  "fallback.sqlite3"
-  "definitions_pack.sqlite3"
+CODE_ASSET_FILES=(
+  "translator-app.tar.gz"
+  "translator-extension.zip"
 )
 ALLOW_DIRTY_RELEASE="${TRANSLATOR_RELEASE_ALLOW_DIRTY:-0}"
 RELEASE_TAG="${TRANSLATOR_RELEASE_TAG:-}"
+RELEASE_REPO="${TRANSLATOR_RELEASE_REPO:-gorodtx/selection_translator_anki}"
+DB_BUNDLE_LOCK_PATH="${TRANSLATOR_DB_BUNDLE_LOCK_PATH:-${ROOT_DIR}/scripts/db-bundle.lock.json}"
 
 log() {
   echo "[release-build] $*"
@@ -83,21 +84,8 @@ print(digest.hexdigest())
 PY
 }
 
-resolve_local_base_path() {
-  local filename="$1"
-  local candidates=(
-    "${ROOT_DIR}/translate_logic/infrastructure/language_base/offline_language_base/${filename}"
-    "${ROOT_DIR}/translate_logic/language_base/offline_language_base/${filename}"
-    "${ROOT_DIR}/offline_language_base/${filename}"
-  )
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if [[ -s "${candidate}" ]]; then
-      printf "%s" "${candidate}"
-      return
-    fi
-  done
-  printf ""
+require_db_bundle_lock() {
+  [[ -s "${DB_BUNDLE_LOCK_PATH}" ]] || fail "db bundle lock not found: ${DB_BUNDLE_LOCK_PATH}"
 }
 
 build_app_archive() {
@@ -140,28 +128,34 @@ PY
   log "built ${ext_archive}"
 }
 
-copy_offline_bases() {
-  local filename
-  for filename in "${OFFLINE_BASE_FILES[@]}"; do
-    local src
-    src="$(resolve_local_base_path "${filename}")"
-    [[ -n "${src}" ]] || fail "offline base not found: ${filename}"
-    cp "${src}" "${ASSETS_DIR}/${filename}"
-    log "copied ${filename}"
-  done
+copy_install_script() {
+  cp "${ROOT_DIR}/scripts/install.sh" "${DIST_DIR}/install.sh"
+  chmod +x "${DIST_DIR}/install.sh"
 }
 
-build_manifest() {
-  local manifest="${ASSETS_DIR}/release-assets.sha256"
+build_release_manifest() {
+  [[ -n "${RELEASE_TAG}" ]] || fail "TRANSLATOR_RELEASE_TAG is required to build release-manifest.json"
+  python3 "${ROOT_DIR}/dev/scripts/release_metadata.py" build-release-manifest \
+    --repo "${RELEASE_REPO}" \
+    --release-tag "${RELEASE_TAG}" \
+    --assets-dir "${ASSETS_DIR}" \
+    --install-script "${DIST_DIR}/install.sh" \
+    --db-lock "${DB_BUNDLE_LOCK_PATH}" \
+    --out-file "${DIST_DIR}/release-manifest.json" >/dev/null
+  log "built ${DIST_DIR}/release-manifest.json"
+}
+
+build_code_manifest() {
+  local manifest="${DIST_DIR}/release-assets.sha256"
   : > "${manifest}"
   (
-    cd "${ASSETS_DIR}"
+    cd "${DIST_DIR}"
     local filename
     for filename in \
-      translator-app.tar.gz \
-      translator-extension.zip \
-      "${OFFLINE_BASE_FILES[@]}"; do
-      [[ -s "${filename}" ]] || fail "missing asset file: ${filename}"
+      install.sh \
+      release-manifest.json \
+      "${CODE_ASSET_FILES[@]}"; do
+      [[ -s "${filename}" ]] || fail "missing release asset: ${filename}"
       printf "%s  %s\n" "$(sha256_of_file "${filename}")" "${filename}" >> "${manifest}"
     done
   )
@@ -172,18 +166,18 @@ main() {
   validate_release_tag
   ensure_clean_tracked_tree
   ensure_release_tag_is_new
+  require_db_bundle_lock
+  rm -rf "${DIST_DIR}"
   mkdir -p "${ASSETS_DIR}"
 
   build_app_archive
   build_extension_archive
-  copy_offline_bases
-  build_manifest
+  copy_install_script
+  build_release_manifest
+  build_code_manifest
 
-  cp "${ROOT_DIR}/scripts/install.sh" "${DIST_DIR}/install.sh"
-  chmod +x "${DIST_DIR}/install.sh"
-
-  log "release assets ready in ${DIST_DIR}"
-  log "upload: assets/release-assets.sha256 + assets/*.tar.gz + assets/*.zip + assets/*.sqlite3 + install.sh"
+  log "code release assets ready in ${DIST_DIR}"
+  log "upload: install.sh + release-manifest.json + release-assets.sha256 + translator-app.tar.gz + translator-extension.zip"
 }
 
 main "$@"
