@@ -47,6 +47,7 @@ class AnkiController:
         config: AnkiConfig,
         original_text: str,
         result: TranslationResult,
+        examples_override: tuple[str, ...] | None,
         is_request_active: Callable[[int], bool],
         on_ready: Callable[[AnkiUpsertPreview], None],
         set_anki_available: Callable[[bool], None],
@@ -55,7 +56,12 @@ class AnkiController:
         if self._prepare_future is not None:
             self._prepare_future.cancel()
         self._anki_request_id = request_id
-        future = self._anki_flow.prepare_upsert(config, original_text, result)
+        future = self._anki_flow.prepare_upsert(
+            config,
+            original_text,
+            result,
+            examples_override=examples_override,
+        )
         future.add_done_callback(
             lambda done: GLib.idle_add(
                 self._apply_prepare_result,
