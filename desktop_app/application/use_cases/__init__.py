@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from desktop_app.application.use_cases.anki_flow import AnkiFlow as AnkiFlow
+from desktop_app.application.use_cases.example_refresh import (
+    ExampleRefreshUseCase as ExampleRefreshUseCase,
+)
 from desktop_app.application.use_cases.anki_upsert import (
     AnkiUpsertDecision as AnkiUpsertDecision,
 )
@@ -18,6 +21,7 @@ __all__ = [
     "AnkiFlow",
     "AnkiUpsertDecision",
     "AnkiUpsertPreview",
+    "ExampleRefreshUseCase",
     "TranslationExecutor",
     "TranslationFlow",
 ]
