@@ -6,6 +6,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field
 import os
 import threading
+from typing import cast
 
 import aiohttp
 
@@ -14,6 +15,7 @@ from desktop_app.infrastructure.services.runtime import AsyncRuntime
 from translate_logic.infrastructure.http.cache import HttpCache
 from translate_logic.application.pipeline.translate import (
     build_latency_fetcher,
+    filter_examples,
     translate_async,
     warmup_pipeline_resources,
 )
@@ -26,11 +28,11 @@ from translate_logic.infrastructure.language_base.provider import (
     LanguageBaseProvider,
     default_fallback_language_base_path,
 )
-from translate_logic.models import TranslationResult, TranslationStatus
+from translate_logic.models import Example, TranslationResult, TranslationStatus
 from translate_logic.shared.text import normalize_text
 
 
-def _future_set() -> set[Future[TranslationResult]]:
+def _future_set() -> set[Future[object]]:
     return set()
 
 
@@ -51,7 +53,7 @@ class TranslationService:
     _fetcher: AsyncFetcher | None = None
     _session_lock: asyncio.Lock | None = None
     _http_cache: HttpCache = field(default_factory=HttpCache)
-    _active: set[Future[TranslationResult]] = field(default_factory=_future_set)
+    _active: set[Future[object]] = field(default_factory=_future_set)
     _inflight: dict[str, Future[TranslationResult]] = field(default_factory=_future_map)
     _state_lock: threading.Lock = field(default_factory=_thread_lock, repr=False)
     _generation: int = 0
@@ -96,7 +98,7 @@ class TranslationService:
             on_partial=on_partial,
         )
         future = asyncio.run_coroutine_threadsafe(coro, self.runtime.loop)
-        self._register_future(future)
+        self._register_future(cast(Future[object], future))
         self._register_inflight(cache_key, future)
         return future
 
@@ -104,6 +106,19 @@ class TranslationService:
         self, text: str, source_lang: str, target_lang: str
     ) -> TranslationResult | None:
         return self.result_cache.get(_translation_key(text, source_lang, target_lang))
+
+    def refresh_examples(
+        self,
+        lookup_text: str,
+        *,
+        limit: int,
+    ) -> Future[tuple[Example, ...]]:
+        future = asyncio.run_coroutine_threadsafe(
+            self._refresh_examples_async(lookup_text, limit=limit),
+            self.runtime.loop,
+        )
+        self._register_future(cast(Future[object], future))
+        return future
 
     def warmup(self) -> None:
         try:
@@ -176,6 +191,22 @@ class TranslationService:
             self.result_cache.set(cache_key, result)
         return result
 
+    async def _refresh_examples_async(
+        self,
+        lookup_text: str,
+        *,
+        limit: int,
+    ) -> tuple[Example, ...]:
+        normalized = normalize_text(lookup_text)
+        if not normalized or limit <= 0 or not self._language_base.is_available:
+            return ()
+        loop = asyncio.get_running_loop()
+        examples = await loop.run_in_executor(
+            None,
+            lambda: self._language_base.get_examples(word=normalized, limit=limit),
+        )
+        return tuple(filter_examples(list(examples)))
+
     async def _ensure_fetcher(self) -> AsyncFetcher:
         if self._fetcher is not None and self._session is not None:
             return self._fetcher
@@ -196,11 +227,11 @@ class TranslationService:
     async def close(self) -> None:
         await self._abort_session()
 
-    def _register_future(self, future: Future[TranslationResult]) -> None:
+    def _register_future(self, future: Future[object]) -> None:
         with self._state_lock:
             self._active.add(future)
 
-        def _discard(done: Future[TranslationResult]) -> None:
+        def _discard(done: Future[object]) -> None:
             del done
             with self._state_lock:
                 self._active.discard(future)
