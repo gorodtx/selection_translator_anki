@@ -151,3 +151,26 @@ Then:
 - copy `%USERPROFILE%/.codex/skills`
 - re-auth connector-style MCP inside Codex
 - optionally copy `%USERPROFILE%/.config/translator/desktop_config.json`
+
+## Codex Config
+
+Use the tracked template:
+
+- `docs/windows_codex.config.example.toml`
+
+Copy it to:
+
+- `%USERPROFILE%/.codex/config.toml`
+
+Then adjust:
+
+- repo path
+- filesystem MCP root
+- email credentials
+- any connector auth that is restored separately inside Codex
+
+Notes:
+
+- `fetch`, `sqlite`, and `mail` are pinned through `uvx`
+- `chrome_devtools` and `puppeteer` should also be pinned if you want stricter reproducibility
+- built-in or connector-style integrations such as GitHub, Figma, and OpenAI docs still need separate enablement or re-auth
