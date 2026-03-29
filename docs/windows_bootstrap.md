@@ -234,3 +234,30 @@ Use a Linux VM or separate Linux machine for:
 - D-Bus smoke: `Translate "hello"`, `Translate "look up"`, `GetAnkiStatus`
 - UI checks: open/close translation window, notification auto-hide, tray interactions
 - hang/deadlock checks around hotkeys, tray, clipboard, and overlay
+
+## Validation Checklist
+
+Codex level:
+
+- project is trusted in Codex
+- custom skills are visible
+- MCP servers start cleanly
+- `fetch` and `sqlite` respond
+
+Repo level:
+
+- `uv sync --group dev` passes
+- `pytest` passes
+- `ruff check .` passes
+- `pyright` passes at least on changed files
+
+DB level:
+
+- `offline_language_base/primary.sqlite3` exists and matches lock hash
+- `offline_language_base/fallback.sqlite3` exists and matches lock hash
+- `offline_language_base/definitions_pack.sqlite3` exists and matches lock hash
+- SQLite MCP points to the real `offline_language_base/primary.sqlite3`
+
+Runtime level:
+
+- validate only on Linux GNOME
