@@ -1,0 +1,9 @@
+# Replace D:/dev/translator with your actual repo path.
+# Replace secrets before use.
+
+model = "gpt-5.4"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[projects."D:/dev/translator"]
+trust_level = "trusted"
