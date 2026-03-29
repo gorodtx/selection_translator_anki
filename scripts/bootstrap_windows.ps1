@@ -88,3 +88,24 @@ if (-not (Test-Path -LiteralPath $lockFile)) {
 $lock = Get-Content -LiteralPath $lockFile -Raw | ConvertFrom-Json
 $assets = Get-JsonAssetMap -AssetsObject $lock.assets
 $assetNames = @("primary.sqlite3", "fallback.sqlite3", "definitions_pack.sqlite3")
+
+Write-Step "Repo root: $resolvedRepoRoot"
+Write-Step "DB bundle tag: $($lock.tag)"
+Write-Step "DB target dir: $dbDir"
+
+$toolMatrix = @(
+    @{ Name = "python"; Args = @("--version") },
+    @{ Name = "uv"; Args = @("--version") },
+    @{ Name = "node"; Args = @("--version") },
+    @{ Name = "npm"; Args = @("--version") },
+    @{ Name = "rg"; Args = @("--version") }
+)
+
+foreach ($tool in $toolMatrix) {
+    $versionText = Get-CommandVersionText -CommandName $tool.Name -Arguments $tool.Args
+    if ($null -eq $versionText) {
+        Write-Step "$($tool.Name): missing"
+    } else {
+        Write-Step "$($tool.Name): $versionText"
+    }
+}
