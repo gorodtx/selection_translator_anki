@@ -158,4 +158,19 @@ foreach ($assetName in $assetNames) {
     $assetUrl = "$baseUrl/$assetName"
     $targetPath = Join-Path $dbDir $assetName
     $expectedSha = "$($asset.sha256)".ToLowerInvariant()
+
+    if (-not $VerifyOnly) {
+        Write-Step "Download $assetName from $assetUrl"
+        if (-not $DryRun) {
+            $tempPath = "$targetPath.part"
+            try {
+                Invoke-WebRequest -Uri $assetUrl -OutFile $tempPath
+                Move-Item -Force -LiteralPath $tempPath -Destination $targetPath
+            } finally {
+                if (Test-Path -LiteralPath $tempPath) {
+                    Remove-Item -Force -LiteralPath $tempPath
+                }
+            }
+        }
+    }
 }
