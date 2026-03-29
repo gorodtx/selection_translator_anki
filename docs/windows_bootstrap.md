@@ -75,3 +75,20 @@ Do not copy these as-is:
 - `app.pid`
 - `last_selection.txt`
 - raw tokens or passwords
+
+## Exact Transfer Manifest
+
+Copy or recreate these artifacts from the old machine:
+
+- Linux `~/.codex/skills/` -> Windows `%USERPROFILE%/.codex/skills/`
+- Linux `~/.config/translator/desktop_config.json` -> Windows `%USERPROFILE%/.config/translator/desktop_config.json`
+- Linux repo `.env` -> Windows repo `.env` only if you need the same release automation setup
+
+Do not copy this file raw:
+
+- Linux `~/.codex/config.toml`
+
+Instead, rebuild it on Windows from the tracked template:
+
+- source template: `docs/windows_codex.config.example.toml`
+- target path: `%USERPROFILE%/.codex/config.toml`
