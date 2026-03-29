@@ -139,3 +139,10 @@ if ($CreateSkillsJunction) {
         }
     }
 }
+
+if (-not (Test-Path -LiteralPath $dbDir)) {
+    Write-Step "Create DB directory: $dbDir"
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Force -Path $dbDir | Out-Null
+    }
+}
