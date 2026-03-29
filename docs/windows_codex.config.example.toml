@@ -30,3 +30,19 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "D:/"]
 [mcp_servers.puppeteer]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-puppeteer"]
+
+[mcp_servers.mail]
+command = "uvx"
+args = ["mcp-email-server==0.6.2", "stdio"]
+startup_timeout_sec = 60
+
+[mcp_servers.mail.env]
+MCP_EMAIL_SERVER_ACCOUNT_NAME = "..."
+MCP_EMAIL_SERVER_EMAIL_ADDRESS = "..."
+MCP_EMAIL_SERVER_FULL_NAME = "..."
+MCP_EMAIL_SERVER_IMAP_HOST = "..."
+MCP_EMAIL_SERVER_IMAP_PORT = "..."
+MCP_EMAIL_SERVER_PASSWORD = "..."
+MCP_EMAIL_SERVER_SMTP_HOST = "..."
+MCP_EMAIL_SERVER_SMTP_PORT = "..."
+MCP_EMAIL_SERVER_USER_NAME = "..."
