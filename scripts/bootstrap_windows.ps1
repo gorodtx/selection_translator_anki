@@ -109,3 +109,18 @@ foreach ($tool in $toolMatrix) {
         Write-Step "$($tool.Name): $versionText"
     }
 }
+
+if ($SetupVenv) {
+    $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+    if ($null -eq $uvCommand) {
+        throw "uv is required when -SetupVenv is used."
+    }
+
+    Push-Location $resolvedRepoRoot
+    try {
+        Invoke-Checked -FilePath $uvCommand.Source -Arguments @("venv", ".venv", "--python", $PythonVersion)
+        Invoke-Checked -FilePath $uvCommand.Source -Arguments @("sync", "--group", "dev")
+    } finally {
+        Pop-Location
+    }
+}
