@@ -56,4 +56,21 @@ function Get-JsonAssetMap {
     return $map
 }
 
+function Invoke-Checked {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments
+    )
+
+    Write-Step ("run: " + ($FilePath + " " + ($Arguments -join " ")).Trim())
+    if ($DryRun) {
+        return
+    }
+
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed: $FilePath $($Arguments -join ' ')"
+    }
+}
+
 Require-WindowsHost
