@@ -124,3 +124,30 @@ If you already created the venv and only want DB validation:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap_windows.ps1 -RepoRoot (Get-Location) -VerifyOnly
 ```
+
+## Exact PowerShell Sequence
+
+From a clean Windows shell:
+
+```powershell
+$Repo = "D:/dev/translator"
+git clone https://github.com/gorodtx/selection_translator_anki.git $Repo
+Set-Location $Repo
+git checkout gnome
+git checkout d1296c1
+
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.codex" | Out-Null
+Copy-Item ".\docs\windows_codex.config.example.toml" "$env:USERPROFILE\.codex\config.toml"
+
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap_windows.ps1 `
+  -RepoRoot $Repo `
+  -SetupVenv `
+  -CreateSkillsJunction
+```
+
+Then:
+
+- edit `%USERPROFILE%/.codex/config.toml`
+- copy `%USERPROFILE%/.codex/skills`
+- re-auth connector-style MCP inside Codex
+- optionally copy `%USERPROFILE%/.config/translator/desktop_config.json`
