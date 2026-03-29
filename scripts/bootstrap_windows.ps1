@@ -190,3 +190,10 @@ foreach ($assetName in $assetNames) {
 
     Write-Step "Verified $assetName"
 }
+
+Write-Host ""
+Write-Step "Next steps:"
+Write-Step "1. Copy docs\\windows_codex.config.example.toml to %USERPROFILE%\\.codex\\config.toml and replace paths and secrets."
+Write-Step "2. Copy or verify %USERPROFILE%\\.codex\\skills; use -CreateSkillsJunction if you want repo\\.skills."
+Write-Step "3. If you use Chrome DevTools MCP, start Chrome with --remote-debugging-port=9222."
+Write-Step "4. Use a Linux VM or Linux host for GNOME runtime, D-Bus smoke, and UI deadlock validation."
