@@ -17,3 +17,16 @@ startup_timeout_sec = 60
 command = "uvx"
 args = ["mcp-server-fetch==2025.4.7"]
 startup_timeout_sec = 30
+
+[mcp_servers.sqlite]
+command = "uvx"
+args = ["mcp-server-sqlite==2025.4.25", "--db-path", "D:/dev/translator/offline_language_base/primary.sqlite3"]
+startup_timeout_sec = 30
+
+[mcp_servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "D:/"]
+
+[mcp_servers.puppeteer]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-puppeteer"]
