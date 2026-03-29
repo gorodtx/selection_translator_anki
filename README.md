@@ -21,6 +21,7 @@ Offline-first selection translator for Linux GNOME with fast popup UI, D-Bus bac
 
 Supported now: **Linux GNOME (Wayland/X11)**.  
 Planned (not supported yet): **macOS / Windows**.
+Windows repo/Codex bootstrap only: [docs/windows_bootstrap.md](docs/windows_bootstrap.md).
 
 [![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![GTK4](https://img.shields.io/badge/GTK-4-7FE719?logo=gtk&logoColor=black)](https://www.gtk.org/)
