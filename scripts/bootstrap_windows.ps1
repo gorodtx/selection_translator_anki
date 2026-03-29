@@ -173,4 +173,15 @@ foreach ($assetName in $assetNames) {
             }
         }
     }
+
+    if ($DryRun) {
+        Write-Step "Verify SHA-256 for $assetName against $expectedSha"
+        continue
+    }
+
+    if (-not (Test-Path -LiteralPath $targetPath)) {
+        throw "Missing DB file: $targetPath"
+    }
+
+    $actualSha = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash.ToLowerInvariant()
 }
