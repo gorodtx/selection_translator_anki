@@ -215,3 +215,22 @@ uv run pytest
 uv run ruff check .
 uv run pyright
 ```
+
+## What Still Requires Linux
+
+These remain Linux-only until the project gets a separate Windows frontend/runtime layer:
+
+- GNOME Shell extension
+- D-Bus service activation
+- `systemctl --user`
+- `gsettings`
+- `gnome-extensions`
+- Wayland/X11 selection and hotkey flow
+- tray and popup runtime behavior
+
+Use a Linux VM or separate Linux machine for:
+
+- `dev/tools/dev_reload.sh`
+- D-Bus smoke: `Translate "hello"`, `Translate "look up"`, `GetAnkiStatus`
+- UI checks: open/close translation window, notification auto-hide, tray interactions
+- hang/deadlock checks around hotkeys, tray, clipboard, and overlay
