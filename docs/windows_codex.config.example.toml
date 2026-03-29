@@ -7,3 +7,13 @@ sandbox_mode = "workspace-write"
 
 [projects."D:/dev/translator"]
 trust_level = "trusted"
+
+[mcp_servers.chrome_devtools]
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+startup_timeout_sec = 60
+
+[mcp_servers.fetch]
+command = "uvx"
+args = ["mcp-server-fetch==2025.4.7"]
+startup_timeout_sec = 30
