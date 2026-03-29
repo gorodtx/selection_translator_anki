@@ -10,3 +10,16 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host "[windows-bootstrap] $Message"
+}
+
+function Require-WindowsHost {
+    if ($env:OS -ne "Windows_NT") {
+        throw "bootstrap_windows.ps1 supports Windows hosts only."
+    }
+}
+
+Require-WindowsHost
