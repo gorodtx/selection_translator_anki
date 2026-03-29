@@ -92,3 +92,35 @@ Instead, rebuild it on Windows from the tracked template:
 
 - source template: `docs/windows_codex.config.example.toml`
 - target path: `%USERPROFILE%/.codex/config.toml`
+
+## Repo Bootstrap
+
+Clone and pin the same branch and commit if you need a 1:1 source snapshot:
+
+```powershell
+git clone https://github.com/gorodtx/selection_translator_anki.git D:/dev/translator
+Set-Location D:/dev/translator
+git checkout gnome
+git checkout d1296c1
+```
+
+Run the tracked bootstrap script from the repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap_windows.ps1 -RepoRoot (Get-Location) -SetupVenv
+```
+
+What the script does:
+
+- reports local tool availability and versions when present
+- creates `.venv` with Python `3.13` when `-SetupVenv` is used
+- runs `uv sync --group dev`
+- downloads `primary.sqlite3`, `fallback.sqlite3`, and `definitions_pack.sqlite3`
+- verifies their SHA-256 values against `scripts/db-bundle.lock.json`
+- places DBs into `repo/offline_language_base`, which is already auto-discovered by the code
+
+If you already created the venv and only want DB validation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap_windows.ps1 -RepoRoot (Get-Location) -VerifyOnly
+```
