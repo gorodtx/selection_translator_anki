@@ -198,3 +198,20 @@ If you need Anki integration on Windows:
 - install Windows Anki
 - install AnkiConnect
 - restore or recreate `desktop_config.json`
+
+## What Works On Windows
+
+- repo checkout and dependency sync
+- offline DB placement in `offline_language_base`
+- tests, lint, and type checks
+- Codex project config, skills, and most MCP setup
+- release tooling that does not depend on GNOME runtime
+- optional AnkiConnect-based flows
+
+Recommended validation:
+
+```powershell
+uv run pytest
+uv run ruff check .
+uv run pyright
+```
