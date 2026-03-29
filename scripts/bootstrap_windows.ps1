@@ -146,3 +146,16 @@ if (-not (Test-Path -LiteralPath $dbDir)) {
         New-Item -ItemType Directory -Force -Path $dbDir | Out-Null
     }
 }
+
+$baseUrl = "https://github.com/$($lock.repo)/releases/download/$($lock.tag)"
+
+foreach ($assetName in $assetNames) {
+    if (-not $assets.ContainsKey($assetName)) {
+        throw "Lock file is missing asset metadata for $assetName"
+    }
+
+    $asset = $assets[$assetName]
+    $assetUrl = "$baseUrl/$assetName"
+    $targetPath = Join-Path $dbDir $assetName
+    $expectedSha = "$($asset.sha256)".ToLowerInvariant()
+}
