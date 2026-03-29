@@ -22,4 +22,28 @@ function Require-WindowsHost {
     }
 }
 
+function Get-CommandVersionText {
+    param(
+        [string]$CommandName,
+        [string[]]$Arguments
+    )
+
+    $command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        return $null
+    }
+
+    try {
+        $output = & $command.Source @Arguments 2>&1
+    } catch {
+        return "$CommandName is installed but version lookup failed: $($_.Exception.Message)"
+    }
+
+    if ($null -eq $output) {
+        return "$CommandName is installed"
+    }
+
+    return (($output | ForEach-Object { "$_" }) -join " ").Trim()
+}
+
 Require-WindowsHost
