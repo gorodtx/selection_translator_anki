@@ -124,3 +124,18 @@ if ($SetupVenv) {
         Pop-Location
     }
 }
+
+if ($CreateSkillsJunction) {
+    if (-not (Test-Path -LiteralPath $userSkillsPath)) {
+        throw "Cannot create .skills junction because user skills directory is missing: $userSkillsPath"
+    }
+
+    if (Test-Path -LiteralPath $repoSkillsPath) {
+        Write-Step ".skills already exists: $repoSkillsPath"
+    } else {
+        Write-Step "Create .skills junction: $repoSkillsPath -> $userSkillsPath"
+        if (-not $DryRun) {
+            New-Item -ItemType Junction -Path $repoSkillsPath -Target $userSkillsPath | Out-Null
+        }
+    }
+}
