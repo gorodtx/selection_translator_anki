@@ -46,4 +46,14 @@ function Get-CommandVersionText {
     return (($output | ForEach-Object { "$_" }) -join " ").Trim()
 }
 
+function Get-JsonAssetMap {
+    param($AssetsObject)
+
+    $map = @{}
+    foreach ($property in $AssetsObject.PSObject.Properties) {
+        $map[$property.Name] = $property.Value
+    }
+    return $map
+}
+
 Require-WindowsHost
