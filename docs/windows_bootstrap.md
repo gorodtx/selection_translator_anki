@@ -174,3 +174,27 @@ Notes:
 - `fetch`, `sqlite`, and `mail` are pinned through `uvx`
 - `chrome_devtools` and `puppeteer` should also be pinned if you want stricter reproducibility
 - built-in or connector-style integrations such as GitHub, Figma, and OpenAI docs still need separate enablement or re-auth
+
+## Chrome DevTools MCP
+
+If you use browser MCP on Windows, start Chrome with remote debugging:
+
+```powershell
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-port=9222 `
+  --user-data-dir="$env:USERPROFILE\.codex\chrome-devtools-profile"
+```
+
+## Optional App Config And Anki
+
+The desktop config path is still built from `Path.home() / ".config"` in `desktop_app/config.py`.
+
+On Windows that means:
+
+- `%USERPROFILE%/.config/translator/desktop_config.json`
+
+If you need Anki integration on Windows:
+
+- install Windows Anki
+- install AnkiConnect
+- restore or recreate `desktop_config.json`
