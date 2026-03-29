@@ -46,3 +46,6 @@ MCP_EMAIL_SERVER_PASSWORD = "..."
 MCP_EMAIL_SERVER_SMTP_HOST = "..."
 MCP_EMAIL_SERVER_SMTP_PORT = "..."
 MCP_EMAIL_SERVER_USER_NAME = "..."
+
+# Connector-style integrations such as GitHub, Figma, and OpenAI docs
+# are enabled and authenticated separately inside Codex.
