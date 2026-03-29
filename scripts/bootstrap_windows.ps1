@@ -74,3 +74,17 @@ function Invoke-Checked {
 }
 
 Require-WindowsHost
+
+$resolvedRepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+$lockFile = Join-Path $resolvedRepoRoot "scripts\db-bundle.lock.json"
+$dbDir = Join-Path $resolvedRepoRoot "offline_language_base"
+$repoSkillsPath = Join-Path $resolvedRepoRoot ".skills"
+$userSkillsPath = Join-Path $HOME ".codex\skills"
+
+if (-not (Test-Path -LiteralPath $lockFile)) {
+    throw "Missing lock file: $lockFile"
+}
+
+$lock = Get-Content -LiteralPath $lockFile -Raw | ConvertFrom-Json
+$assets = Get-JsonAssetMap -AssetsObject $lock.assets
+$assetNames = @("primary.sqlite3", "fallback.sqlite3", "definitions_pack.sqlite3")
