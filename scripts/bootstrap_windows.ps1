@@ -184,4 +184,9 @@ foreach ($assetName in $assetNames) {
     }
 
     $actualSha = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualSha -ne $expectedSha) {
+        throw "SHA-256 mismatch for $assetName. Expected $expectedSha, got $actualSha"
+    }
+
+    Write-Step "Verified $assetName"
 }
