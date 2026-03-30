@@ -1,0 +1,51 @@
+# Replace D:/dev/translator with your actual repo path.
+# Replace secrets before use.
+
+model = "gpt-5.4"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[projects."D:/dev/translator"]
+trust_level = "trusted"
+
+[mcp_servers.chrome_devtools]
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+startup_timeout_sec = 60
+
+[mcp_servers.fetch]
+command = "uvx"
+args = ["mcp-server-fetch==2025.4.7"]
+startup_timeout_sec = 30
+
+[mcp_servers.sqlite]
+command = "uvx"
+args = ["mcp-server-sqlite==2025.4.25", "--db-path", "D:/dev/translator/offline_language_base/primary.sqlite3"]
+startup_timeout_sec = 30
+
+[mcp_servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "D:/"]
+
+[mcp_servers.puppeteer]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-puppeteer"]
+
+[mcp_servers.mail]
+command = "uvx"
+args = ["mcp-email-server==0.6.2", "stdio"]
+startup_timeout_sec = 60
+
+[mcp_servers.mail.env]
+MCP_EMAIL_SERVER_ACCOUNT_NAME = "..."
+MCP_EMAIL_SERVER_EMAIL_ADDRESS = "..."
+MCP_EMAIL_SERVER_FULL_NAME = "..."
+MCP_EMAIL_SERVER_IMAP_HOST = "..."
+MCP_EMAIL_SERVER_IMAP_PORT = "..."
+MCP_EMAIL_SERVER_PASSWORD = "..."
+MCP_EMAIL_SERVER_SMTP_HOST = "..."
+MCP_EMAIL_SERVER_SMTP_PORT = "..."
+MCP_EMAIL_SERVER_USER_NAME = "..."
+
+# Connector-style integrations such as GitHub, Figma, and OpenAI docs
+# are enabled and authenticated separately inside Codex.

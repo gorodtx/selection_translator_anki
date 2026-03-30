@@ -7,6 +7,10 @@ def normalize_text(value: str) -> str:
     return rules.normalize_text(value)
 
 
+def normalize_lookup_text(value: str) -> str:
+    return rules.normalize_lookup_text(value)
+
+
 def normalize_whitespace(value: str) -> str:
     return rules.normalize_whitespace(value)
 

@@ -10,14 +10,19 @@ from translate_logic.models import TranslationResult, TranslationStatus
 @dataclass(slots=True)
 class TranslationSession:
     start_translation: Callable[
-        [str, Callable[[TranslationResult], None]], Future[TranslationResult]
+        [str, str, Callable[[TranslationResult], None]], Future[TranslationResult]
     ]
     on_start: Callable[[str], None]
     on_partial: Callable[[TranslationResult], None]
     on_complete: Callable[[TranslationResult], None]
     on_error: Callable[[], None]
 
-    def run(self, display_text: str, query_text: str) -> Future[TranslationResult]:
+    def run(
+        self,
+        display_text: str,
+        network_text: str,
+        lookup_text: str,
+    ) -> Future[TranslationResult]:
         self.on_start(display_text)
 
         def handle_partial(result: TranslationResult) -> None:
@@ -31,7 +36,7 @@ class TranslationSession:
                 )
             )
 
-        future = self.start_translation(query_text, handle_partial)
+        future = self.start_translation(network_text, lookup_text, handle_partial)
         future.add_done_callback(self._handle_done)
         return future
 

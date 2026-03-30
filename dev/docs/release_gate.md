@@ -1,19 +1,12 @@
-# Release Gate (Linux + Windows Independent Tracks)
+# Stable Release Gate (Linux GNOME)
 
-This repository keeps Linux and Windows release tracks independent.
+This project ships production artifacts for **Linux GNOME**.
 
-- Linux release quality is proven by Linux checks.
-- Windows release quality is proven by Windows CI + mandatory Windows VM gate.
-- Cross-substitution is not allowed.
-
-## 1) Immutable release policy (mandatory)
+## 1) Immutable release policy
 
 - Versioning: `vMAJOR.MINOR.PATCH` (+ optional `-rc.N`).
-- Existing tag/release assets are never replaced.
-- Any fix after publish is a new `PATCH` tag.
-- Channels:
-  - `vX.Y.Z-rc.N`: cross-platform CI rehearsal.
-  - `vX.Y.Z`: publish only after required gates are green for the target track.
+- Existing tags/releases are never replaced.
+- Any hotfix after publish is a new PATCH tag.
 
 ## 2) Preflight before publishing
 
@@ -23,18 +16,19 @@ dev/scripts/release_preflight.sh vX.Y.Z
 
 What it enforces:
 - clean tracked git tree,
-- tag format check,
+- valid release tag format,
 - tag does not exist locally/remotely,
-- release assets built from tracked files only,
+- DB bundle lock matches local sqlite files,
+- code release assets are built from tracked files only,
 - checksums verified.
 
-## 3) Linux production gate (only for Linux release track)
+## 3) Stable Linux production gate
 
 1. Restart runtime:
    - `systemctl --user restart translator-desktop.service`
 2. Installer healthcheck:
    - `bash scripts/install.sh healthcheck`
-3. Direct health probes:
+3. Direct D-Bus smoke:
    - `gdbus call --session --dest com.translator.desktop --object-path /com/translator/desktop --method com.translator.desktop.Translate "hello"`
    - `gdbus call --session --dest com.translator.desktop --object-path /com/translator/desktop --method com.translator.desktop.Translate "look up"`
    - `gdbus call --session --dest com.translator.desktop --object-path /com/translator/desktop --method com.translator.desktop.GetAnkiStatus`
@@ -43,72 +37,31 @@ What it enforces:
    - tray menu opens History/Settings,
    - notification banner auto-hides (~1.2s).
 
-## 4) Windows mandatory gate (for all Windows release work)
+## 4) Release model
 
-Windows gate source of truth:
+This project now publishes two immutable artifact layers:
 
-1. Green Windows CI jobs in `.github/workflows/ci-matrix.yml`:
-   - `windows-core-tests`
-   - `windows-package-smoke`
-   - `windows-ipc-smoke`
-   - `windows-evidence-validate`
-2. Mandatory VM gate on `QEMU/KVM` + `Windows 11 23H2+`.
-3. Mandatory evidence bundle:
-   - `vm-gate-checklist.md`
-   - `env-manifest.json`
-   - `logs/app.log`
-   - `logs/helper.log`
-   - `logs/ipc.log`
-   - `video/gate-run.mp4`
+1. Code release per `vMAJOR.MINOR.PATCH`
+   - `install.sh`
+   - `release-manifest.json`
+   - `release-assets.sha256`
+   - `translator-app.tar.gz`
+   - `translator-extension.zip`
+2. DB bundle release only when sqlite bytes change
+   - `primary.sqlite3`
+   - `fallback.sqlite3`
+   - `definitions_pack.sqlite3`
+   - `db-assets.sha256`
 
-Required docs and tools:
+`release-manifest.json` pins the exact immutable DB bundle tag.
 
-- `docs/windows/vm-gate.md`
-- `docs/windows/vm-options-fact-check.md`
-- `docs/windows/vm-gate-checklist.md`
-- `docs/windows/env-manifest.schema.json`
-- `tools/windows/gate/run_vm_gate.ps1`
-- `tools/windows/gate/run_vm_gate_host.py`
-- `tools/windows/gate/validate_evidence.py`
-- `tools/windows/vm/preflight_host.py`
-- `tools/windows/vm/provision_win11_vm.py`
-- `tools/windows/vm/create_baseline_snapshot.py`
-- `tools/windows/vm/reset_gate_vm.py`
-- `tools/windows/vm/install_gate_prereqs_offline.py`
+## 5) Artifact cleanliness contract
 
-### Hard stop for Windows work in Linux host environment
-
-During Windows implementation/validation, these are not valid acceptance checks:
-
-- `dev/run_dev_instance.sh ...`
-- `gdbus ...`
-- Linux UI/runtime smoke
-
-They must not be used as evidence for Windows readiness.
-
-## 5) CI matrix gate
-
-Single workflow: `.github/workflows/ci-matrix.yml`.
-
-- `core-tests` (ubuntu/macos)
-- `windows-core-tests`
-- `windows-package-smoke`
-- `windows-ipc-smoke`
-- `windows-evidence-validate`
-- `package-linux`
-- `package-macos`
-- `sign-windows` (native step, secrets-gated)
-- `notarize-macos` (native step, secrets-gated)
-
-## 6) Stable vs dev contour rules
-
-- Stable contour:
-  - `TRANSLATOR_INSTALL_MODE=stable`
-  - install/update/rollback only from release assets
-  - local checkout install path must stay disabled
-- Dev contour:
-  - isolated worktree + `dev/run_dev_instance.sh`
-  - separate D-Bus name / systemd unit / extension UUID
-
-- bootstrap script: `dev/scripts/bootstrap_dev_worktree.sh`
-- dev runtime launcher: `dev/run_dev_instance.sh`
+- `translator-app.tar.gz` is built via `git archive` from explicit allowlist:
+  - `desktop_app/`
+  - `translate_logic/`
+  - `icons/`
+  - `scripts/runtime-requirements.txt`
+- `.sqlite3` files are blocked inside the code release app archive.
+- Code releases stay small and do not republish offline DB bytes when checksums are unchanged.
+- Offline DB bytes are reused locally by checksum and fetched from a pinned DB bundle tag, never from `latest/download`.

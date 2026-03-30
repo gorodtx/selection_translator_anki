@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
 from urllib.parse import quote
 
 from translate_logic.domain.models import ExampleLimit, QueryLimit
+
+_LOOKUP_CLEAN_RE = re.compile(r"[^A-Za-z'-]+")
 
 
 def normalize_whitespace(value: str) -> str:
@@ -14,6 +17,12 @@ def normalize_text(value: str) -> str:
     if len(collapsed) > QueryLimit.MAX_CHARS.value:
         collapsed = collapsed[: QueryLimit.MAX_CHARS.value].rstrip()
     return collapsed
+
+
+def normalize_lookup_text(value: str) -> str:
+    normalized = normalize_text(value)
+    cleaned = _LOOKUP_CLEAN_RE.sub(" ", normalized)
+    return normalize_whitespace(cleaned)
 
 
 def count_words(value: str) -> int:

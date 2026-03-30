@@ -20,8 +20,8 @@ Offline-first selection translator for Linux GNOME with fast popup UI, D-Bus bac
 [English](#english) | [Русский](#русский)
 
 Supported now: **Linux GNOME (Wayland/X11)**.  
-In progress: **Windows prep (no production adapter yet)**.  
-Out of scope for current cycle: **macOS**.
+Planned (not supported yet): **macOS / Windows**.
+Windows repo/Codex bootstrap only: [docs/windows_bootstrap.md](docs/windows_bootstrap.md).
 
 [![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![GTK4](https://img.shields.io/badge/GTK-4-7FE719?logo=gtk&logoColor=black)](https://www.gtk.org/)
@@ -130,7 +130,7 @@ Release guardrails (hard fail by default):
 - Build only from a clean tracked git state (no unstaged/staged tracked changes).
 - `translator-app.tar.gz` is created from `git archive HEAD` (tracked files only).
 - `.sqlite3` inside app archive is blocked; offline DB ships only as separate release assets.
-- Immutable release policy: existing tag/release must not be modified.
+- Immutable policy: existing tag/release must not be modified.
 - Optional override for emergency/debug only: `TRANSLATOR_RELEASE_ALLOW_DIRTY=1`.
 - Channel policy:
   - `vX.Y.Z-rc.N` for cross-platform matrix rehearsal.
@@ -160,28 +160,6 @@ gh release create vX.Y.Z \
 ```
 
 Detailed gate checklist: `dev/docs/release_gate.md`.
-Windows VM gate runbook: `docs/windows/vm-gate.md`.
-Windows VM options fact-check: `docs/windows/vm-options-fact-check.md`.
-Windows VM checklist template: `docs/windows/vm-gate-checklist.md`.
-
-Parallel stable+dev runtime runbook: `dev/docs/parallel_runtime.md`.
-
-Dev isolation bootstrap (from stable checkout):
-
-```bash
-# creates ~/dev/translator-dev and moves local dirty changes there
-dev/scripts/bootstrap_dev_worktree.sh ~/dev/translator-dev
-```
-
-Dev runtime control (inside dev worktree):
-
-```bash
-cd ~/dev/translator-dev
-dev/run_dev_instance.sh setup
-dev/run_dev_instance.sh sync-bases
-dev/run_dev_instance.sh status
-dev/run_dev_instance.sh switch-to-dev
-```
 
 ---
 
@@ -276,28 +254,6 @@ gh release create vX.Y.Z \
 ```
 
 Полный gate-чеклист: `dev/docs/release_gate.md`.
-Runbook Windows VM gate: `docs/windows/vm-gate.md`.
-Факт-чек и сравнение вариантов VM: `docs/windows/vm-options-fact-check.md`.
-Шаблон чеклиста Windows VM: `docs/windows/vm-gate-checklist.md`.
-
-Runbook параллельного stable+dev режима: `dev/docs/parallel_runtime.md`.
-
-Bootstrap из stable checkout для dev-изоляции:
-
-```bash
-# создаёт ~/dev/translator-dev и переносит туда текущий dirty state
-dev/scripts/bootstrap_dev_worktree.sh ~/dev/translator-dev
-```
-
-Управление dev-рантаймом (внутри dev worktree):
-
-```bash
-cd ~/dev/translator-dev
-dev/run_dev_instance.sh setup
-dev/run_dev_instance.sh sync-bases
-dev/run_dev_instance.sh status
-dev/run_dev_instance.sh switch-to-dev
-```
 
 ## License
 
