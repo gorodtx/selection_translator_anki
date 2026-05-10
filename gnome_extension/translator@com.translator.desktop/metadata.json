@@ -2,7 +2,7 @@
   "uuid": "translator@com.translator.desktop",
   "name": "Translator",
   "description": "Translate primary selection via a Python D-Bus backend.",
-  "version": 1,
-  "shell-version": ["49"],
+  "version": 2,
+  "shell-version": ["49", "50"],
   "settings-schema": "org.gnome.shell.extensions.translator"
 }
