@@ -142,8 +142,20 @@ cover all of them:
 | Word | What the dictionary holds | Result |
 | --- | --- | --- |
 | `get over` | a phrasal section with two example sentences and no sense-level translation | card with examples, no candidates |
-| `run into` | no entry | no card |
-| `figure out` | no entry | no card |
+| `run into`, `figure out`, `deal with`, `rely on`, `put up with`, `in spite of` | no entry under any search method (exact, prefix, wildcard) | no card |
+
+Inventing a gloss out of `get over`'s example sentences was tried and rejected
+on the numbers: across 30 words it recovered two correct translations and
+introduced six wrong ones, because those sentences translate idioms rather than
+the headword.
+
+One trap worth naming. Oxford marks case government with a Latin letter after a
+plus: `наталкиваться на + a`, `следить за + i`, `отчитываться в + p`. The
+candidate cleaner drops anything carrying Latin letters, so it used to throw
+those translations away whole, and an article whose senses all govern a case
+produced nothing at all. Stripping the marker before the Latin check recovered
+38 candidates over 30 words and lost none: `come across` went from 0 to 7,
+`look after` from 1 to 6, `account for` from 4 to 11.
 
 **Entries are big.** The Oxford article for `set` is about 106 KB of markup and
 arrives as a single NDJSON line, and `run` is 87 KB. asyncio's default stream
