@@ -49,12 +49,14 @@ class SettingsFlow:
         anki_flow: AnkiFlow,
         on_save: Callable[[AppConfig], None],
         dispatch: Dispatch = call_inline,
+        on_reachability: Callable[[bool], None] | None = None,
     ) -> None:
         self._config = config
         self._runtime = runtime
         self._anki_flow = anki_flow
         self._on_save = on_save
         self._dispatch = dispatch
+        self._on_reachability = on_reachability
         self._pending_anki: AnkiConfig | None = config.anki
         self._model_ready = False
         self._model_names_future: Future[AnkiListResult] | None = None
@@ -211,8 +213,10 @@ class SettingsFlow:
         try:
             result = future.result()
         except Exception:
+            self._report_reachability(False)
             reply(AnkiListResult(items=[], error="Failed to load Anki decks."))
             return
+        self._report_reachability(result.error is None)
         reply(result)
 
     def _on_select_deck_done(
@@ -324,8 +328,10 @@ class SettingsFlow:
             result = future.result()
         except Exception:
             self._model_ready = False
+            self._report_reachability(False)
             self._flush_status_waiters()
             return
+        self._report_reachability(result.error is None)
         if result.error is not None:
             self._model_ready = False
             self._flush_status_waiters()
@@ -380,6 +386,10 @@ class SettingsFlow:
 
     def _action_result(self, message: str) -> AnkiActionResult:
         return AnkiActionResult(message=message, status=self._current_status())
+
+    def _report_reachability(self, reachable: bool) -> None:
+        if self._on_reachability is not None:
+            self._on_reachability(reachable)
 
     def _runtime_ready(self) -> bool:
         try:

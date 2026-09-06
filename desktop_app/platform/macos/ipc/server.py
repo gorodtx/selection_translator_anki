@@ -38,6 +38,7 @@ class IpcServer:
         self._handler = handler
         self._server: asyncio.AbstractServer | None = None
         self._writers: set[asyncio.StreamWriter] = set()
+        self._owns_socket = False
 
     @property
     def socket_path(self) -> Path:
@@ -61,6 +62,7 @@ class IpcServer:
             path=str(self._socket_path),
             limit=MAX_LINE_BYTES,
         )
+        self._owns_socket = True
         os.chmod(self._socket_path, 0o600)
         logger.info("ipc listening on %s", self._socket_path)
 
@@ -80,6 +82,11 @@ class IpcServer:
                 await server.wait_closed()
         for writer in list(self._writers):
             self._drop_writer(writer)
+        if not self._owns_socket:
+            # A failed start (for example: another backend already listening)
+            # must never remove the socket that instance is serving.
+            return
+        self._owns_socket = False
         with contextlib.suppress(OSError):
             if self._socket_path.exists():
                 self._socket_path.unlink()

@@ -274,6 +274,7 @@ class Daemon:
             if server is not None:
                 server.broadcast(event, payload)
 
+        pid_path: Path | None = None
         session = BackendSession(
             services=services,
             config=config,
@@ -301,9 +302,9 @@ class Daemon:
         for signum in (signal.SIGINT, signal.SIGTERM):
             with contextlib.suppress(NotImplementedError, RuntimeError):
                 loop.add_signal_handler(signum, self.request_stop)
-        pid_path = _write_pid_file(self._socket_path)
         try:
             await server.start()
+            pid_path = _write_pid_file(self._socket_path)
             logger.info("backend %s ready (pid %d)", BACKEND_VERSION, os.getpid())
             await self._stop_event.wait()
         finally:

@@ -403,3 +403,42 @@ def test_backend_api_dispatches_translate_and_rejects_unknown_method(
         assert bad_params.value.code is ErrorCode.INVALID_PARAMS
 
     asyncio.run(scenario())
+
+
+def test_settings_flow_reports_anki_reachability() -> None:
+    """`anki.status` must not claim Anki is up when the model query failed."""
+    from desktop_app.application.use_cases.settings_flow import SettingsFlow
+    from desktop_app.infrastructure.anki import AnkiListResult
+
+    class _Service:
+        def __init__(self, result: AnkiListResult) -> None:
+            self._result = result
+
+        def model_names(self) -> Future[AnkiListResult]:
+            future: Future[AnkiListResult] = Future()
+            future.set_result(self._result)
+            return future
+
+    class _Runtime:
+        @property
+        def loop(self) -> object:
+            return object()
+
+    reachability: list[bool] = []
+
+    def build(result: AnkiListResult) -> SettingsFlow:
+        return SettingsFlow(
+            config=_config(),
+            runtime=cast(AsyncRuntime, _Runtime()),
+            anki_flow=AnkiFlow(service=cast("object", _Service(result))),  # type: ignore[arg-type]
+            on_save=lambda config: None,
+            dispatch=call_inline,
+            on_reachability=reachability.append,
+        )
+
+    build(AnkiListResult(items=[], error="Cannot connect to host 127.0.0.1:8765"))
+    assert reachability == [False]
+
+    reachability.clear()
+    build(AnkiListResult(items=["Translator"], error=None))
+    assert reachability == [True]

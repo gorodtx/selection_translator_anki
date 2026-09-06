@@ -36,9 +36,20 @@ async def call(
     wait_final: bool,
     timeout: float,
 ) -> int:
-    reader, writer = await asyncio.open_unix_connection(
-        path=str(socket_path), limit=MAX_LINE_BYTES
-    )
+    try:
+        reader, writer = await asyncio.open_unix_connection(
+            path=str(socket_path), limit=MAX_LINE_BYTES
+        )
+    except (FileNotFoundError, ConnectionRefusedError):
+        print(
+            f"no backend listening on {socket_path}\n"
+            "start one with scripts/run_backend_macos.sh",
+            file=sys.stderr,
+        )
+        return 4
+    except OSError as exc:
+        print(f"cannot connect to {socket_path}: {exc}", file=sys.stderr)
+        return 4
     request_id = "cli-1"
     writer.write(encode_line({"id": request_id, "method": method, "params": params}))
     await writer.drain()

@@ -108,6 +108,7 @@ class BackendSession:
             anki_flow=services.anki_flow,
             on_save=self._on_settings_saved,
             dispatch=dispatch,
+            on_reachability=self._set_anki_available_flag,
         )
         self._state = TranslationState()
         self._presenter = TranslationPresenter()
@@ -389,11 +390,7 @@ class BackendSession:
         return self._anki_available
 
     def anki_decks(self, reply: Callable[[AnkiListResult], None]) -> None:
-        def _reply(result: AnkiListResult) -> None:
-            self._set_anki_available(result.error is None, announce=True)
-            reply(result)
-
-        self._settings.list_decks(_reply)
+        self._settings.list_decks(reply)
 
     def anki_select_deck(
         self, deck: str, reply: Callable[[AnkiActionResult], None]

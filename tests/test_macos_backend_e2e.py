@@ -366,3 +366,38 @@ def test_server_rejects_socket_paths_longer_than_af_unix_allows(tmp_path: Path) 
 
 async def _unused_handler(request: Request) -> JsonObject:
     raise AssertionError(f"handler must not run ({request.method})")
+
+
+def test_second_backend_never_removes_the_running_socket() -> None:
+    """A refused start must leave the live instance serving."""
+
+    async def scenario() -> None:
+        socket_path = _socket_path()
+
+        async def handler(request: Request) -> JsonObject:
+            return {"echo": request.method}
+
+        first = IpcServer(socket_path=socket_path, handler=handler)
+        await first.start()
+        try:
+            second = IpcServer(socket_path=socket_path, handler=handler)
+            with pytest.raises(RuntimeError, match="already listening"):
+                await second.start()
+            # The losing instance still runs its shutdown path.
+            await second.stop()
+
+            assert socket_path.exists(), "the live socket was removed"
+            reader, writer = await asyncio.open_unix_connection(path=str(socket_path))
+            try:
+                writer.write(encode_line({"id": 1, "method": "ping"}))
+                await writer.drain()
+                line = await asyncio.wait_for(reader.readline(), 5)
+                message = protocol.as_json_object(json.loads(line.decode("utf-8")))
+                assert message is not None and message["ok"] is True
+            finally:
+                writer.close()
+        finally:
+            await first.stop()
+        assert not socket_path.exists()
+
+    asyncio.run(scenario())
