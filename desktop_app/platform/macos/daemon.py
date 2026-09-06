@@ -75,10 +75,21 @@ def engine_status() -> JsonObject:
 
 
 def db_status() -> JsonObject:
-    status: JsonObject = {
-        key: resolve_offline_base_file(name).exists() for key, name in _DB_FILES.items()
-    }
-    status["dir"] = str(paths.db_dir())
+    """Report which offline bases are reachable and where they live.
+
+    ``dir`` is the directory the primary base actually resolved from, which is
+    not always the download directory: an explicit override or a repo checkout
+    can supply the files from elsewhere.
+    """
+    status: JsonObject = {}
+    resolved_dir = paths.db_dir()
+    for key, name in _DB_FILES.items():
+        path = resolve_offline_base_file(name)
+        exists = path.exists()
+        status[key] = exists
+        if exists and key == "primary":
+            resolved_dir = path.parent
+    status["dir"] = str(resolved_dir)
     return status
 
 
