@@ -12,69 +12,108 @@ two-phase translation timing (partial, then final) match the real daemon.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
 import json
 import os
+from pathlib import Path
 import socket
 import socketserver
 import threading
 import time
-from pathlib import Path
+from typing import cast
+
+# A plain alias, not PEP 695 syntax: this script has to run on the system
+# python3 that ships with Command Line Tools (3.9).
+Json = dict[str, object]
 
 PROTOCOL_VERSION = 1
 BACKEND_VERSION = "mock-0.3.0"
 
-TRANSLATIONS: dict[str, dict[str, object]] = {
-    "bank": {
-        "translation": "берег; банк; насыпь",
-        "definitions": [
+
+def _text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _items(value: object) -> list[object]:
+    return cast(list[object], value) if isinstance(value, list) else []
+
+
+def _strings(value: object) -> list[str]:
+    return [item for item in _items(value) if isinstance(item, str)]
+
+
+def _objects(value: object) -> list[Json]:
+    return [cast(Json, item) for item in _items(value) if isinstance(item, dict)]
+
+
+@dataclass(frozen=True)
+class Entry:
+    """One canned lookup. ``apple`` mirrors the LexicalInfo block of a real state."""
+
+    translation: str
+    definitions: list[str] = field(default_factory=list[str])
+    examples: list[str] = field(default_factory=list[str])
+    apple: Json | None = None
+
+
+def _sense(index: int, label: str, translation: str, examples: list[Json]) -> Json:
+    return {
+        "index": index,
+        "label": label,
+        "translation": translation,
+        "examples": examples,
+    }
+
+
+TRANSLATIONS: dict[str, Entry] = {
+    "bank": Entry(
+        translation="берег; банк; насыпь",
+        definitions=[
             "the land alongside a river or lake",
             "a financial establishment that keeps money for customers",
         ],
-        "examples": ["We sat on the river bank.", "She works at a bank downtown."],
-        "apple": {
+        examples=["We sat on the river bank.", "She works at a bank downtown."],
+        apple={
             "headword": "bank",
             "ipa_uk": "baŋk",
             "ipa_us": "bæŋk",
             "source": "apple_dictionary",
             "entries": [
                 {
-                    "pos": "noun",
+                    "pos": "noun¹",
                     "senses": [
-                        {
-                            "index": 1,
-                            "label": "of river",
-                            "translation": "бе́рег",
-                            "examples": [
-                                {"en": "bank of clouds", "ru": "гряда́ облако́в"}
-                            ],
-                        },
-                        {
-                            "index": 2,
-                            "label": "Finance",
-                            "translation": "банк",
-                            "examples": [],
-                        },
+                        _sense(
+                            1,
+                            "of river",
+                            "бе́рег",
+                            [{"en": "bank of clouds", "ru": "гряда́ облако́в"}],
+                        ),
+                        _sense(2, "under-water shelf", "ба́нка", []),
                     ],
                 },
                 {
-                    "pos": "transitive verb",
+                    "pos": "noun²",
+                    "senses": [_sense(1, "Finance", "банк", [])],
+                },
+                {
+                    "pos": "transitive verb¹",
                     "senses": [
-                        {
-                            "index": 1,
-                            "label": "put into bank",
-                            "translation": "класть (impf) в банк / положи́ть (pf) в банк",
-                            "examples": [],
-                        }
+                        _sense(
+                            1,
+                            "put into bank",
+                            "класть (impf) в банк / положи́ть (pf) в банк",
+                            [],
+                        )
                     ],
                 },
             ],
         },
-    },
-    "look up": {
-        "translation": "навестить; отыскать; улучшаться",
-        "definitions": ["to search for information in a reference work"],
-        "examples": ["Look up the word in a dictionary.", "Things are looking up."],
-        "apple": {
+    ),
+    "look up": Entry(
+        translation="навестить; отыскать; улучшаться",
+        definitions=["to search for information in a reference work"],
+        examples=["Look up the word in a dictionary.", "Things are looking up."],
+        apple={
             "headword": "look up",
             "ipa_uk": "lʊk",
             "ipa_us": "lʊk",
@@ -83,33 +122,24 @@ TRANSLATIONS: dict[str, dict[str, object]] = {
                 {
                     "pos": "transitive verb",
                     "senses": [
-                        {
-                            "index": 1,
-                            "label": "visit",
-                            "translation": "навеща́ть (impf) / навести́ть (pf)",
-                            "examples": [
-                                {"en": "look up trains", "ru": "посмотре́ть расписа́ние"}
-                            ],
-                        }
+                        _sense(
+                            1,
+                            "visit",
+                            "навеща́ть (impf) / навести́ть (pf)",
+                            [{"en": "look up trains", "ru": "посмотре́ть расписа́ние"}],
+                        )
                     ],
                 }
             ],
         },
-    },
+    ),
 }
-DEFAULT = {
-    "translation": "перевод недоступен в моке",
-    "definitions": [],
-    "examples": [],
-    "apple": None,
-}
+DEFAULT = Entry(translation="перевод недоступен в моке")
 
 
-def view_state(
-    text: str, *, loading: bool, final: bool, entry_id: int | None
-) -> dict[str, object]:
+def view_state(text: str, *, loading: bool, final: bool, entry_id: int | None) -> Json:
     data = TRANSLATIONS.get(text.strip().lower(), DEFAULT)
-    translation = str(data["translation"]) if not loading or final else ""
+    translation = data.translation if not loading or final else ""
     return {
         "original": text.strip(),
         "original_raw": text,
@@ -117,14 +147,14 @@ def view_state(
         # unwrapped text separately; native clients read ``translation_raw``.
         "translation": translation.replace("; ", ";\n"),
         "translation_raw": translation,
-        "definitions_items": list(data["definitions"]) if final else [],
-        "examples": [{"en": item} for item in data["examples"]] if final else [],
-        "can_refresh_examples": final and bool(data["examples"]),
+        "definitions_items": list(data.definitions) if final else [],
+        "examples": [{"en": item} for item in data.examples] if final else [],
+        "can_refresh_examples": final and bool(data.examples),
         "refreshing_examples": False,
         "loading": loading,
         "can_add_anki": final,
         "entry_id": entry_id,
-        "apple": data["apple"] if final else None,
+        "apple": data.apple if final else None,
     }
 
 
@@ -136,14 +166,14 @@ class Backend:
         self.request_id = 0
         self.entry_id = 0
         self.current = ""
-        self.history: list[dict[str, object]] = []
+        self.history: list[Json] = []
         self.deck = "Vocabulary"
         self.clients: list[socket.socket] = []
         self.lock = threading.Lock()
 
     # -- events -------------------------------------------------------------
 
-    def broadcast(self, event: str, payload: dict[str, object]) -> None:
+    def broadcast(self, event: str, payload: Json) -> None:
         line = (
             json.dumps({"event": event, "payload": payload}, ensure_ascii=False) + "\n"
         ).encode()
@@ -155,7 +185,7 @@ class Backend:
             except OSError:
                 pass
 
-    def emit_translation(self, phase: str, state: dict[str, object]) -> None:
+    def emit_translation(self, phase: str, state: Json) -> None:
         self.broadcast(
             "translation.state",
             {"request_id": self.request_id, "phase": phase, "state": state},
@@ -163,13 +193,13 @@ class Backend:
 
     # -- methods ------------------------------------------------------------
 
-    def handle(self, method: str, params: dict[str, object]) -> dict[str, object]:
+    def handle(self, method: str, params: Json) -> Json:
         handler = getattr(self, f"do_{method.replace('.', '_')}", None)
         if handler is None:
             raise KeyError(method)
         return handler(params)
 
-    def do_ping(self, _: dict[str, object]) -> dict[str, object]:
+    def do_ping(self, _: Json) -> Json:
         return {
             "version": BACKEND_VERSION,
             "protocol": PROTOCOL_VERSION,
@@ -184,7 +214,7 @@ class Backend:
             "engines": {"apple_dictionary": True, "apple_translation": False},
         }
 
-    def do_translate(self, params: dict[str, object]) -> dict[str, object]:
+    def do_translate(self, params: Json) -> Json:
         text = str(params.get("text", ""))
         self.request_id += 1
         self.entry_id += 1
@@ -198,7 +228,7 @@ class Backend:
     def _finish_translation(self, text: str, entry_id: int) -> None:
         time.sleep(0.15)
         partial = view_state(text, loading=True, final=False, entry_id=entry_id)
-        gloss = str(TRANSLATIONS.get(text.strip().lower(), DEFAULT)["translation"])
+        gloss = TRANSLATIONS.get(text.strip().lower(), DEFAULT).translation
         partial["translation"] = gloss.replace("; ", ";\n")
         partial["translation_raw"] = gloss
         self.emit_translation("partial", partial)
@@ -211,58 +241,61 @@ class Backend:
                 "entry_id": entry_id,
                 "text": text.strip(),
                 "lookup_text": text.strip().lower(),
-                "translation": final["translation_raw"],
-                "definitions_en": final["definitions_items"],
-                "examples": [item["en"] for item in final["examples"]],
+                "translation": _text(final["translation_raw"]),
+                "definitions_en": _strings(final["definitions_items"]),
+                "examples": [
+                    _text(item.get("en")) for item in _objects(final["examples"])
+                ],
             },
         )
         self.broadcast(
             "notification", {"message": "Translation ready.", "level": "success"}
         )
 
-    def do_cancel(self, _: dict[str, object]) -> dict[str, object]:
+    def do_cancel(self, _: Json) -> Json:
         return {}
 
     do_close = do_cancel
 
-    def do_history_list(self, _: dict[str, object]) -> dict[str, object]:
+    def do_history_list(self, _: Json) -> Json:
         return {"items": self.history}
 
-    def do_history_select(self, params: dict[str, object]) -> dict[str, object]:
-        entry_id = int(params.get("entry_id", 0))
+    def do_history_select(self, params: Json) -> Json:
+        raw = params.get("entry_id", 0)
+        entry_id = raw if isinstance(raw, int) else 0
         item = next(
             (entry for entry in self.history if entry["entry_id"] == entry_id), None
         )
         if item is None:
             raise LookupError("no_active_entry")
         self.request_id += 1
-        self.current = str(item["text"])
+        self.current = _text(item["text"])
         return {
             "request_id": self.request_id,
             "state": view_state(
-                str(item["text"]), loading=False, final=True, entry_id=entry_id
+                self.current, loading=False, final=True, entry_id=entry_id
             ),
         }
 
-    def do_examples_refresh(self, _: dict[str, object]) -> dict[str, object]:
+    def do_examples_refresh(self, _: Json) -> Json:
         state = view_state(
             self.current, loading=False, final=True, entry_id=self.entry_id
         )
-        rotated = list(state["examples"])
+        rotated = _objects(state["examples"])
         rotated.reverse()
         state["examples"] = rotated
         return {"state": state, "changed": bool(rotated)}
 
-    def do_copy_all(self, _: dict[str, object]) -> dict[str, object]:
+    def do_copy_all(self, _: Json) -> Json:
         state = view_state(
             self.current, loading=False, final=True, entry_id=self.entry_id
         )
-        lines = [str(state["original"]), str(state["translation_raw"])]
-        lines += [str(item) for item in state["definitions_items"]]
-        lines += [str(item["en"]) for item in state["examples"]]
+        lines = [_text(state["original"]), _text(state["translation_raw"])]
+        lines += _strings(state["definitions_items"])
+        lines += [_text(item.get("en")) for item in _objects(state["examples"])]
         return {"text": "\n".join(line for line in lines if line)}
 
-    def do_anki_status(self, _: dict[str, object]) -> dict[str, object]:
+    def do_anki_status(self, _: Json) -> Json:
         available = not self.fail_anki
         return {
             "model_status": "Ready" if available else "Unavailable",
@@ -271,12 +304,12 @@ class Backend:
             "available": available,
         }
 
-    def do_anki_decks(self, _: dict[str, object]) -> dict[str, object]:
+    def do_anki_decks(self, _: Json) -> Json:
         if self.fail_anki:
             return {"decks": [], "error": "AnkiConnect is not reachable."}
         return {"decks": ["Default", "Vocabulary", "English::Verbs"], "error": None}
 
-    def do_anki_select_deck(self, params: dict[str, object]) -> dict[str, object]:
+    def do_anki_select_deck(self, params: Json) -> Json:
         self.deck = str(params.get("deck", ""))
         return {
             "message": f"Deck set to {self.deck}.",
@@ -285,7 +318,7 @@ class Backend:
             "deck_name": self.deck,
         }
 
-    def do_anki_create_model(self, _: dict[str, object]) -> dict[str, object]:
+    def do_anki_create_model(self, _: Json) -> Json:
         return {
             "message": "Model created.",
             "model_status": "Ready",
@@ -293,7 +326,7 @@ class Backend:
             "deck_name": self.deck,
         }
 
-    def do_anki_prepare_upsert(self, _: dict[str, object]) -> dict[str, object]:
+    def do_anki_prepare_upsert(self, _: Json) -> Json:
         if self.fail_anki:
             raise RuntimeError("AnkiConnect is not reachable.")
         state = view_state(
@@ -304,17 +337,19 @@ class Backend:
                 "values": {
                     "translations": [
                         t.strip()
-                        for t in str(state["translation_raw"]).split(";")
+                        for t in _text(state["translation_raw"]).split(";")
                         if t.strip()
                     ],
-                    "definitions_en": list(state["definitions_items"]),
-                    "examples_en": [str(item["en"]) for item in state["examples"]],
+                    "definitions_en": _strings(state["definitions_items"]),
+                    "examples_en": [
+                        _text(item.get("en")) for item in _objects(state["examples"])
+                    ],
                     "image_path": None,
                 },
                 "matches": [
                     {
                         "note_id": 1700000000001,
-                        "word": str(state["original"]),
+                        "word": _text(state["original"]),
                         "translation": "старый перевод",
                         "definitions_en": "old definition",
                         "examples_en": ["old example"],
@@ -331,15 +366,16 @@ class Backend:
             }
         }
 
-    def do_anki_apply_upsert(self, params: dict[str, object]) -> dict[str, object]:
-        decision = params.get("decision", {})
-        assert isinstance(decision, dict)
+    def do_anki_apply_upsert(self, params: Json) -> Json:
+        raw = params.get("decision", {})
+        assert isinstance(raw, dict)
+        decision = cast(Json, raw)
         if decision.get("create_new"):
             return {"outcome": "success", "message": "Note added."}
-        targets = decision.get("target_note_ids") or []
+        targets = _items(decision.get("target_note_ids"))
         return {"outcome": "updated", "message": f"{len(targets)} note(s) updated."}
 
-    def do_settings_get(self, _: dict[str, object]) -> dict[str, object]:
+    def do_settings_get(self, _: Json) -> Json:
         return {
             "languages": {"source": "en", "target": "ru"},
             "anki": {
@@ -355,12 +391,12 @@ class Backend:
             },
         }
 
-    def do_settings_save(self, params: dict[str, object]) -> dict[str, object]:
-        config = params.get("config", {})
-        assert isinstance(config, dict)
-        anki = config.get("anki", {})
+    def do_settings_save(self, params: Json) -> Json:
+        raw = params.get("config", {})
+        assert isinstance(raw, dict)
+        anki = cast(Json, raw).get("anki")
         if isinstance(anki, dict):
-            self.deck = str(anki.get("deck", self.deck))
+            self.deck = _text(cast(Json, anki).get("deck")) or self.deck
         return {
             "message": "Settings saved.",
             "model_status": "Ready",
@@ -368,7 +404,7 @@ class Backend:
             "deck_name": self.deck,
         }
 
-    def do_shutdown(self, _: dict[str, object]) -> dict[str, object]:
+    def do_shutdown(self, _: Json) -> Json:
         threading.Timer(0.2, lambda: os._exit(0)).start()
         return {}
 
@@ -400,10 +436,16 @@ class Handler(socketserver.BaseRequestHandler):
 
     def _dispatch(self, client: socket.socket, line: bytes) -> None:
         try:
-            payload = json.loads(line)
+            decoded: object = json.loads(line)
+            assert isinstance(decoded, dict)
+            payload = cast(Json, decoded)
             request_id = payload["id"]
             method = payload["method"]
-            params = payload.get("params") or {}
+            assert isinstance(method, str)
+            raw_params = payload.get("params")
+            params: Json = (
+                cast(Json, raw_params) if isinstance(raw_params, dict) else {}
+            )
         except Exception:
             self._send(
                 client,
@@ -448,7 +490,7 @@ class Handler(socketserver.BaseRequestHandler):
             return
         self._send(client, {"id": request_id, "ok": True, "result": result})
 
-    def _send(self, client: socket.socket, payload: dict[str, object]) -> None:
+    def _send(self, client: socket.socket, payload: Json) -> None:
         try:
             client.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode())
         except OSError:
