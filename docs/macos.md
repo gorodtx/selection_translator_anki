@@ -253,6 +253,32 @@ Protocol drift is caught by CI: the `shell` job extracts every `Method` and
 `Event` literal from `protocol.py` and fails if any is missing from
 `TranslatorCore/Protocol.swift`.
 
+## Popup geometry
+
+The popup sizes itself to its content and caps the scrollable body at half the
+screen's visible height, clamped to 360–640pt. Measured against the live
+backend on a display whose visible height is 1073pt, so the cap is 536pt and
+the chrome around it 134pt:
+
+| Query | Width | Height | Why |
+| --- | --- | --- | --- |
+| `in spite of everything he said` | 380 | 174 | a sentence: translation only, no dictionary card |
+| `serendipity` | 480 | 600 | one sense, still under the cap |
+| `bank`, `set` | 480 | 670 | at the cap, body scrolls |
+
+Every real word lookup reaches the cap, because a card carries IPA, sense
+blocks, five definitions and three examples. That makes the cap, not the
+content, decide how much is readable without scrolling, which is why it follows
+the screen rather than a fixed number. The body carries a soft scroll edge
+effect so content passing under the action bar reads as continuing rather than
+clipped.
+
+Window geometry is measurable without Screen Recording, through
+`CGWindowListCopyWindowInfo`, and it is the only automated acceptance available
+for the interface here. It proves layer, size and that a window exists at all.
+It says nothing about colour, typography, legibility on glass, or the Reduce
+Transparency path — those need a person.
+
 ## Permissions
 
 | Path | Permission | If denied |
