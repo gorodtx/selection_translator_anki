@@ -130,6 +130,16 @@ Whichever path answers, the pipeline still guards against a mismatched entry:
 a definition whose headword does not match is only applied to single-word
 queries.
 
+Over a wider 38-word probe the structured path answered 35. The three that did
+not are dictionary gaps rather than parser defects, and the network providers
+cover all of them:
+
+| Word | What the dictionary holds | Result |
+| --- | --- | --- |
+| `get over` | a phrasal section with two example sentences and no sense-level translation | card with examples, no candidates |
+| `run into` | no entry | no card |
+| `figure out` | no entry | no card |
+
 **Entries are big.** The Oxford article for `set` is about 106 KB of markup and
 arrives as a single NDJSON line, and `run` is 87 KB. asyncio's default stream
 limit is 64 KB, so the client raises its subprocess limit to 8 MB and drops an
