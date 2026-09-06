@@ -148,11 +148,47 @@ Command Line Tools only, no Xcode).
 | `desktop_app/platform/macos/` | protocol, socket server, session, daemon, CLI client |
 | `translate_logic/infrastructure/providers/apple.py` | sidecar client and merge inputs |
 | `macos/AppleLangHelper/` | Swift sidecar (SwiftPM) |
-| `macos/Translator/` | SwiftUI shell (SwiftPM) |
+| `macos/Translator/` | SwiftUI shell (SwiftPM); `TranslatorCore` holds the pure, testable layer |
 | `scripts/build_macos_app.sh` | assembles `dist/Translator.app` |
 | `scripts/install_macos.sh` | install, update, rollback, remove, healthcheck, status |
 | `scripts/run_backend_macos.sh` | dev launcher for the daemon |
-| `.github/workflows/macos.yml` | gate, sidecar, bundle, notarize |
+| `.github/workflows/macos.yml` | gate, linux-parity, sidecar, shell, bundle, notarize |
+
+## Running the whole stack
+
+```bash
+scripts/run_backend_macos.sh &                       # Python daemon on the socket
+scripts/build_macos_app.sh --out dist                # -> dist/Translator.app (57 MB)
+open dist/Translator.app                             # menu-bar item, no dock icon
+```
+
+The shell has debug entry points so the UI can be driven without a selection or a
+shortcut: `TRANSLATOR_DEBUG_TEXT="bank"` opens the popup on that text at launch,
+and `TRANSLATOR_DEBUG_WINDOW=settings|history|anki` opens one window.
+`macos/Translator/scripts/mock_backend.py` answers the real protocol with canned
+data, including the two-phase timing, for working without Python running.
+
+Verified end to end here: the bundled shell connected to the live daemon
+(`ipc client connected`) and drove two real translations through the pipeline
+with per-provider timings in the log.
+
+Protocol drift is caught by CI: the `shell` job extracts every `Method` and
+`Event` literal from `protocol.py` and fails if any is missing from
+`TranslatorCore/Protocol.swift`.
+
+## Permissions
+
+| Path | Permission | If denied |
+| --- | --- | --- |
+| Services menu item | none | always available |
+| Global shortcut (`RegisterEventHotKey`) | none | always available |
+| Reading the selection via Accessibility | Accessibility | falls back to a synthesized ⌘C |
+| Downloading the en→ru pair | none, but needs SwiftUI | machine translation stays off |
+
+Screenshots and window inspection from a terminal additionally need Screen
+Recording and Accessibility for that terminal; without them `screencapture`
+fails with "could not create image from display" and System Events returns
+-1728.
 
 ## Release
 
