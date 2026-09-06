@@ -117,6 +117,24 @@ two known gaps, which the structured record path exists to close:
 - **Only the first homograph is returned.** `bank` yields the river-bank article
   and never the financial one, even though the dictionary holds three records.
 
+Both gaps close once `markup` is present, measured on the same words through
+`apple_dcs`:
+
+| Query | Flat text | Structured records |
+| --- | --- | --- |
+| `bank` | 1 article, 11 candidates | 3 homographs, 7 blocks, 19 candidates |
+| `look up` | whole `look` article, 36 senses | the `look up` section, 10 candidates |
+| `take off` | nothing | 3 blocks, 11 candidates |
+| `went` | entry found, 0 candidates | senses of `go`, 33 candidates |
+
+Records carry the disambiguation the flat string drops: a homograph number, a
+`title` naming the lemma an inflected form belongs to, and an `anchor` of the
+form `xpointer(//*[@id='…'])` pointing at the phrasal-verb section inside the
+parent entry. `apple_dcs.lexical_from_records` follows the anchor when it is
+present, keeps the headword the dictionary matched (`look up` stays `look up`,
+`went` stays `went`), and merges homographs into consecutive part-of-speech
+blocks marked with the dictionary's own superscript (`noun¹`, `noun²`).
+
 ## Verified facts
 
 Everything below was produced by running it here, on macOS 26.5.2 (arm64,
@@ -130,7 +148,20 @@ Command Line Tools only, no Xcode).
   and `▸` example pairs.
 - `DCSCopyDefinitionMarkup` segfaults with the naive signature — do not use it.
   `DCSCopyRecordsForSearchString` plus `DCSRecordCopyData` is the structured
-  path, and its getters return unretained values.
+  path, and its getters return unretained values. Declare every `DCSGet…`
+  function as returning `Unmanaged<…>`; taking the value directly traps when
+  Swift releases a +0 reference. Search methods observed: 0 exact, 1 prefix,
+  3 wildcard. A multi-word idiom with no headword of its own (`in spite of`)
+  returns nothing at all.
+- The sidecar must not block its main thread. Dictionary Services and
+  Translation deliver replies through the main queue, so a `readLine` loop or a
+  semaphore on the main thread hangs the first request forever; the sidecar
+  reads stdin on its own thread and leaves the main thread in `dispatchMain()`.
+- Command Line Tools ship Swift Testing in
+  `Library/Developer/Frameworks` without telling SwiftPM, and no XCTest at all.
+  `scripts/swift-test.sh` adds the framework and `lib_TestingInterop.dylib`
+  search paths; a package also needs `platforms: [.macOS(.v14)]` or the test
+  macros fail to expand.
 - `TranslationSession(installedSource:target:)` works headless, but only for an
   already-installed pair. `canRequestDownloads` is false outside SwiftUI, both
   for a plain binary and for an ad-hoc-signed bundle, so the download has to be
@@ -147,6 +178,7 @@ Command Line Tools only, no Xcode).
 | `desktop_app/platform/paths.py` | every macOS directory, with env overrides |
 | `desktop_app/platform/macos/` | protocol, socket server, session, daemon, CLI client |
 | `translate_logic/infrastructure/providers/apple.py` | sidecar client and merge inputs |
+| `translate_logic/infrastructure/providers/apple_dcs.py` | entry markup to `LexicalInfo` |
 | `macos/AppleLangHelper/` | Swift sidecar (SwiftPM) |
 | `macos/Translator/` | SwiftUI shell (SwiftPM); `TranslatorCore` holds the pure, testable layer |
 | `scripts/build_macos_app.sh` | assembles `dist/Translator.app` |

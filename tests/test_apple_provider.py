@@ -13,7 +13,6 @@ from translate_logic.infrastructure.providers import apple
 from translate_logic.models import (
     Example,
     FieldValue,
-    LexicalInfo,
     TranslationResult,
 )
 
@@ -36,6 +35,25 @@ LOOK_RAW = (
     "его́ го́рло"
 )
 OXFORD_RU = "Oxford Russian Dictionary - Русско-Английский • Англо-Русский"
+
+# Structured entry markup, the shape ``DCSRecordCopyData`` returns. Content is
+# invented; only the class names and nesting match the real dictionary.
+BANK_MARKUP = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<html xmlns:d="http://www.apple.com/DTDs/DictionaryService-1.0.rng"><head/><body>'
+    '<d:entry id="e_bank" d:title="bank" class="entry" lang="ru">'
+    '<span class="hwg x_xh0"><span d:dhw="1" class="hw">bank </span>'
+    '<span dialect="BrE" class="prx"><span class="ph">baŋk<d:prn/></span></span>'
+    '<span dialect="AmE" class="prx"><span class="ph">bæŋk<d:prn/></span></span></span>'
+    '<span class="gramb x_xd0"><span class="ps x_xdh">noun <d:pos/></span>'
+    '<span class="semb x_xd1 hasSn"><span class="gp x_xdh sn ty_label tg_semb">1 </span>'
+    '<span class="trg x_xd2"><span class="ind"><span class="gp tg_ind">(</span>of river'
+    '<span class="gp tg_ind">) </span></span><span class="trans">бе́рег</span></span>'
+    '<span class="exg x_xd2 hasSn"><span class="x_xdh"><span class="sn">▸ </span>'
+    '<span class="ex">bank of fog</span></span><span class="trg x_xd3">'
+    '<span class="trans">полоса́ тума́на</span></span></span></span></span>'
+    "</d:entry></body></html>"
+)
 
 
 def test_parse_oxford_russian_extracts_ipa_pos_senses_and_examples() -> None:
@@ -143,6 +161,7 @@ def _write_fake_helper(tmp_path: Path, *, with_markup: bool = False) -> Path:
         #!{sys.executable}
         import json, sys
         BANK = {BANK_RAW!r}
+        MARKUP = {BANK_MARKUP!r}
         DICT = {OXFORD_RU!r}
         WITH_MARKUP = {with_markup!r}
         for line in sys.stdin:
@@ -165,7 +184,7 @@ def _write_fake_helper(tmp_path: Path, *, with_markup: bool = False) -> Path:
                 if term.lower().startswith("bank"):
                     records.append({{"dictionary": DICT, "headword": "bank", "title": None,
                                      "anchor": None,
-                                     "markup": "<html/>" if WITH_MARKUP else None}})
+                                     "markup": MARKUP if WITH_MARKUP else None}})
                 out = {{"id": rid, "ok": True, "result": {{"records": records, "elapsed_ms": 1.0}}}}
             elif op == "text_definition":
                 text = BANK if term.lower().startswith("bank") else ""
@@ -233,28 +252,9 @@ def test_helper_client_defines_translates_and_reports_status(fake_helper: Path) 
 def test_helper_client_prefers_structured_records_when_markup_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """With markup present the client parses it and never asks for the flat text."""
     script = _write_fake_helper(tmp_path, with_markup=True)
     monkeypatch.setattr(apple.sys, "platform", "darwin")
-    calls: list[str] = []
-
-    class _FakeDcs:
-        @staticmethod
-        def records_from_json(payload: object) -> list[object]:
-            calls.append("records_from_json")
-            assert isinstance(payload, list)
-            return list(payload)
-
-        @staticmethod
-        def lexical_from_records(records: object, *, query: str) -> LexicalInfo:
-            calls.append(f"lexical_from_records:{query}")
-            del records
-            return LexicalInfo(headword="bank", ipa_uk="baŋk", ipa_us="bæŋk")
-
-    monkeypatch.setattr(
-        apple.importlib,
-        "import_module",
-        lambda name: _FakeDcs,  # type: ignore[arg-type]
-    )
 
     async def scenario() -> apple.AppleDefinition | None:
         helper = apple.AppleLangHelper(binary=script)
@@ -266,8 +266,17 @@ def test_helper_client_prefers_structured_records_when_markup_present(
     definition = asyncio.run(scenario())
 
     assert definition is not None
-    assert definition.lexical.ipa_uk == "baŋk"
-    assert calls == ["records_from_json", "lexical_from_records:bank"]
+    assert definition.raw.startswith("<?xml")  # the markup, not the flat text
+    lexical = definition.lexical
+    assert lexical.headword == "bank"
+    assert (lexical.ipa_uk, lexical.ipa_us) == ("baŋk", "bæŋk")
+    assert [entry.pos for entry in lexical.entries] == ["noun"]
+    sense = lexical.entries[0].senses[0]
+    assert (sense.index, sense.label, sense.translation) == (1, "of river", "бе́рег")
+    assert [(pair.en, pair.ru) for pair in sense.examples] == [
+        ("bank of fog", "полоса́ тума́на")
+    ]
+    assert definition.candidates() == ["берег"]
 
 
 def test_helper_client_survives_process_crash(fake_helper: Path) -> None:

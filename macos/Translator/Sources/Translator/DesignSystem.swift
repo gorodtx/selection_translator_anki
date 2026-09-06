@@ -37,6 +37,8 @@ enum Layout {
     static let sectionGap: CGFloat = 14
     static let rowGap: CGFloat = 8
     static let cardRadius: CGFloat = 22
+    /// Cap on the scrolling part of the popup, so a long entry never fills the screen.
+    static let bodyMaxHeight: CGFloat = 460
     static let innerRadius: CGFloat = 14
     static let chipRadius: CGFloat = 9
 }

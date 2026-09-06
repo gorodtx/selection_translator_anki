@@ -15,26 +15,17 @@ struct TranslationPopupView: View {
         GlassEffectContainer(spacing: 12) {
             VStack(alignment: .leading, spacing: Layout.sectionGap) {
                 header
-                if model.state.loading && !model.state.hasTranslation {
-                    loadingRow
+                // A dictionary card can run to dozens of sense blocks (looking up an
+                // inflected form pulls in the lemma's whole entry), so the body scrolls
+                // while the headword and the actions stay put.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Layout.sectionGap) {
+                        body(for: model.state)
+                    }
                 }
-                if model.state.hasTranslation {
-                    translationSection
-                }
-                if let apple = model.state.apple, apple.hasContent {
-                    appleSection(apple)
-                }
-                if !model.state.definitionsItems.isEmpty {
-                    definitionsSection
-                }
-                if !model.state.examples.isEmpty {
-                    examplesSection
-                }
-                if let error = model.lastError, !model.state.hasTranslation {
-                    Text(error)
-                        .font(.secondaryText)
-                        .foregroundStyle(.secondary)
-                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxHeight: Layout.bodyMaxHeight)
+                .scrollBounceBehavior(.basedOnSize)
                 actionBar
             }
             .padding(Layout.gutter)
@@ -47,6 +38,30 @@ struct TranslationPopupView: View {
     }
 
     // MARK: - Sections
+
+    @ViewBuilder
+    private func body(for state: ViewState) -> some View {
+        if state.loading && !state.hasTranslation {
+            loadingRow
+        }
+        if state.hasTranslation {
+            translationSection
+        }
+        if let apple = state.apple, apple.hasContent {
+            appleSection(apple)
+        }
+        if !state.definitionsItems.isEmpty {
+            definitionsSection
+        }
+        if !state.examples.isEmpty {
+            examplesSection
+        }
+        if let error = model.lastError, !state.hasTranslation {
+            Text(error)
+                .font(.secondaryText)
+                .foregroundStyle(.secondary)
+        }
+    }
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
