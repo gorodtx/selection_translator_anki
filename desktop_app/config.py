@@ -89,6 +89,14 @@ def save_config(config: AppConfig) -> None:
     path.write_text(data, encoding="utf-8")
 
 
+def config_to_dict(config: AppConfig) -> dict[str, JsonValue]:
+    return _config_to_dict(config)
+
+
+def config_from_dict(payload: JsonValue) -> AppConfig:
+    return _parse_config(payload)
+
+
 def _default_config() -> AppConfig:
     return AppConfig(
         languages=LanguageConfig(
