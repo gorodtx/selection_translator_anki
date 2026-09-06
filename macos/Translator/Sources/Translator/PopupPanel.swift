@@ -13,6 +13,7 @@ final class PopupPanelController: NSObject, NSWindowDelegate {
     private var onClose: (() -> Void)?
     private var openAnki: (() -> Void)?
     private var localMonitor: Any?
+    private var bodyMaxHeight = PopupLayout.bodyMaxHeight(forScreenHeight: 900)
 
     init(model: AppModel) {
         self.model = model
@@ -26,6 +27,7 @@ final class PopupPanelController: NSObject, NSWindowDelegate {
         self.openAnki = openAnki
         let panel = ensurePanel()
         let screen = screenContaining(pointer ?? NSEvent.mouseLocation)
+        applyBodyMaxHeight(for: screen)
         let size = fittingSize(width: PopupLayout.preferredWidth(for: model.state))
         let frame = PopupLayout.frame(
             for: size,
@@ -79,14 +81,29 @@ final class PopupPanelController: NSObject, NSWindowDelegate {
 
     // MARK: - Panel
 
-    private func ensurePanel() -> NSPanel {
-        if let panel { return panel }
-        let root = TranslationPopupView(
+    /// The cap follows the screen the popup opens on, so moving to another display
+    /// changes how much is read without scrolling.
+    private func applyBodyMaxHeight(for screen: NSScreen) {
+        let cap = PopupLayout.bodyMaxHeight(forScreenHeight: screen.visibleFrame.height)
+        guard cap != bodyMaxHeight else { return }
+        bodyMaxHeight = cap
+        if let hosting = panel?.contentView as? NSHostingView<AnyView> {
+            hosting.rootView = AnyView(makeRootView())
+        }
+    }
+
+    private func makeRootView() -> TranslationPopupView {
+        TranslationPopupView(
             model: model,
+            bodyMaxHeight: bodyMaxHeight,
             onClose: { [weak self] in self?.closeRequested() },
             onOpenAnki: { [weak self] in self?.openAnki?() }
         )
-        let hosting = NSHostingView(rootView: AnyView(root))
+    }
+
+    private func ensurePanel() -> NSPanel {
+        if let panel { return panel }
+        let hosting = NSHostingView(rootView: AnyView(makeRootView()))
         hosting.translatesAutoresizingMaskIntoConstraints = true
 
         let panel = NSPanel(

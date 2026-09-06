@@ -113,3 +113,26 @@ import Testing
         #expect(grown.maxX <= screen.maxX - PopupLayout.screenMargin)
     }
 }
+
+@Suite struct BodyHeightTests {
+    /// The cap decides how much of a dictionary card is read without scrolling; it has to
+    /// use a large display without letting the popup take over a small one.
+    @Test func capScalesWithTheScreenWithinBounds() {
+        #expect(PopupLayout.bodyMaxHeight(forScreenHeight: 900) == 450)
+        #expect(PopupLayout.bodyMaxHeight(forScreenHeight: 1440) == 640)
+        #expect(PopupLayout.bodyMaxHeight(forScreenHeight: 1600) == 640)
+    }
+
+    @Test func capNeverCollapsesOnAShortScreen() {
+        #expect(PopupLayout.bodyMaxHeight(forScreenHeight: 600) == 360)
+        #expect(PopupLayout.bodyMaxHeight(forScreenHeight: 0) == 360)
+    }
+
+    @Test func popupStillFitsTheScreenAtTheLargestCap() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let cap = PopupLayout.bodyMaxHeight(forScreenHeight: screen.height)
+        let size = CGSize(width: 480, height: cap + PopupLayout.chromeHeight)
+        let frame = PopupLayout.frame(for: size, pointer: CGPoint(x: 700, y: 500), visible: screen)
+        #expect(frame.height <= screen.height - 2 * PopupLayout.screenMargin)
+    }
+}

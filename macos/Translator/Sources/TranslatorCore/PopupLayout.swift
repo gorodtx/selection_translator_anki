@@ -8,6 +8,18 @@ public enum PopupLayout {
     public static let maxWidth: CGFloat = 520
     public static let pointerOffset = CGPoint(x: 14, y: -18)
     public static let screenMargin: CGFloat = 12
+    /// Header, action bar and padding around the scrolling body.
+    public static let chromeHeight: CGFloat = 133
+
+    /// Cap on the scrolling part of the popup.
+    ///
+    /// A dictionary card with senses, definitions and examples runs past any fixed cap on
+    /// every real lookup, so this decides how much is read without scrolling. Half the
+    /// screen keeps the popup a popup while using a large display when there is one; the
+    /// bounds keep it sane on a laptop and on a 5K panel alike.
+    public static func bodyMaxHeight(forScreenHeight height: CGFloat) -> CGFloat {
+        min(max(height * 0.5, 360), 640)
+    }
 
     /// Width grows with the longest line the popup has to show, within bounds.
     public static func preferredWidth(for state: ViewState) -> CGFloat {

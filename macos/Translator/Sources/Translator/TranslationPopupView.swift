@@ -5,6 +5,8 @@ import TranslatorCore
 /// one physical object; sections morph between phases instead of being replaced.
 struct TranslationPopupView: View {
     @Bindable var model: AppModel
+    /// How tall the scrolling body may grow; the panel derives it from its screen.
+    var bodyMaxHeight: CGFloat
     var onClose: () -> Void
     var onOpenAnki: () -> Void
 
@@ -24,8 +26,11 @@ struct TranslationPopupView: View {
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: Layout.bodyMaxHeight)
+                .frame(maxHeight: bodyMaxHeight)
                 .scrollBounceBehavior(.basedOnSize)
+                // Content continues under the actions rather than stopping at a hard
+                // edge, so there is something to see when there is more to read.
+                .scrollEdgeEffectStyle(.soft, for: .vertical)
                 actionBar
             }
             .padding(Layout.gutter)
