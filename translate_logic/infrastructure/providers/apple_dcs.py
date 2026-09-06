@@ -74,6 +74,10 @@ _CYRILLIC_RE: Final[re.Pattern[str]] = re.compile(r"[А-Яа-яЁё]")
 _LATIN_OR_OPERATOR_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z+=]")
 _ASPECT_RE: Final[re.Pattern[str]] = re.compile(r"\((?:impf|pf|det|indet|iter)\.?\)")
 _LATIN_PAREN_RE: Final[re.Pattern[str]] = re.compile(r"\((?:[^()]*[A-Za-z][^()]*)\)")
+# Oxford appends the case a verb governs as a latin letter: "наталкиваться на + a"
+# (accusative), "следить за + i" (instrumental). It is a grammar note on an otherwise
+# ordinary translation, so it has to go before the latin-letter check rejects the lot.
+_CASE_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"\s*\+\s*[a-z]{1,2}\b\.?")
 _COMBINING_ACUTE: Final[str] = "́"
 _LABEL_CLASSES: Final[tuple[str, ...]] = ("ind", "fld", "lev", "reg")
 _MAX_CANDIDATE_WORDS: Final[int] = 5
@@ -193,6 +197,7 @@ def _split_candidates(translation: str) -> Iterator[str]:
     cleaned = translation.replace(_COMBINING_ACUTE, "").replace("|", "")
     cleaned = _ASPECT_RE.sub("", cleaned)
     cleaned = _LATIN_PAREN_RE.sub("", cleaned)
+    cleaned = _CASE_MARKER_RE.sub("", cleaned)
     for piece in re.split(r"[/,;]", cleaned):
         candidate = piece.strip().strip("()").strip()
         tokens = candidate.split()

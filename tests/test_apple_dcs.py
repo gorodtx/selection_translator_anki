@@ -171,6 +171,19 @@ CROSS_REF_ENTRY = _entry(
     + "</span></span>",
 )
 
+GOVERNED_ENTRY = _entry(
+    "encounter",
+    _headword("encounter")
+    + '<span class="gramb x_xd0"><span class="ps x_xdh">transitive verb <d:pos/></span>'
+    + _sense(
+        "1",
+        "meet",
+        _aspect_pair("ната́лкиваться на + a", "натолкну́ться на + a")
+        + '<span class="trans">следи́ть глаза́ми за + i</span>',
+    )
+    + "</span>",
+)
+
 NOISY_ENTRY = _entry(
     "dabble",
     _headword("dabble")
@@ -377,6 +390,39 @@ def test_candidates_drop_notes_that_are_not_translations() -> None:
     # "осм|а́тривать, -отре́ть". The intact stem is a translation; the dangling affix that
     # follows it is not. The eight-word gloss is a definition, not a gloss to put on a card.
     assert candidates == ["мешать", "осматривать"]
+
+
+def test_candidates_drop_the_case_a_verb_governs() -> None:
+    """ "наталкиваться на + a" is a translation with a grammar note, not a reject.
+
+    The note is a latin letter, so before it was stripped the whole candidate failed the
+    latin check and entries like "come across" produced nothing at all.
+    """
+    info = _card([_record(GOVERNED_ENTRY, "encounter")], query="encounter")
+    assert translation_candidates(info) == [
+        "наталкиваться на",
+        "натолкнуться на",
+        "следить глазами за",
+    ]
+
+
+def test_candidates_keep_a_plus_that_is_not_a_case_marker() -> None:
+    info = _card(
+        [
+            _record(
+                _entry(
+                    "plus",
+                    _headword("plus")
+                    + '<span class="gramb x_xd0"><span class="ps x_xdh">noun</span>'
+                    + _sense("1", "", '<span class="trans">плюс</span>')
+                    + "</span>",
+                ),
+                "plus",
+            )
+        ],
+        query="plus",
+    )
+    assert translation_candidates(info) == ["плюс"]
 
 
 def test_strip_stress_keeps_other_diacritics() -> None:
