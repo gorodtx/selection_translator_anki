@@ -160,6 +160,21 @@ def test_translation_candidates_drop_grammar_fragments() -> None:
     assert definition.candidates() == ["смотреть", "выглядеть", "казаться"]
 
 
+def test_translation_candidates_keep_a_qualifier_whole() -> None:
+    """A qualifier in brackets must survive intact, closing bracket included."""
+    raw = (
+        "present | BrE ˈprɛznt, AmE ˈprɛznt | noun 1 (Grammar) настоя́щее (вре́мя) "
+        "2 (gift) пода́рок"
+    )
+    info = apple.parse_oxford_russian(raw)
+    assert info is not None
+    definition = apple.AppleDefinition(lexical=info, dictionary=OXFORD_RU, raw=raw)
+
+    candidates = definition.candidates()
+    assert candidates == ["настоящее (время)", "подарок"]
+    assert all(c.count("(") == c.count(")") for c in candidates)
+
+
 def test_translation_candidates_keep_verbs_that_govern_a_case() -> None:
     """ "наталкиваться на + a" is a translation with a grammar note, not a reject.
 

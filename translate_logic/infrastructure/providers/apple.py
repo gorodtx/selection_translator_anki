@@ -749,6 +749,16 @@ def _parse_examples(part: str) -> list[ExamplePair]:
     return pairs
 
 
+def _unwrap(fragment: str) -> str:
+    """Drop brackets that wrap a whole fragment, keeping an ordinary qualifier intact.
+
+    ``strip("()")`` would also eat the closing bracket of "настоя́щее (вре́мя)".
+    """
+    if fragment.startswith("(") and fragment.endswith(")"):
+        return fragment[1:-1].strip()
+    return fragment
+
+
 def _translation_candidates(translation: str) -> list[str]:
     if not translation:
         return []
@@ -759,7 +769,10 @@ def _translation_candidates(translation: str) -> list[str]:
     cleaned = _CASE_MARKER_RE.sub("", cleaned)
     candidates: list[str] = []
     for piece in re.split(r"[/,;]", cleaned):
-        piece = piece.strip().strip("()").strip()
+        piece = _unwrap(piece.strip())
+        if piece.count("(") != piece.count(")"):
+            # A qualifier the split cut in half; the halves are not translations.
+            continue
         tokens = piece.split()
         # Dangling prefixes/endings ("по-", "-ать") mark inflection notes, not
         # standalone translations; drop the whole fragment.

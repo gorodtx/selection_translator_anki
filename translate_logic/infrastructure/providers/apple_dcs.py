@@ -191,6 +191,13 @@ def translation_candidates(info: LexicalInfo) -> list[str]:
 # --------------------------------------------------------------------- candidates
 
 
+def _unwrap(fragment: str) -> str:
+    """Drop brackets that wrap a whole fragment, keeping an ordinary qualifier intact."""
+    if fragment.startswith("(") and fragment.endswith(")"):
+        return fragment[1:-1].strip()
+    return fragment
+
+
 def _split_candidates(translation: str) -> Iterator[str]:
     if not translation:
         return
@@ -199,7 +206,10 @@ def _split_candidates(translation: str) -> Iterator[str]:
     cleaned = _LATIN_PAREN_RE.sub("", cleaned)
     cleaned = _CASE_MARKER_RE.sub("", cleaned)
     for piece in re.split(r"[/,;]", cleaned):
-        candidate = piece.strip().strip("()").strip()
+        candidate = _unwrap(piece.strip())
+        if candidate.count("(") != candidate.count(")"):
+            # A qualifier the split cut in half; the halves are not translations.
+            continue
         tokens = candidate.split()
         # "по-" / "-ать" are inflection notes glued to the previous form, never a
         # translation on their own, so the whole fragment goes.

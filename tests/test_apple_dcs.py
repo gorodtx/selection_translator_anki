@@ -425,6 +425,33 @@ def test_candidates_keep_a_plus_that_is_not_a_case_marker() -> None:
     assert translation_candidates(info) == ["плюс"]
 
 
+def test_candidates_keep_a_qualifier_whole() -> None:
+    """ "настоя́щее (вре́мя)" must not lose its closing bracket.
+
+    Stripping brackets from both ends of a fragment ate the qualifier's closing one and
+    put "настоящее (время" on the card.
+    """
+    body = (
+        _headword("present")
+        + '<span class="gramb x_xd0"><span class="ps x_xdh">noun</span>'
+        + _sense("1", "", '<span class="trans">настоя́щее (вре́мя)</span>')
+        + "</span>"
+    )
+    info = _card([_record(_entry("present", body), "present")], query="present")
+    assert translation_candidates(info) == ["настоящее (время)"]
+
+
+def test_candidates_unwrap_a_fully_bracketed_fragment() -> None:
+    body = (
+        _headword("aside")
+        + '<span class="gramb x_xd0"><span class="ps x_xdh">adverb</span>'
+        + _sense("1", "", '<span class="trans">(в сто́рону)</span>')
+        + "</span>"
+    )
+    info = _card([_record(_entry("aside", body), "aside")], query="aside")
+    assert translation_candidates(info) == ["в сторону"]
+
+
 def test_strip_stress_keeps_other_diacritics() -> None:
     assert strip_stress("руче́й") == "ручей"
     assert strip_stress("ёлка") == "ёлка"
