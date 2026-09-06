@@ -74,6 +74,7 @@ class ErrorCode(StrEnum):
     INVALID_PARAMS = "invalid_params"
     NOT_READY = "not_ready"
     NO_ACTIVE_ENTRY = "no_active_entry"
+    ANKI = "anki_error"
     INTERNAL = "internal"
 
 

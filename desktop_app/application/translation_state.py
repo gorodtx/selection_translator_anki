@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from desktop_app.application.examples_state import EntryExamplesState
+from desktop_app.application.history import HistoryItem
+from translate_logic.models import TranslationResult, TranslationStatus
+
+
+@dataclass(slots=True)
+class TranslationMemory:
+    text: str = ""
+    lookup_text: str = ""
+    result: TranslationResult | None = None
+    entry_id: int | None = None
+    examples_state: EntryExamplesState | None = None
+
+    def reset(self) -> None:
+        self.text = ""
+        self.lookup_text = ""
+        self.result = None
+        self.entry_id = None
+        self.examples_state = None
+
+    def update(
+        self,
+        text: str,
+        result: TranslationResult | None,
+        *,
+        lookup_text: str = "",
+    ) -> None:
+        self.text = text
+        self.lookup_text = lookup_text
+        self.result = result
+        self.entry_id = None
+        self.examples_state = None
+
+    def set_entry(self, item: HistoryItem) -> None:
+        self.text = item.text
+        self.lookup_text = item.lookup_text
+        self.result = item.result
+        self.entry_id = item.entry_id
+        self.examples_state = item.examples_state
+
+    def can_reuse(self, text: str, *, loading: bool) -> bool:
+        if loading:
+            return False
+        normalized = text.strip()
+        if not normalized:
+            return False
+        if normalized != self.text.strip():
+            return False
+        if self.result is None:
+            return False
+        if self.result.status is TranslationStatus.EMPTY:
+            return False
+        return True
+
+
+@dataclass(slots=True)
+class TranslationRequest:
+    current_id: int = 0
+    active_id: int | None = None
+    _presented: bool = False
+
+    def next_id(self) -> int:
+        self.current_id += 1
+        self.active_id = self.current_id
+        self._presented = False
+        return self.current_id
+
+    def invalidate(self) -> int:
+        self.current_id += 1
+        self.active_id = None
+        self._presented = False
+        return self.current_id
+
+    def is_active(self, request_id: int) -> bool:
+        return request_id == self.active_id
+
+    def should_present(self, is_visible: bool) -> bool:
+        del is_visible
+        return self.active_id is not None and not self._presented
+
+    def mark_presented(self) -> None:
+        self._presented = True
+
+
+@dataclass(slots=True)
+class TranslationState:
+    memory: TranslationMemory = field(default_factory=TranslationMemory)
+    request: TranslationRequest = field(default_factory=TranslationRequest)
