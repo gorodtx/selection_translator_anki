@@ -6,6 +6,7 @@ from pathlib import Path
 import stat
 import sys
 import textwrap
+from typing import cast
 
 import pytest
 
@@ -13,6 +14,7 @@ from translate_logic.infrastructure.providers import apple
 from translate_logic.models import (
     Example,
     FieldValue,
+    LexicalInfo,
     TranslationResult,
 )
 
@@ -293,6 +295,90 @@ def test_helper_client_survives_process_crash(fake_helper: Path) -> None:
             await helper.close()
 
     asyncio.run(scenario())
+
+
+def _write_big_reply_helper(tmp_path: Path, payload_bytes: int) -> Path:
+    """A helper whose `define` reply is one very long NDJSON line."""
+    script = tmp_path / "big-apple-lang-helper"
+    body = textwrap.dedent(
+        f"""\
+        #!{sys.executable}
+        import json, sys
+        BIG = "x" * {payload_bytes}
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            req = json.loads(line)
+            rid = req.get("id", "0")
+            if req.get("op") == "define":
+                out = {{"id": rid, "ok": True, "result": {{"records": [
+                    {{"dictionary": "d", "headword": "x", "title": None,
+                      "anchor": None, "markup": BIG}}]}}}}
+            else:
+                out = {{"id": rid, "ok": True, "result": {{"pong": True}}}}
+            sys.stdout.write(json.dumps(out) + "\\n")
+            sys.stdout.flush()
+        """
+    )
+    script.write_text(body, encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return script
+
+
+def test_helper_client_reads_entries_larger_than_the_default_stream_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """asyncio streams default to 64 KB; Oxford's `set` article is ~106 KB.
+
+    Before the limit was raised, readline() raised mid-read, the reader task
+    died and every later request on that process returned nothing.
+    """
+    monkeypatch.setattr(apple.sys, "platform", "darwin")
+    script = _write_big_reply_helper(tmp_path, 300_000)
+    seen: list[int] = []
+
+    class _FakeDcs:
+        @staticmethod
+        def records_from_json(payload: object) -> list[dict[str, object]]:
+            assert isinstance(payload, list)
+            records: list[dict[str, object]] = []
+            for item in cast(list[object], payload):
+                assert isinstance(item, dict)
+                records.append(cast(dict[str, object], item))
+            return records
+
+        @staticmethod
+        def lexical_from_records(
+            records: list[dict[str, object]], *, query: str
+        ) -> LexicalInfo:
+            del query
+            markup = records[0]["markup"]
+            assert isinstance(markup, str)
+            seen.append(len(markup))
+            return LexicalInfo(headword="x")
+
+    def _import_module(name: str) -> object:
+        assert name.endswith("apple_dcs")
+        return _FakeDcs
+
+    monkeypatch.setattr(apple.importlib, "import_module", _import_module)
+
+    async def scenario() -> None:
+        helper = apple.AppleLangHelper(binary=script)
+        try:
+            definition = await helper.define("set", timeout=10.0)
+            assert definition is not None
+            # The process survives: a second request still answers.
+            second = await helper.define("set", timeout=10.0)
+            assert second is not None
+        finally:
+            await helper.close()
+
+    asyncio.run(scenario())
+
+    assert seen == [300_000, 300_000]
+    assert apple.STREAM_LIMIT_BYTES > 64 * 1024
 
 
 def test_lookup_runs_define_and_translate_together(fake_helper: Path) -> None:

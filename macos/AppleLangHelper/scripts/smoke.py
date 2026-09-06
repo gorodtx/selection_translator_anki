@@ -14,9 +14,27 @@ REQUESTS = [
     {"id": 1, "op": "ping"},
     {"id": 2, "op": "dictionaries"},
     {"id": 3, "op": "availability", "source": "en", "target": "ru"},
-    {"id": 4, "op": "define", "term": "bank", "dictionary": "Oxford Russian", "include_markup": False},
-    {"id": 5, "op": "define", "term": "look up", "dictionary": "Oxford Russian", "max_records": 1},
-    {"id": 6, "op": "translate", "text": "How are you doing today?", "source": "en", "target": "ru"},
+    {
+        "id": 4,
+        "op": "define",
+        "term": "bank",
+        "dictionary": "Oxford Russian",
+        "include_markup": False,
+    },
+    {
+        "id": 5,
+        "op": "define",
+        "term": "look up",
+        "dictionary": "Oxford Russian",
+        "max_records": 1,
+    },
+    {
+        "id": 6,
+        "op": "translate",
+        "text": "How are you doing today?",
+        "source": "en",
+        "target": "ru",
+    },
     {"id": 7, "op": "text_definition", "term": "nevertheless"},
     "garbage line",
     {"id": 8, "op": "shutdown"},
@@ -25,7 +43,12 @@ REQUESTS = [
 
 def main() -> int:
     proc = subprocess.Popen(
-        [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+        [BIN],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
     )
     assert proc.stdin and proc.stdout
     sel = selectors.DefaultSelector()

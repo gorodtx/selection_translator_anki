@@ -37,6 +37,10 @@ DEFAULT_TRANSLATE_TIMEOUT_S: Final[float] = 1.5
 DEFAULT_STATUS_TIMEOUT_S: Final[float] = 3.0
 _SPAWN_FAILURE_LIMIT: Final[int] = 3
 _MAX_RECORDS: Final[int] = 8
+# Dictionary entry markup is large: the Oxford article for `set` is ~106 KB and
+# arrives as one NDJSON line. asyncio's default stream limit is 64 KB, which
+# raised ValueError mid-read and silently killed the reader task.
+STREAM_LIMIT_BYTES: Final[int] = 8 << 20
 _TRANSLATION_UNAVAILABLE_CODES: Final[frozenset[str]] = frozenset(
     {
         "not_installed",
@@ -336,6 +340,7 @@ class AppleLangHelper:
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,
+                    limit=STREAM_LIMIT_BYTES,
                 )
             except OSError as exc:
                 self._spawn_failures += 1
@@ -349,7 +354,12 @@ class AppleLangHelper:
         assert stdout is not None
         try:
             while True:
-                line = await stdout.readline()
+                try:
+                    line = await stdout.readline()
+                except (asyncio.LimitOverrunError, ValueError):
+                    # One oversized entry must not take the sidecar down with it.
+                    _LOGGER.warning("apple helper sent an oversized line; dropping it")
+                    continue
                 if not line:
                     break
                 try:
