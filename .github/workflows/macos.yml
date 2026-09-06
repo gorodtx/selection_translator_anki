@@ -28,7 +28,7 @@ jobs:
         run: uv sync --frozen --dev
 
       - name: ruff check
-        run: uv run --frozen ruff check desktop_app translate_logic tests
+        run: uv run --frozen ruff check .
 
       - name: ruff format (changed files only)
         run: |

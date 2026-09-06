@@ -110,7 +110,9 @@ def test_run_blocks_avoid_bash_4_builtins() -> None:
 def test_gate_runs_lint_types_and_tests() -> None:
     commands = _commands("gate")
 
-    assert "ruff check" in commands
+    # The gate must cover every Python file in the repo, not a hand-picked list:
+    # macos/Translator/scripts/mock_backend.py slipped past a narrower check.
+    assert "ruff check ." in commands
     assert "ruff format --check" in commands
     assert "mypy" in commands
     assert "pytest" in commands

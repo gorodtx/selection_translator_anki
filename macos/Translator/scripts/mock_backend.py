@@ -43,9 +43,16 @@ TRANSLATIONS: dict[str, dict[str, object]] = {
                             "index": 1,
                             "label": "of river",
                             "translation": "бе́рег",
-                            "examples": [{"en": "bank of clouds", "ru": "гряда́ облако́в"}],
+                            "examples": [
+                                {"en": "bank of clouds", "ru": "гряда́ облако́в"}
+                            ],
                         },
-                        {"index": 2, "label": "Finance", "translation": "банк", "examples": []},
+                        {
+                            "index": 2,
+                            "label": "Finance",
+                            "translation": "банк",
+                            "examples": [],
+                        },
                     ],
                 },
                 {
@@ -78,7 +85,9 @@ TRANSLATIONS: dict[str, dict[str, object]] = {
                             "index": 1,
                             "label": "visit",
                             "translation": "навеща́ть (impf) / навести́ть (pf)",
-                            "examples": [{"en": "look up trains", "ru": "посмотре́ть расписа́ние"}],
+                            "examples": [
+                                {"en": "look up trains", "ru": "посмотре́ть расписа́ние"}
+                            ],
                         }
                     ],
                 }
@@ -94,7 +103,9 @@ DEFAULT = {
 }
 
 
-def view_state(text: str, *, loading: bool, final: bool, entry_id: int | None) -> dict[str, object]:
+def view_state(
+    text: str, *, loading: bool, final: bool, entry_id: int | None
+) -> dict[str, object]:
     data = TRANSLATIONS.get(text.strip().lower(), DEFAULT)
     return {
         "original": text.strip(),
@@ -127,7 +138,9 @@ class Backend:
     # -- events -------------------------------------------------------------
 
     def broadcast(self, event: str, payload: dict[str, object]) -> None:
-        line = (json.dumps({"event": event, "payload": payload}, ensure_ascii=False) + "\n").encode()
+        line = (
+            json.dumps({"event": event, "payload": payload}, ensure_ascii=False) + "\n"
+        ).encode()
         with self.lock:
             targets = list(self.clients)
         for client in targets:
@@ -171,13 +184,17 @@ class Backend:
         self.entry_id += 1
         self.current = text
         state = view_state(text, loading=True, final=False, entry_id=self.entry_id)
-        threading.Thread(target=self._finish_translation, args=(text, self.entry_id), daemon=True).start()
+        threading.Thread(
+            target=self._finish_translation, args=(text, self.entry_id), daemon=True
+        ).start()
         return {"request_id": self.request_id, "state": state}
 
     def _finish_translation(self, text: str, entry_id: int) -> None:
         time.sleep(0.15)
         partial = view_state(text, loading=True, final=False, entry_id=entry_id)
-        partial["translation"] = TRANSLATIONS.get(text.strip().lower(), DEFAULT)["translation"]
+        partial["translation"] = TRANSLATIONS.get(text.strip().lower(), DEFAULT)[
+            "translation"
+        ]
         self.emit_translation("partial", partial)
         time.sleep(0.5)
         final = view_state(text, loading=False, final=True, entry_id=entry_id)
@@ -193,7 +210,9 @@ class Backend:
                 "examples": [item["en"] for item in final["examples"]],
             },
         )
-        self.broadcast("notification", {"message": "Translation ready.", "level": "success"})
+        self.broadcast(
+            "notification", {"message": "Translation ready.", "level": "success"}
+        )
 
     def do_cancel(self, _: dict[str, object]) -> dict[str, object]:
         return {}
@@ -205,25 +224,33 @@ class Backend:
 
     def do_history_select(self, params: dict[str, object]) -> dict[str, object]:
         entry_id = int(params.get("entry_id", 0))
-        item = next((entry for entry in self.history if entry["entry_id"] == entry_id), None)
+        item = next(
+            (entry for entry in self.history if entry["entry_id"] == entry_id), None
+        )
         if item is None:
             raise LookupError("no_active_entry")
         self.request_id += 1
         self.current = str(item["text"])
         return {
             "request_id": self.request_id,
-            "state": view_state(str(item["text"]), loading=False, final=True, entry_id=entry_id),
+            "state": view_state(
+                str(item["text"]), loading=False, final=True, entry_id=entry_id
+            ),
         }
 
     def do_examples_refresh(self, _: dict[str, object]) -> dict[str, object]:
-        state = view_state(self.current, loading=False, final=True, entry_id=self.entry_id)
+        state = view_state(
+            self.current, loading=False, final=True, entry_id=self.entry_id
+        )
         rotated = list(state["examples"])
         rotated.reverse()
         state["examples"] = rotated
         return {"state": state, "changed": bool(rotated)}
 
     def do_copy_all(self, _: dict[str, object]) -> dict[str, object]:
-        state = view_state(self.current, loading=False, final=True, entry_id=self.entry_id)
+        state = view_state(
+            self.current, loading=False, final=True, entry_id=self.entry_id
+        )
         lines = [str(state["original"]), str(state["translation"])]
         lines += [str(item) for item in state["definitions_items"]]
         lines += [str(item["en"]) for item in state["examples"]]
@@ -263,11 +290,17 @@ class Backend:
     def do_anki_prepare_upsert(self, _: dict[str, object]) -> dict[str, object]:
         if self.fail_anki:
             raise RuntimeError("AnkiConnect is not reachable.")
-        state = view_state(self.current, loading=False, final=True, entry_id=self.entry_id)
+        state = view_state(
+            self.current, loading=False, final=True, entry_id=self.entry_id
+        )
         return {
             "preview": {
                 "values": {
-                    "translations": [t.strip() for t in str(state["translation"]).split(";") if t.strip()],
+                    "translations": [
+                        t.strip()
+                        for t in str(state["translation"]).split(";")
+                        if t.strip()
+                    ],
                     "definitions_en": list(state["definitions_items"]),
                     "examples_en": [str(item["en"]) for item in state["examples"]],
                     "image_path": None,
@@ -282,7 +315,13 @@ class Backend:
                         "image": None,
                     }
                 ],
-                "available_fields": ["Word", "Translation", "Example", "definitions_en", "image"],
+                "available_fields": [
+                    "Word",
+                    "Translation",
+                    "Example",
+                    "definitions_en",
+                    "image",
+                ],
             }
         }
 
@@ -360,18 +399,46 @@ class Handler(socketserver.BaseRequestHandler):
             method = payload["method"]
             params = payload.get("params") or {}
         except Exception:
-            self._send(client, {"id": None, "ok": False, "error": {"code": "bad_request", "message": "Malformed JSON."}})
+            self._send(
+                client,
+                {
+                    "id": None,
+                    "ok": False,
+                    "error": {"code": "bad_request", "message": "Malformed JSON."},
+                },
+            )
             return
         try:
             result = self.backend.handle(method, params)
         except KeyError:
-            self._send(client, {"id": request_id, "ok": False, "error": {"code": "unknown_method", "message": method}})
+            self._send(
+                client,
+                {
+                    "id": request_id,
+                    "ok": False,
+                    "error": {"code": "unknown_method", "message": method},
+                },
+            )
             return
         except LookupError as exc:
-            self._send(client, {"id": request_id, "ok": False, "error": {"code": "no_active_entry", "message": str(exc)}})
+            self._send(
+                client,
+                {
+                    "id": request_id,
+                    "ok": False,
+                    "error": {"code": "no_active_entry", "message": str(exc)},
+                },
+            )
             return
         except Exception as exc:  # noqa: BLE001 - mock surfaces any failure verbatim
-            self._send(client, {"id": request_id, "ok": False, "error": {"code": "anki_error", "message": str(exc)}})
+            self._send(
+                client,
+                {
+                    "id": request_id,
+                    "ok": False,
+                    "error": {"code": "anki_error", "message": str(exc)},
+                },
+            )
             return
         self._send(client, {"id": request_id, "ok": True, "result": result})
 
@@ -393,7 +460,9 @@ def main() -> int:
         Path.home() / "Library/Application Support/Translator/run/backend.sock"
     )
     parser.add_argument("--socket", default=default_socket)
-    parser.add_argument("--fail-anki", action="store_true", help="report AnkiConnect as unreachable")
+    parser.add_argument(
+        "--fail-anki", action="store_true", help="report AnkiConnect as unreachable"
+    )
     args = parser.parse_args()
 
     path = Path(args.socket).expanduser()
