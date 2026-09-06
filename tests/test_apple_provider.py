@@ -154,7 +154,32 @@ def test_translation_candidates_drop_grammar_fragments() -> None:
     assert info is not None
     definition = apple.AppleDefinition(lexical=info, dictionary=OXFORD_RU, raw=raw)
 
-    assert definition.candidates() == ["смотреть", "казаться"]
+    # "по-" is a dangling prefix and goes. "выглядеть + i" is a translation carrying
+    # the case it governs, so only the marker goes and the verb stays; dropping it
+    # whole is what left "come across" with no candidates at all.
+    assert definition.candidates() == ["смотреть", "выглядеть", "казаться"]
+
+
+def test_translation_candidates_keep_verbs_that_govern_a_case() -> None:
+    """ "наталкиваться на + a" is a translation with a grammar note, not a reject.
+
+    The note is a latin letter, and the cleaner rejects latin letters, so entries whose
+    senses all govern a case used to produce nothing: "come across" had no candidates
+    at all despite three aspect pairs.
+    """
+    raw = (
+        "come across | BrE kʌm, AmE kəm | verb 1 (encounter) ната́лкиваться на + a, "
+        "натолкну́ться на + a 2 (care for) следи́ть глаза́ми за + i"
+    )
+    info = apple.parse_oxford_russian(raw)
+    assert info is not None
+    definition = apple.AppleDefinition(lexical=info, dictionary=OXFORD_RU, raw=raw)
+
+    assert definition.candidates() == [
+        "наталкиваться на",
+        "натолкнуться на",
+        "следить глазами за",
+    ]
 
 
 def _write_fake_helper(tmp_path: Path, *, with_markup: bool = False) -> Path:

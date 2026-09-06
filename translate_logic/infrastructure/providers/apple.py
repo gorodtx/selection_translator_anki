@@ -81,6 +81,10 @@ _HOMOGRAPH_RE: Final[re.Pattern[str]] = re.compile(r"\s+\d+$")
 _IPA_RE: Final[re.Pattern[str]] = re.compile(r"(BrE|AmE)\s+([^,|]+)")
 _TRAILING_GLOSS_RE: Final[re.Pattern[str]] = re.compile(r"\s*\([^()А-Яа-яЁё]*\)\s*$")
 _LATIN_OR_OPERATOR_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z+=]")
+# The case a verb governs, written as a latin letter after a plus: "наталкиваться
+# на + a", "следить за + i". Same rule as apple_dcs._CASE_MARKER_RE; both cleaners
+# have to agree, since the flat-text path never reaches that module.
+_CASE_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"\s*\+\s*[a-z]{1,2}\b\.?")
 
 
 def _new_pending() -> dict[str, asyncio.Future[JsonObject]]:
@@ -752,6 +756,7 @@ def _translation_candidates(translation: str) -> list[str]:
     cleaned = _ASPECT_RE.sub("", cleaned)
     cleaned = cleaned.replace("|", "")
     cleaned = re.sub(r"\((?:[^()]*[A-Za-z][^()]*)\)", "", cleaned)
+    cleaned = _CASE_MARKER_RE.sub("", cleaned)
     candidates: list[str] = []
     for piece in re.split(r"[/,;]", cleaned):
         piece = piece.strip().strip("()").strip()
