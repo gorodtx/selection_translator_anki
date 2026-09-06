@@ -45,7 +45,12 @@ from desktop_app.platform.macos.ipc.protocol import (
     translation_state_event,
 )
 from desktop_app.application.translation_state import TranslationState
-from translate_logic.models import Example, TranslationResult, TranslationStatus
+from translate_logic.models import (
+    Example,
+    LexicalInfo,
+    TranslationResult,
+    TranslationStatus,
+)
 from translate_logic.shared.highlight import build_highlight_spec, highlight_to_markdown
 
 type Emit = Callable[[Event, JsonObject], None]
@@ -63,6 +68,8 @@ class StateSnapshot:
     request_id: int
     state: TranslationViewState
     entry_id: int | None
+    lexical: LexicalInfo | None = None
+    translation_raw: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +127,8 @@ class BackendSession:
             request_id=self._state.request.current_id,
             state=self._presenter.state,
             entry_id=self._state.memory.entry_id,
+            lexical=self._current_lexical(),
+            translation_raw=self._current_translation_raw(),
         )
 
     # --- translation ----------------------------------------------------------
@@ -509,8 +518,24 @@ class BackendSession:
                 phase=phase,
                 state=self._presenter.state,
                 entry_id=self._state.memory.entry_id,
+                lexical=self._current_lexical(),
+                translation_raw=self._current_translation_raw(),
             ),
         )
+
+    def _current_translation_raw(self) -> str | None:
+        result = self._state.memory.result
+        if result is None or not result.translation_ru.is_present:
+            return None
+        if not self._presenter.state.translation.strip():
+            return None
+        return result.translation_ru.text
+
+    def _current_lexical(self) -> LexicalInfo | None:
+        result = self._state.memory.result
+        if result is None or self._presenter.state.loading:
+            return None
+        return result.lexical
 
     def _notify(self, notification: Notification) -> None:
         self._emit(Event.NOTIFICATION, notification_to_json(notification))

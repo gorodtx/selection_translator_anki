@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Callable
+import concurrent.futures
 import contextlib
 import logging
 from logging.handlers import RotatingFileHandler
@@ -54,6 +55,7 @@ from desktop_app.platform.macos.session import (
 from translate_logic.infrastructure.language_base.locations import (
     resolve_offline_base_file,
 )
+from translate_logic.infrastructure.providers import apple
 
 BACKEND_VERSION: Final[str] = "0.3.0"
 _ANKI_TIMEOUT_S: Final[float] = 20.0
@@ -68,8 +70,8 @@ _DB_FILES: Final[dict[str, str]] = {
 logger = logging.getLogger(__name__)
 
 
-def engine_status() -> dict[str, bool]:
-    return {"apple_dictionary": False, "apple_translation": False}
+def engine_status() -> JsonObject:
+    return apple.engine_status()
 
 
 def db_status() -> JsonObject:
@@ -88,13 +90,15 @@ class BackendApi:
         loop: asyncio.AbstractEventLoop,
         socket_path: Path,
         request_shutdown: Callable[[], None],
-        engines: Callable[[], dict[str, bool]] = engine_status,
+        engines: Callable[[], JsonObject] = engine_status,
+        refresh_engines: Callable[[], None] | None = None,
     ) -> None:
         self._session = session
         self._loop = loop
         self._socket_path = socket_path
         self._request_shutdown = request_shutdown
         self._engines = engines
+        self._refresh_engines = refresh_engines
 
     async def handle(self, request: Request) -> JsonObject:
         try:
@@ -194,6 +198,9 @@ class BackendApi:
         raise ProtocolDecodeError(ErrorCode.UNKNOWN_METHOD, f"Unhandled {method}.")
 
     def _ping(self) -> JsonObject:
+        engines = self._engines()
+        if engines.get("stale") is True and self._refresh_engines is not None:
+            self._refresh_engines()
         return {
             "version": BACKEND_VERSION,
             "protocol": PROTOCOL_VERSION,
@@ -201,7 +208,7 @@ class BackendApi:
             "platform": sys.platform,
             "socket": str(self._socket_path),
             "db": db_status(),
-            "engines": dict(self._engines()),
+            "engines": engines,
         }
 
     async def _await_reply[T](
@@ -222,7 +229,12 @@ class BackendApi:
 def _snapshot_json(snapshot: StateSnapshot) -> JsonObject:
     return {
         "request_id": snapshot.request_id,
-        "state": view_state_to_json(snapshot.state, entry_id=snapshot.entry_id),
+        "state": view_state_to_json(
+            snapshot.state,
+            entry_id=snapshot.entry_id,
+            lexical=snapshot.lexical,
+            translation_raw=snapshot.translation_raw,
+        ),
     }
 
 
@@ -258,12 +270,22 @@ class Daemon:
             emit=emit,
             save_config=save_config,
         )
+
+        def refresh_engines() -> None:
+            future = asyncio.run_coroutine_threadsafe(
+                apple.refresh_status(), services.runtime.loop
+            )
+            future.add_done_callback(_log_engine_refresh)
+
         api = BackendApi(
             session=session,
             loop=loop,
             socket_path=self._socket_path,
             request_shutdown=self.request_stop,
+            refresh_engines=refresh_engines,
         )
+        if apple.is_available():
+            refresh_engines()
         server = IpcServer(socket_path=self._socket_path, handler=api.handle)
         for signum in (signal.SIGINT, signal.SIGTERM):
             with contextlib.suppress(NotImplementedError, RuntimeError):
@@ -281,6 +303,24 @@ class Daemon:
             with contextlib.suppress(OSError):
                 if pid_path is not None and pid_path.exists():
                     pid_path.unlink()
+
+
+def _log_engine_refresh(
+    future: concurrent.futures.Future[apple.AppleEngineStatus | None],
+) -> None:
+    try:
+        status = future.result()
+    except Exception:
+        logger.exception("apple engine status refresh failed")
+        return
+    if status is None:
+        logger.info("apple engines unavailable")
+        return
+    logger.info(
+        "apple engines: dictionaries=%s translation=%s",
+        list(status.dictionaries),
+        status.translation_status,
+    )
 
 
 async def _close_services(services: AppServices) -> None:

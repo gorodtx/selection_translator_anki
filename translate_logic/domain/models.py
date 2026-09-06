@@ -47,10 +47,43 @@ class TranslationStatus(Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class ExamplePair:
+    en: str
+    ru: str
+
+
+@dataclass(frozen=True, slots=True)
+class LexicalSense:
+    index: int
+    label: str
+    translation: str
+    examples: tuple[ExamplePair, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class LexicalEntry:
+    pos: str
+    senses: tuple[LexicalSense, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class LexicalInfo:
+    """Dictionary-grade data (IPA, parts of speech, numbered senses) that the
+    plain translation string cannot carry; populated by on-device engines."""
+
+    headword: str
+    ipa_uk: str = ""
+    ipa_us: str = ""
+    entries: tuple[LexicalEntry, ...] = ()
+    source: str = "apple_dictionary"
+
+
+@dataclass(frozen=True, slots=True)
 class TranslationResult:
     translation_ru: FieldValue
     definitions_en: tuple[str, ...] = ()
     examples: tuple[Example, ...] = ()
+    lexical: LexicalInfo | None = None
 
     @classmethod
     def empty(cls) -> "TranslationResult":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import sys
 import types
@@ -34,6 +35,9 @@ def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool:
 
 def pytest_configure(config: pytest.Config) -> None:
     del config
+    # Keep the suite deterministic: the Apple sidecar is only exercised by tests
+    # that opt in explicitly (see tests/test_apple_provider.py).
+    os.environ.setdefault("TRANSLATOR_DISABLE_APPLE_ENGINES", "1")
     _install_gi_stub_if_missing()
 
 

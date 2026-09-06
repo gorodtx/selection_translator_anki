@@ -6,6 +6,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 import logging
+import re
 import time
 from collections.abc import Coroutine
 from typing import Callable, Final
@@ -29,9 +30,11 @@ from translate_logic.infrastructure.language_base.definitions_base import (
 from translate_logic.models import (
     Example,
     FieldValue,
+    LexicalInfo,
     TranslationLimit,
     TranslationResult,
 )
+from translate_logic.infrastructure.providers import apple
 from translate_logic.infrastructure.providers.cambridge import (
     CambridgeResult,
     translate_cambridge,
@@ -52,6 +55,8 @@ from translate_logic.shared.text import (
     normalize_whitespace,
 )
 from translate_logic.shared.translation import (
+    TranslationSeparator,
+    clean_translations,
     limit_translations,
     merge_translations,
     partition_translations,
@@ -99,6 +104,9 @@ _DEFINITIONS_LIMIT: Final[int] = 5
 _DEFINITIONS_PRIMARY_LIMIT: Final[int] = 5
 _DEFINITIONS_QUERY_MAX_WORDS: Final[int] = 5
 _CAMBRIDGE_FALLBACK_MAX_WORDS: Final[int] = 5
+_APPLE_FINAL_WAIT_S: Final[float] = 0.35
+_APPLE_PARTIAL_CANDIDATES: Final[int] = 3
+_CYRILLIC_RE: Final[re.Pattern[str]] = re.compile(r"[А-Яа-яЁё]")
 
 
 def build_latency_fetcher(
@@ -153,6 +161,210 @@ async def translate_async(
 
 
 async def _translate_with_fetcher_async(
+    text: str,
+    source_lang: str,
+    target_lang: str,
+    lookup_text: str | None,
+    fetcher: AsyncFetcher,
+    language_base: LanguageBase | None = None,
+    definitions_base: DefinitionsBase | None = None,
+    on_partial: Callable[[TranslationResult], None] | None = None,
+) -> TranslationResult:
+    """Run the network pipeline and, on macOS, race it against Apple's engines.
+
+    The on-device dictionary and translator answer in a few milliseconds, so
+    their result can become the first partial; the final result merges Apple
+    senses/examples into whatever the network sources produced.
+    """
+    network_text = text.strip()
+    resolved_lookup_text = (
+        normalize_lookup_text(lookup_text or network_text) if network_text else ""
+    )
+    if not network_text or not resolved_lookup_text or not apple.is_available():
+        return await _translate_network_async(
+            text,
+            source_lang,
+            target_lang,
+            lookup_text,
+            fetcher,
+            language_base,
+            definitions_base,
+            on_partial,
+        )
+    apple_task = _start_lookup_task(
+        apple.lookup(
+            text=network_text,
+            lookup_text=resolved_lookup_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+    )
+    partial_emitted = False
+
+    def forward_partial(result: TranslationResult) -> None:
+        nonlocal partial_emitted
+        partial_emitted = True
+        if on_partial is not None:
+            on_partial(result)
+
+    async def apple_partial_watch() -> None:
+        try:
+            apple_lookup = await asyncio.shield(apple_task)
+        except Exception:
+            return
+        if partial_emitted:
+            return
+        candidate = _apple_partial_candidate(
+            apple_lookup, query=resolved_lookup_text, target_lang=target_lang
+        )
+        if candidate is None:
+            return
+        _log_stage_elapsed("apple_partial", 0.0)
+        forward_partial(TranslationResult(translation_ru=FieldValue.present(candidate)))
+
+    watcher = (
+        asyncio.create_task(apple_partial_watch()) if on_partial is not None else None
+    )
+    try:
+        result = await _translate_network_async(
+            text,
+            source_lang,
+            target_lang,
+            lookup_text,
+            fetcher,
+            language_base,
+            definitions_base,
+            forward_partial,
+        )
+    finally:
+        if watcher is not None and not watcher.done():
+            watcher.cancel()
+            with suppress(asyncio.CancelledError):
+                await watcher
+    apple_lookup = await _resolve_apple_lookup(apple_task)
+    return merge_apple_lookup(
+        result, apple_lookup, query=resolved_lookup_text, target_lang=target_lang
+    )
+
+
+async def _resolve_apple_lookup(
+    task: asyncio.Task[apple.AppleLookup],
+) -> apple.AppleLookup | None:
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), _APPLE_FINAL_WAIT_S)
+    except (TimeoutError, asyncio.CancelledError):
+        await _cancel_lookup_task(task)
+        return None
+    except Exception:
+        return None
+
+
+def _apple_definition_applies(definition: apple.AppleDefinition, query: str) -> bool:
+    return definition.matches(query) or count_words(query) == 1
+
+
+def _apple_machine_candidate(
+    machine_translation: str | None, *, query: str, target_lang: str
+) -> str | None:
+    if not machine_translation:
+        return None
+    candidate = normalize_whitespace(machine_translation)
+    if not candidate or candidate.casefold() == query.casefold():
+        return None
+    if target_lang == "ru" and not _CYRILLIC_RE.search(candidate):
+        return None
+    return candidate
+
+
+def _apple_partial_candidate(
+    lookup: apple.AppleLookup, *, query: str, target_lang: str
+) -> str | None:
+    machine = _apple_machine_candidate(
+        lookup.machine_translation, query=query, target_lang=target_lang
+    )
+    if machine is not None:
+        return machine
+    definition = lookup.definition
+    if definition is None or not _apple_definition_applies(definition, query):
+        return None
+    candidates = clean_translations(definition.candidates())[:_APPLE_PARTIAL_CANDIDATES]
+    if not candidates:
+        return None
+    return TranslationSeparator.DEFAULT.value.join(candidates)
+
+
+def merge_apple_lookup(
+    result: TranslationResult,
+    lookup: apple.AppleLookup | None,
+    *,
+    query: str,
+    target_lang: str,
+) -> TranslationResult:
+    if lookup is None or lookup.is_empty:
+        return result
+    definition = lookup.definition
+    applies = definition is not None and _apple_definition_applies(definition, query)
+    dictionary_candidates = (
+        clean_translations(definition.candidates())
+        if definition is not None and applies
+        else []
+    )
+    machine = _apple_machine_candidate(
+        lookup.machine_translation, query=query, target_lang=target_lang
+    )
+    existing = (
+        _split_translations(result.translation_ru.text)
+        if result.translation_ru.is_present
+        else []
+    )
+    apple_candidates = list(dictionary_candidates)
+    if machine is not None:
+        apple_candidates = merge_translations(
+            apple_candidates, clean_translations([machine])
+        )
+    if existing:
+        merged = limit_translations(
+            merge_translations(existing, apple_candidates),
+            TranslationLimit.PRIMARY.value,
+        )
+    elif apple_candidates:
+        merged = limit_translations(apple_candidates, TranslationLimit.PRIMARY.value)
+    elif machine is not None:
+        merged = [machine]
+    else:
+        merged = []
+    translation_text = (
+        TranslationSeparator.DEFAULT.value.join(merged) if merged else None
+    )
+    examples = list(result.examples)
+    lexical: LexicalInfo | None = None
+    if definition is not None and applies:
+        lexical = definition.lexical
+        apple_examples = filter_examples(
+            [Example(en=sentence) for sentence in definition.example_sentences()]
+        )
+        if apple_examples:
+            examples = _merge_examples(primary=examples, fallback=apple_examples)
+    if (
+        translation_text == (result.translation_ru.text or None)
+        and examples == list(result.examples)
+        and lexical is None
+    ):
+        return result
+    return TranslationResult(
+        translation_ru=FieldValue.from_optional(translation_text),
+        definitions_en=result.definitions_en,
+        examples=tuple(examples),
+        lexical=lexical,
+    )
+
+
+def _split_translations(text: str) -> list[str]:
+    parts = [part.strip() for part in text.split(TranslationSeparator.DEFAULT.value)]
+    return [part for part in parts if part]
+
+
+async def _translate_network_async(
     text: str,
     source_lang: str,
     target_lang: str,

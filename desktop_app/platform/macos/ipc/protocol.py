@@ -26,6 +26,7 @@ from desktop_app.application.view_state import TranslationViewState
 from desktop_app.config import AppConfig, JsonValue, config_from_dict, config_to_dict
 from desktop_app.infrastructure.anki import AnkiListResult
 from desktop_app.infrastructure.notifications.models import Notification
+from translate_logic.models import LexicalInfo
 
 PROTOCOL_VERSION: Final[int] = 1
 MAX_LINE_BYTES: Final[int] = 1 << 20
@@ -189,15 +190,51 @@ def get_object(params: JsonObject, key: str) -> JsonObject:
 # --- domain → JSON -----------------------------------------------------------
 
 
+def lexical_to_json(info: LexicalInfo | None) -> JsonObject | None:
+    if info is None:
+        return None
+    entries: list[JsonValue] = []
+    for entry in info.entries:
+        senses: list[JsonValue] = []
+        for sense in entry.senses:
+            senses.append(
+                {
+                    "index": sense.index,
+                    "label": sense.label,
+                    "translation": sense.translation,
+                    "examples": [
+                        {"en": pair.en, "ru": pair.ru} for pair in sense.examples
+                    ],
+                }
+            )
+        entries.append({"pos": entry.pos, "senses": senses})
+    return {
+        "headword": info.headword,
+        "ipa_uk": info.ipa_uk,
+        "ipa_us": info.ipa_us,
+        "entries": entries,
+        "source": info.source,
+    }
+
+
 def view_state_to_json(
     state: TranslationViewState,
     *,
     entry_id: int | None,
+    lexical: LexicalInfo | None = None,
+    translation_raw: str | None = None,
 ) -> JsonObject:
     return {
         "original": state.original,
         "original_raw": state.original_raw,
         "translation": state.translation,
+        # ``translation`` is hard-wrapped for the GTK label; native clients
+        # should lay out the unwrapped text themselves.
+        "translation_raw": (
+            translation_raw
+            if translation_raw is not None
+            else state.translation.replace("\n", " ")
+        ),
         "definitions_items": list(state.definitions_items),
         "examples": [{"en": item.en} for item in state.examples],
         "can_refresh_examples": state.can_refresh_examples,
@@ -205,6 +242,7 @@ def view_state_to_json(
         "loading": state.loading,
         "can_add_anki": state.can_add_anki,
         "entry_id": entry_id,
+        "apple": lexical_to_json(lexical),
     }
 
 
@@ -214,11 +252,18 @@ def translation_state_event(
     phase: Phase,
     state: TranslationViewState,
     entry_id: int | None,
+    lexical: LexicalInfo | None = None,
+    translation_raw: str | None = None,
 ) -> JsonObject:
     return {
         "request_id": request_id,
         "phase": str(phase),
-        "state": view_state_to_json(state, entry_id=entry_id),
+        "state": view_state_to_json(
+            state,
+            entry_id=entry_id,
+            lexical=lexical,
+            translation_raw=translation_raw,
+        ),
     }
 
 
