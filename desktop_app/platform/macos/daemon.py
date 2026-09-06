@@ -310,6 +310,9 @@ def _log_engine_refresh(
 ) -> None:
     try:
         status = future.result()
+    except concurrent.futures.CancelledError:
+        # Shutdown raced the probe; nothing to report.
+        return
     except Exception:
         logger.exception("apple engine status refresh failed")
         return

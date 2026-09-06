@@ -21,9 +21,15 @@ from translate_logic.application.pipeline.translate import (
 )
 from translate_logic.infrastructure.http.transport import AsyncFetcher
 from translate_logic.infrastructure.language_base.base import LanguageBase
-from translate_logic.infrastructure.language_base.definitions_base import DefinitionsBase
-from translate_logic.infrastructure.language_base.definitions_provider import DefinitionsBaseProvider
-from translate_logic.infrastructure.language_base.multi_provider import MultiLanguageBaseProvider
+from translate_logic.infrastructure.language_base.definitions_base import (
+    DefinitionsBase,
+)
+from translate_logic.infrastructure.language_base.definitions_provider import (
+    DefinitionsBaseProvider,
+)
+from translate_logic.infrastructure.language_base.multi_provider import (
+    MultiLanguageBaseProvider,
+)
 from translate_logic.infrastructure.language_base.provider import (
     LanguageBaseProvider,
     default_fallback_language_base_path,
@@ -125,7 +131,7 @@ class TranslationService:
             future = asyncio.run_coroutine_threadsafe(
                 self._ensure_fetcher(), self.runtime.loop
             )
-            future.add_done_callback(lambda done: done.exception())
+            future.add_done_callback(_drain_warmup_future)
             if _should_warmup_language_base():
                 resources_future = asyncio.run_coroutine_threadsafe(
                     warmup_pipeline_resources(
@@ -134,7 +140,7 @@ class TranslationService:
                     ),
                     self.runtime.loop,
                 )
-                resources_future.add_done_callback(lambda done: done.exception())
+                resources_future.add_done_callback(_drain_warmup_future)
         except Exception:
             return
 
@@ -262,6 +268,15 @@ class TranslationService:
         if session is None:
             return
         await session.close()
+
+
+def _drain_warmup_future[T](future: Future[T]) -> None:
+    # Swallow the result so a cancelled warmup does not surface as an
+    # unhandled exception in the callback (noisy under launchd).
+    try:
+        future.exception()
+    except Exception:
+        return
 
 
 def _cache_key(text: str, source_lang: str, target_lang: str) -> str:
