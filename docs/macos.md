@@ -128,7 +128,12 @@ The flat path has two gaps the structured one closes:
 
 Whichever path answers, the pipeline still guards against a mismatched entry:
 a definition whose headword does not match is only applied to single-word
-queries.
+queries, and phrasal blocks belonging to another phrase are dropped. An
+inflected form resolves to the base article, so `went` arrives as the whole of
+`go`: 26 blocks, 22 of them phrasal verbs like `go about` and `go back` that
+translate nothing the reader asked for. Filtering them leaves 5 blocks and 17
+candidates instead of 26 and 33. A record that is itself phrasal, such as
+`look up`, is left untouched.
 
 Over a wider 38-word probe the structured path answered 35. The three that did
 not are dictionary gaps rather than parser defects, and the network providers
