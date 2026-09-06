@@ -37,6 +37,8 @@ DEFAULT_TRANSLATE_TIMEOUT_S: Final[float] = 1.5
 DEFAULT_STATUS_TIMEOUT_S: Final[float] = 3.0
 _SPAWN_FAILURE_LIMIT: Final[int] = 3
 _MAX_RECORDS: Final[int] = 8
+# `apple_dcs` labels a phrasal sub-entry as "<phrase> · <part of speech>".
+_PHRASAL_POS_SEPARATOR: Final[str] = " · "
 # Dictionary entry markup is large: the Oxford article for `set` is ~106 KB and
 # arrives as one NDJSON line. asyncio's default stream limit is 64 KB, which
 # raised ValueError mid-read and silently killed the reader task.
@@ -570,6 +572,7 @@ def _definition_from_records(
     lexical = lexical_from_records(records, query=query)
     if lexical is None:
         return None
+    lexical = focus_on_query(lexical, query=query)
     dictionary = _first_record_dictionary(result)
     first_markup = ""
     first = _as_object(records_raw[0])
@@ -578,6 +581,44 @@ def _definition_from_records(
         if isinstance(markup, str):
             first_markup = markup
     return AppleDefinition(lexical=lexical, dictionary=dictionary, raw=first_markup)
+
+
+def focus_on_query(info: LexicalInfo, *, query: str) -> LexicalInfo:
+    """Drop phrasal sub-entries that belong to a different phrase.
+
+    An inflected form resolves to the base article: `went` returns all of `go`,
+    whose 26 blocks include 22 phrasal verbs (`go about`, `go back`, ...). None
+    of them translate the query, and they crowd both the card and the candidate
+    list. A block is kept when its part of speech names no phrase, or names the
+    query itself, so `look up` (already a phrasal record) survives untouched.
+    """
+    if not info.entries:
+        return info
+    normalized_query = _normalize_key(query)
+    kept = tuple(
+        entry
+        for entry in info.entries
+        if _entry_phrase(entry.pos) in {"", normalized_query}
+    )
+    if len(kept) == len(info.entries):
+        return info
+    if not kept:
+        return info
+    return LexicalInfo(
+        headword=info.headword,
+        ipa_uk=info.ipa_uk,
+        ipa_us=info.ipa_us,
+        entries=kept,
+        source=info.source,
+    )
+
+
+def _entry_phrase(pos: str) -> str:
+    """The phrase a phrasal sub-entry belongs to, or "" for a plain block."""
+    head, separator, _ = pos.partition(_PHRASAL_POS_SEPARATOR)
+    if not separator:
+        return ""
+    return _normalize_key(head)
 
 
 def _definition_from_flat_text(

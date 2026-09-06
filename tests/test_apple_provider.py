@@ -14,7 +14,9 @@ from translate_logic.infrastructure.providers import apple
 from translate_logic.models import (
     Example,
     FieldValue,
+    LexicalEntry,
     LexicalInfo,
+    LexicalSense,
     TranslationResult,
 )
 
@@ -444,3 +446,80 @@ def test_merge_apple_lookup_extends_translation_examples_and_lexical() -> None:
     )
     assert phrasal.lexical is None
     assert phrasal.translation_ru == base.translation_ru
+
+
+def _entry(pos: str, translation: str) -> LexicalEntry:
+    return LexicalEntry(
+        pos=pos, senses=(LexicalSense(index=1, label="", translation=translation),)
+    )
+
+
+def test_focus_on_query_drops_foreign_phrasal_blocks() -> None:
+    """`went` resolves to the whole `go` article, phrasal verbs included."""
+    info = LexicalInfo(
+        headword="went",
+        ipa_uk="ɡɛt",
+        entries=(
+            _entry("noun", "движение"),
+            _entry("intransitive verb", "ходить"),
+            _entry("go about · intransitive verb", "приниматься"),
+            _entry("go back · intransitive verb", "возвращаться"),
+            _entry("go up · intransitive verb", "подниматься"),
+        ),
+    )
+
+    focused = apple.focus_on_query(info, query="went")
+
+    assert [entry.pos for entry in focused.entries] == ["noun", "intransitive verb"]
+    # Everything else about the card survives.
+    assert focused.headword == "went"
+    assert focused.ipa_uk == "ɡɛt"
+
+
+def test_focus_on_query_keeps_the_block_that_matches_the_query() -> None:
+    info = LexicalInfo(
+        headword="go",
+        entries=(
+            _entry("intransitive verb", "ходить"),
+            _entry("go back · intransitive verb", "возвращаться"),
+            _entry("go up · intransitive verb", "подниматься"),
+        ),
+    )
+
+    focused = apple.focus_on_query(info, query="go back")
+
+    assert [entry.pos for entry in focused.entries] == [
+        "intransitive verb",
+        "go back · intransitive verb",
+    ]
+
+
+def test_focus_on_query_leaves_plain_and_phrasal_records_untouched() -> None:
+    # `look up` arrives as its own record, so nothing is labelled with a phrase.
+    phrasal = LexicalInfo(
+        headword="look up",
+        entries=(
+            _entry("transitive verb", "навещать"),
+            _entry("intransitive verb", "искать"),
+        ),
+    )
+    assert apple.focus_on_query(phrasal, query="look up") is phrasal
+
+    # Homograph markers are not phrase labels.
+    homographs = LexicalInfo(
+        headword="bank",
+        entries=(_entry("noun¹", "берег"), _entry("noun³", "банк")),
+    )
+    assert apple.focus_on_query(homographs, query="bank") is homographs
+
+    assert apple.focus_on_query(LexicalInfo(headword="x"), query="x").entries == ()
+
+
+def test_focus_on_query_keeps_everything_when_nothing_would_remain() -> None:
+    # A card with only foreign phrasal blocks is still better than an empty one.
+    info = LexicalInfo(
+        headword="go",
+        entries=(_entry("go back · intransitive verb", "возвращаться"),),
+    )
+
+    assert apple.focus_on_query(info, query="went") is info
