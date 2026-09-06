@@ -51,7 +51,7 @@ struct TranslationPopupView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.state.displayOriginal.isEmpty ? "—" : model.state.displayOriginal)
+                Text(model.state.originalText.isEmpty ? "—" : model.state.originalText)
                     .font(.popupHeadword)
                     .tracking(-0.4)
                     .lineLimit(3)
@@ -98,7 +98,7 @@ struct TranslationPopupView: View {
                     ProgressView().controlSize(.mini)
                 }
             }
-            Text(model.state.displayTranslation)
+            Text(model.state.translationText)
                 .font(.popupTranslation)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)

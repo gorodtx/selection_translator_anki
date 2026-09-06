@@ -109,6 +109,22 @@ import Testing
         #expect(state.hasTranslation)
     }
 
+    @Test func prefersUnwrappedTranslation() throws {
+        let json = """
+        {"original":"in spite of","translation":"a\\nb","translation_raw":"a b"}
+        """
+        let state = try IPCCoding.decoder.decode(ViewState.self, from: Data(json.utf8))
+        #expect(state.translationText == "a b")
+        #expect(state.hasTranslation)
+    }
+
+    @Test func fallsBackToUnwrappingTheGtkText() throws {
+        let json = #"{"original":"bank","translation":"\u0431\u0435\u0440\u0435\u0433\nбанк"}"#
+        let state = try IPCCoding.decoder.decode(ViewState.self, from: Data(json.utf8))
+        #expect(state.translationRaw.isEmpty)
+        #expect(state.translationText == "берег банк")
+    }
+
     @Test func toleratesMissingFields() throws {
         let state = try IPCCoding.decoder.decode(ViewState.self, from: Data("{}".utf8))
         #expect(state.isEmpty)
@@ -144,6 +160,13 @@ import Testing
         #expect(apple.groupedEntries.count == 1)
         #expect(apple.groupedEntries[0].pos == "noun")
         #expect(apple.groupedEntries[0].senses[0].translation == "берег")
+    }
+
+    @Test func decodesAppleSource() throws {
+        let json = #"{"apple":{"headword":"bank","entries":[],"source":"apple_dictionary"}}"#
+        let state = try IPCCoding.decoder.decode(ViewState.self, from: Data(json.utf8))
+        #expect(state.apple?.source == "apple_dictionary")
+        #expect(state.apple?.hasContent == false)
     }
 }
 
@@ -249,6 +272,25 @@ import Testing
         #expect(ping.engines.appleDictionary)
         #expect(!ping.engines.appleTranslation)
     }
+
+    @Test func decodesEngineDiagnostics() throws {
+        let json = """
+        {"engines":{"apple_dictionary":true,"apple_translation":false,
+          "translation_status":"supported","dictionaries":["Oxford Russian"],
+          "helper":"/usr/local/bin/apple-lang-helper","stale":false}}
+        """
+        let ping = try IPCCoding.decoder.decode(PingInfo.self, from: Data(json.utf8))
+        #expect(ping.engines.translationStatus == "supported")
+        #expect(ping.engines.dictionaries == ["Oxford Russian"])
+        #expect(ping.engines.helper == "/usr/local/bin/apple-lang-helper")
+    }
+
+    @Test func toleratesEnginesWithoutDiagnostics() throws {
+        let ping = try IPCCoding.decoder.decode(PingInfo.self, from: Data("{}".utf8))
+        #expect(ping.engines.translationStatus == "unknown")
+        #expect(ping.engines.dictionaries.isEmpty)
+        #expect(ping.engines.helper == nil)
+    }
 }
 
 @Suite("Unwrapped text")
@@ -266,9 +308,9 @@ struct UnwrappedTextTests {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let state = try decoder.decode(ViewState.self, from: Data(json.utf8))
 
-        #expect(state.displayTranslation == "перевод в две строки")
-        #expect(state.displayOriginal == "a very long query")
-        #expect(!state.displayTranslation.contains("\n"))
+        #expect(state.translationText == "перевод в две строки")
+        #expect(state.originalText == "a very long query")
+        #expect(!state.translationText.contains("\n"))
     }
 
     @Test func fallsBackToWrappedWhenRawIsAbsent() throws {
@@ -281,7 +323,7 @@ struct UnwrappedTextTests {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let state = try decoder.decode(ViewState.self, from: Data(json.utf8))
 
-        #expect(state.displayTranslation == "банк")
-        #expect(state.displayOriginal == "bank")
+        #expect(state.translationText == "банк")
+        #expect(state.originalText == "bank")
     }
 }

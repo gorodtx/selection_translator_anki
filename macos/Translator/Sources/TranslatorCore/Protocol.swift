@@ -147,6 +147,8 @@ public struct AppleLexical: Codable, Equatable, Hashable, Sendable {
     public var senses: [AppleSense]
     /// Grouped by part of speech (current payload shape).
     public var entries: [AppleEntry]
+    /// Which engine produced this card, e.g. "apple_dictionary".
+    public var source: String
 
     public init(
         headword: String = "",
@@ -154,7 +156,8 @@ public struct AppleLexical: Codable, Equatable, Hashable, Sendable {
         ipaUs: String = "",
         pos: String = "",
         senses: [AppleSense] = [],
-        entries: [AppleEntry] = []
+        entries: [AppleEntry] = [],
+        source: String = ""
     ) {
         self.headword = headword
         self.ipaUk = ipaUk
@@ -162,6 +165,7 @@ public struct AppleLexical: Codable, Equatable, Hashable, Sendable {
         self.pos = pos
         self.senses = senses
         self.entries = entries
+        self.source = source
     }
 
     public init(from decoder: Decoder) throws {
@@ -172,6 +176,7 @@ public struct AppleLexical: Codable, Equatable, Hashable, Sendable {
         pos = c.value(String.self, .pos, default: "")
         senses = c.value([AppleSense].self, .senses, default: [])
         entries = c.value([AppleEntry].self, .entries, default: [])
+        source = c.value(String.self, .source, default: "")
     }
 
     /// Entries regardless of which payload shape arrived.
@@ -189,9 +194,8 @@ public struct AppleLexical: Codable, Equatable, Hashable, Sendable {
 public struct ViewState: Codable, Equatable, Hashable, Sendable {
     public var original: String
     public var originalRaw: String
+    /// Hard-wrapped for the GTK label; native clients lay out `translationRaw` instead.
     public var translation: String
-    /// Unwrapped translation. `translation` is hard-wrapped at 52 columns for the
-    /// GTK label; a native layout must wrap it itself.
     public var translationRaw: String
     public var definitionsItems: [String]
     public var examples: [ExampleItem]
@@ -235,7 +239,7 @@ public struct ViewState: Codable, Equatable, Hashable, Sendable {
         original = c.value(String.self, .original, default: "")
         originalRaw = c.value(String.self, .originalRaw, default: "")
         translation = c.value(String.self, .translation, default: "")
-        translationRaw = c.value(String.self, .translationRaw, default: translation)
+        translationRaw = c.value(String.self, .translationRaw, default: "")
         definitionsItems = c.value([String].self, .definitionsItems, default: [])
         examples = c.value([ExampleItem].self, .examples, default: [])
         canRefreshExamples = c.value(Bool.self, .canRefreshExamples, default: false)
@@ -246,18 +250,18 @@ public struct ViewState: Codable, Equatable, Hashable, Sendable {
         apple = c.optional(AppleLexical.self, .apple)
     }
 
-    public var hasTranslation: Bool { !translation.isEmpty }
-    public var isEmpty: Bool { original.isEmpty && translation.isEmpty }
-
-    /// Text to render: the unwrapped forms, falling back to the wrapped ones so
-    /// an older backend still displays correctly.
-    public var displayTranslation: String {
-        translationRaw.isEmpty ? translation : translationRaw
+    /// Unwrapped text to display; falls back to the wrapped one on older backends.
+    public var translationText: String {
+        translationRaw.isEmpty ? translation.replacingOccurrences(of: "\n", with: " ") : translationRaw
     }
 
-    public var displayOriginal: String {
-        originalRaw.isEmpty ? original : originalRaw
+    /// `original` is hard-wrapped the same way; prefer this everywhere it is shown.
+    public var originalText: String {
+        originalRaw.isEmpty ? original.replacingOccurrences(of: "\n", with: " ") : originalRaw
     }
+
+    public var hasTranslation: Bool { !translationText.isEmpty }
+    public var isEmpty: Bool { original.isEmpty && translationText.isEmpty }
 }
 
 // MARK: - Responses
@@ -288,16 +292,32 @@ public struct PingInfo: Codable, Equatable, Sendable {
     public struct Engines: Codable, Equatable, Sendable {
         public var appleDictionary: Bool
         public var appleTranslation: Bool
+        /// "installed" | "supported" | "unsupported" | "unknown" — why translation is off.
+        public var translationStatus: String
+        public var dictionaries: [String]
+        public var helper: String?
 
-        public init(appleDictionary: Bool = false, appleTranslation: Bool = false) {
+        public init(
+            appleDictionary: Bool = false,
+            appleTranslation: Bool = false,
+            translationStatus: String = "unknown",
+            dictionaries: [String] = [],
+            helper: String? = nil
+        ) {
             self.appleDictionary = appleDictionary
             self.appleTranslation = appleTranslation
+            self.translationStatus = translationStatus
+            self.dictionaries = dictionaries
+            self.helper = helper
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             appleDictionary = c.value(Bool.self, .appleDictionary, default: false)
             appleTranslation = c.value(Bool.self, .appleTranslation, default: false)
+            translationStatus = c.value(String.self, .translationStatus, default: "unknown")
+            dictionaries = c.value([String].self, .dictionaries, default: [])
+            helper = c.optional(String.self, .helper)
         }
     }
 

@@ -35,6 +35,7 @@ TRANSLATIONS: dict[str, dict[str, object]] = {
             "headword": "bank",
             "ipa_uk": "baŋk",
             "ipa_us": "bæŋk",
+            "source": "apple_dictionary",
             "entries": [
                 {
                     "pos": "noun",
@@ -77,6 +78,7 @@ TRANSLATIONS: dict[str, dict[str, object]] = {
             "headword": "look up",
             "ipa_uk": "lʊk",
             "ipa_us": "lʊk",
+            "source": "apple_dictionary",
             "entries": [
                 {
                     "pos": "transitive verb",
@@ -107,10 +109,14 @@ def view_state(
     text: str, *, loading: bool, final: bool, entry_id: int | None
 ) -> dict[str, object]:
     data = TRANSLATIONS.get(text.strip().lower(), DEFAULT)
+    translation = str(data["translation"]) if not loading or final else ""
     return {
         "original": text.strip(),
         "original_raw": text,
-        "translation": data["translation"] if not loading or final else "",
+        # The daemon hard-wraps ``translation`` for the GTK label and sends the
+        # unwrapped text separately; native clients read ``translation_raw``.
+        "translation": translation.replace("; ", ";\n"),
+        "translation_raw": translation,
         "definitions_items": list(data["definitions"]) if final else [],
         "examples": [{"en": item} for item in data["examples"]] if final else [],
         "can_refresh_examples": final and bool(data["examples"]),
@@ -118,7 +124,7 @@ def view_state(
         "loading": loading,
         "can_add_anki": final,
         "entry_id": entry_id,
-        **({"apple": data["apple"]} if final and data["apple"] else {}),
+        "apple": data["apple"] if final else None,
     }
 
 
@@ -192,9 +198,9 @@ class Backend:
     def _finish_translation(self, text: str, entry_id: int) -> None:
         time.sleep(0.15)
         partial = view_state(text, loading=True, final=False, entry_id=entry_id)
-        partial["translation"] = TRANSLATIONS.get(text.strip().lower(), DEFAULT)[
-            "translation"
-        ]
+        gloss = str(TRANSLATIONS.get(text.strip().lower(), DEFAULT)["translation"])
+        partial["translation"] = gloss.replace("; ", ";\n")
+        partial["translation_raw"] = gloss
         self.emit_translation("partial", partial)
         time.sleep(0.5)
         final = view_state(text, loading=False, final=True, entry_id=entry_id)
@@ -205,7 +211,7 @@ class Backend:
                 "entry_id": entry_id,
                 "text": text.strip(),
                 "lookup_text": text.strip().lower(),
-                "translation": final["translation"],
+                "translation": final["translation_raw"],
                 "definitions_en": final["definitions_items"],
                 "examples": [item["en"] for item in final["examples"]],
             },
@@ -251,7 +257,7 @@ class Backend:
         state = view_state(
             self.current, loading=False, final=True, entry_id=self.entry_id
         )
-        lines = [str(state["original"]), str(state["translation"])]
+        lines = [str(state["original"]), str(state["translation_raw"])]
         lines += [str(item) for item in state["definitions_items"]]
         lines += [str(item["en"]) for item in state["examples"]]
         return {"text": "\n".join(line for line in lines if line)}
@@ -298,7 +304,7 @@ class Backend:
                 "values": {
                     "translations": [
                         t.strip()
-                        for t in str(state["translation"]).split(";")
+                        for t in str(state["translation_raw"]).split(";")
                         if t.strip()
                     ],
                     "definitions_en": list(state["definitions_items"]),
