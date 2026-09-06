@@ -10,7 +10,12 @@ import textwrap
 import pytest
 
 from translate_logic.infrastructure.providers import apple
-from translate_logic.models import Example, FieldValue, TranslationResult
+from translate_logic.models import (
+    Example,
+    FieldValue,
+    LexicalInfo,
+    TranslationResult,
+)
 
 BANK_RAW = (
     "bank 1 | BrE baŋk, AmE bæŋk | noun 1 (of river) бе́рег 2 (under-water shelf) "
@@ -130,36 +135,55 @@ def test_translation_candidates_drop_grammar_fragments() -> None:
     assert definition.candidates() == ["смотреть", "казаться"]
 
 
-def _write_fake_helper(tmp_path: Path) -> Path:
+def _write_fake_helper(tmp_path: Path, *, with_markup: bool = False) -> Path:
+    """A stand-in for the Swift sidecar speaking the same NDJSON protocol."""
     script = tmp_path / "fake-apple-lang-helper"
     body = textwrap.dedent(
         f"""\
         #!{sys.executable}
         import json, sys
         BANK = {BANK_RAW!r}
+        DICT = {OXFORD_RU!r}
+        WITH_MARKUP = {with_markup!r}
         for line in sys.stdin:
             line = line.strip()
             if not line:
                 continue
             req = json.loads(line)
-            rid = req.get("id", 0)
+            rid = req.get("id", "0")
             op = req.get("op")
-            if op == "status":
-                out = {{"id": rid, "ok": True, "result": {{"dictionaries": ["{OXFORD_RU}"],
-                        "translation": {{"status": "supported", "supportedCount": 38}}}}}}
+            term = req.get("term") or ""
+            if op == "ping":
+                out = {{"id": rid, "ok": True, "result": {{"pong": True, "version": "test"}}}}
+            elif op in ("availability", "dictionaries"):
+                out = {{"id": rid, "ok": True, "result": {{
+                    "source": req.get("source", "en"), "target": req.get("target", "ru"),
+                    "status": "supported",
+                    "dictionaries": [{{"name": DICT, "short_name": None}}]}}}}
             elif op == "define":
-                hits = []
-                if req.get("text", "").lower().startswith("bank"):
-                    hits.append({{"dictionary": "{OXFORD_RU}", "raw": BANK}})
-                out = {{"id": rid, "ok": True, "result": {{"results": hits}}}}
+                records = []
+                if term.lower().startswith("bank"):
+                    records.append({{"dictionary": DICT, "headword": "bank", "title": None,
+                                     "anchor": None,
+                                     "markup": "<html/>" if WITH_MARKUP else None}})
+                out = {{"id": rid, "ok": True, "result": {{"records": records, "elapsed_ms": 1.0}}}}
+            elif op == "text_definition":
+                text = BANK if term.lower().startswith("bank") else ""
+                out = {{"id": rid, "ok": True, "result": {{"text": text, "elapsed_ms": 1.0}}}}
             elif op == "translate":
                 text = req.get("text", "")
                 if text.startswith("ok:"):
-                    out = {{"id": rid, "ok": True, "result": {{"text": "перевод " + text[3:], "source": "en", "target": "ru"}}}}
+                    out = {{"id": rid, "ok": True, "result": {{"text": "перевод " + text[3:],
+                            "source": "en", "target": "ru", "elapsed_ms": 1.0}}}}
                 elif text == "crash":
                     sys.exit(3)
                 else:
-                    out = {{"id": rid, "ok": False, "error": {{"code": "not_installed", "message": "notInstalled"}}}}
+                    out = {{"id": rid, "ok": False, "error": {{
+                        "code": "translation_not_installed", "message": "notInstalled"}}}}
+            elif op == "shutdown":
+                sys.stdout.write(json.dumps({{"id": rid, "ok": True, "result": {{}}}}) + "\\n")
+                sys.stdout.flush()
+                break
             else:
                 out = {{"id": rid, "ok": False, "error": {{"code": "unknown_op", "message": op}}}}
             sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\\n")
@@ -189,9 +213,12 @@ def test_helper_client_defines_translates_and_reports_status(fake_helper: Path) 
             assert status.dictionaries == (OXFORD_RU,)
             assert not status.translation_installed
 
+            # No markup in the records, so the client falls back to the flat
+            # DCSCopyTextDefinition text and parses it itself.
             definition = await helper.define("bank")
             assert definition is not None
             assert definition.lexical.headword == "bank"
+            assert definition.dictionary == OXFORD_RU
             assert await helper.define("zzz") is None
 
             assert await helper.translate("hello", source="en", target="ru") is None
@@ -201,6 +228,46 @@ def test_helper_client_defines_translates_and_reports_status(fake_helper: Path) 
             await helper.close()
 
     asyncio.run(scenario())
+
+
+def test_helper_client_prefers_structured_records_when_markup_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _write_fake_helper(tmp_path, with_markup=True)
+    monkeypatch.setattr(apple.sys, "platform", "darwin")
+    calls: list[str] = []
+
+    class _FakeDcs:
+        @staticmethod
+        def records_from_json(payload: object) -> list[object]:
+            calls.append("records_from_json")
+            assert isinstance(payload, list)
+            return list(payload)
+
+        @staticmethod
+        def lexical_from_records(records: object, *, query: str) -> LexicalInfo:
+            calls.append(f"lexical_from_records:{query}")
+            del records
+            return LexicalInfo(headword="bank", ipa_uk="baŋk", ipa_us="bæŋk")
+
+    monkeypatch.setattr(
+        apple.importlib,
+        "import_module",
+        lambda name: _FakeDcs,  # type: ignore[arg-type]
+    )
+
+    async def scenario() -> apple.AppleDefinition | None:
+        helper = apple.AppleLangHelper(binary=script)
+        try:
+            return await helper.define("bank")
+        finally:
+            await helper.close()
+
+    definition = asyncio.run(scenario())
+
+    assert definition is not None
+    assert definition.lexical.ipa_uk == "baŋk"
+    assert calls == ["records_from_json", "lexical_from_records:bank"]
 
 
 def test_helper_client_survives_process_crash(fake_helper: Path) -> None:

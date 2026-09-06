@@ -10,7 +10,8 @@ structured senses, IPA and EN→RU example pairs.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Callable, Sequence
+import importlib
 from dataclasses import dataclass, field
 import json
 import logging
@@ -35,6 +36,17 @@ DEFAULT_DEFINE_TIMEOUT_S: Final[float] = 0.6
 DEFAULT_TRANSLATE_TIMEOUT_S: Final[float] = 1.5
 DEFAULT_STATUS_TIMEOUT_S: Final[float] = 3.0
 _SPAWN_FAILURE_LIMIT: Final[int] = 3
+_MAX_RECORDS: Final[int] = 8
+_TRANSLATION_UNAVAILABLE_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "not_installed",
+        "unsupported",
+        "translation_not_installed",
+        "translation_unsupported",
+        "translation_failed",
+        "unsupported_os",
+    }
+)
 _STATUS_TTL_S: Final[float] = 300.0
 _MAX_CANDIDATE_WORDS: Final[int] = 5
 _COMBINING_ACUTE: Final[str] = "́"
@@ -65,7 +77,7 @@ _TRAILING_GLOSS_RE: Final[re.Pattern[str]] = re.compile(r"\s*\([^()А-Яа-яЁ�
 _LATIN_OR_OPERATOR_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z+=]")
 
 
-def _new_pending() -> dict[int, asyncio.Future[JsonObject]]:
+def _new_pending() -> dict[str, asyncio.Future[JsonObject]]:
     return {}
 
 
@@ -170,10 +182,18 @@ def is_available() -> bool:
 
 @dataclass(slots=True)
 class AppleLangHelper:
+    """Client for the ``apple-lang-helper`` sidecar (NDJSON over stdio).
+
+    Protocol (see ``macos/AppleLangHelper``): requests carry a string ``id``
+    and an ``op`` (``ping``/``availability``/``dictionaries``/``define``/
+    ``text_definition``/``translate``/``shutdown``); responses echo the id
+    with ``ok`` plus ``result`` or ``error{code,message}``.
+    """
+
     binary: Path
     _process: asyncio.subprocess.Process | None = None
     _reader: asyncio.Task[None] | None = None
-    _pending: dict[int, asyncio.Future[JsonObject]] = field(
+    _pending: dict[str, asyncio.Future[JsonObject]] = field(
         default_factory=_new_pending
     )
     _next_id: int = 1
@@ -183,11 +203,22 @@ class AppleLangHelper:
     async def define(
         self, text: str, *, timeout: float = DEFAULT_DEFINE_TIMEOUT_S
     ) -> AppleDefinition | None:
-        result = await self.request("define", text=text, timeout=timeout)
-        hits = result.get("results")
-        if not isinstance(hits, list):
+        result = await self.request(
+            "define",
+            timeout=timeout,
+            term=text,
+            max_records=_MAX_RECORDS,
+            include_markup=True,
+        )
+        definition = _definition_from_records(result, query=text)
+        if definition is not None:
+            return definition
+        dictionary = _first_record_dictionary(result)
+        flat = await self.request("text_definition", timeout=timeout, term=text)
+        raw = flat.get("text")
+        if not isinstance(raw, str) or not raw.strip():
             return None
-        return _pick_definition(hits, query=text)
+        return _definition_from_flat_text(raw, dictionary=dictionary, query=text)
 
     async def translate(
         self,
@@ -199,10 +230,10 @@ class AppleLangHelper:
     ) -> str | None:
         try:
             result = await self.request(
-                "translate", text=text, source=source, target=target, timeout=timeout
+                "translate", timeout=timeout, text=text, source=source, target=target
             )
         except AppleHelperError as exc:
-            if exc.code in {"not_installed", "unsupported"}:
+            if exc.code in _TRANSLATION_UNAVAILABLE_CODES:
                 return None
             raise
         translated = result.get("text")
@@ -219,20 +250,11 @@ class AppleLangHelper:
         timeout: float = DEFAULT_STATUS_TIMEOUT_S,
     ) -> AppleEngineStatus:
         result = await self.request(
-            "status", source=source, target=target, timeout=timeout
+            "availability", timeout=timeout, source=source, target=target
         )
-        dictionaries_raw = result.get("dictionaries")
-        dictionaries = (
-            tuple(item for item in dictionaries_raw if isinstance(item, str))
-            if isinstance(dictionaries_raw, list)
-            else ()
-        )
-        translation = result.get("translation")
-        status = "unknown"
-        if isinstance(translation, dict):
-            raw_status = translation.get("status")
-            if isinstance(raw_status, str):
-                status = raw_status
+        dictionaries = _dictionary_names(result.get("dictionaries"))
+        raw_status = result.get("status")
+        status = raw_status if isinstance(raw_status, str) else "unknown"
         return AppleEngineStatus(
             dictionary_available=bool(dictionaries),
             dictionaries=dictionaries,
@@ -241,27 +263,18 @@ class AppleLangHelper:
         )
 
     async def request(
-        self,
-        op: str,
-        *,
-        text: str | None = None,
-        source: str | None = None,
-        target: str | None = None,
-        timeout: float,
+        self, op: str, *, timeout: float, **fields: JsonValue
     ) -> JsonObject:
         process = await self._ensure_process()
         if process.stdin is None:
             raise AppleHelperError("spawn_failed", "helper stdin unavailable")
         loop = asyncio.get_running_loop()
-        request_id = self._next_id
+        request_id = str(self._next_id)
         self._next_id += 1
         payload: JsonObject = {"id": request_id, "op": op}
-        if text is not None:
-            payload["text"] = text
-        if source is not None:
-            payload["source"] = source
-        if target is not None:
-            payload["target"] = target
+        for key, value in fields.items():
+            if value is not None:
+                payload[key] = value
         future: asyncio.Future[JsonObject] = loop.create_future()
         self._pending[request_id] = future
         try:
@@ -276,7 +289,9 @@ class AppleLangHelper:
             ) from exc
         finally:
             self._pending.pop(request_id, None)
-        if message.get("ok") is True:
+        if message.get("ok") is True or (
+            "ok" not in message and message.get("error") is None
+        ):
             result = message.get("result")
             return result if isinstance(result, dict) else {}
         error = message.get("error")
@@ -344,10 +359,10 @@ class AppleLangHelper:
                 message = _as_object(decoded)
                 if message is None:
                     continue
-                request_id = message.get("id")
-                if not isinstance(request_id, int):
+                raw_id = message.get("id")
+                if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)):
                     continue
-                future = self._pending.get(request_id)
+                future = self._pending.get(str(raw_id))
                 if future is not None and not future.done():
                     future.set_result(message)
                     self._spawn_failures = 0
@@ -486,28 +501,91 @@ async def _safe_translate(
 # --- parsing -------------------------------------------------------------------------------
 
 
-def _pick_definition(hits: Iterable[object], *, query: str) -> AppleDefinition | None:
-    parsed: list[AppleDefinition] = []
-    for item in hits:
-        hit = _as_object(item)
-        if hit is None:
+def _dictionary_names(value: JsonValue | None) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    names: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            names.append(item)
             continue
-        raw = hit.get("raw")
-        dictionary = hit.get("dictionary")
-        if not isinstance(raw, str) or not isinstance(dictionary, str):
+        entry = _as_object(item)
+        if entry is None:
             continue
-        if not any(marker in dictionary for marker in _RU_DICTIONARY_MARKERS):
-            continue
-        lexical = parse_oxford_russian(raw)
-        if lexical is None:
-            continue
-        parsed.append(AppleDefinition(lexical=lexical, dictionary=dictionary, raw=raw))
-    if not parsed:
+        name = entry.get("name")
+        if isinstance(name, str):
+            names.append(name)
+    return tuple(names)
+
+
+def _first_record_dictionary(result: JsonObject) -> str:
+    records = result.get("records")
+    if isinstance(records, list):
+        for item in records:
+            record = _as_object(item)
+            if record is None:
+                continue
+            dictionary = record.get("dictionary")
+            if isinstance(dictionary, str) and dictionary:
+                return dictionary
+    return ""
+
+
+def _definition_from_records(
+    result: JsonObject, *, query: str
+) -> AppleDefinition | None:
+    """Structured path: XHTML records parsed by ``apple_dcs`` when present."""
+    records_raw = result.get("records")
+    if not isinstance(records_raw, list) or not records_raw:
         return None
-    for definition in parsed:
-        if definition.matches(query):
-            return definition
-    return parsed[0]
+    if not any(
+        isinstance(record := _as_object(item), dict)
+        and isinstance(record.get("markup"), str)
+        for item in records_raw
+    ):
+        return None
+    try:
+        module = importlib.import_module(
+            "translate_logic.infrastructure.providers.apple_dcs"
+        )
+    except ImportError:
+        return None
+    records_from_json = cast(
+        Callable[[object], Sequence[object]], getattr(module, "records_from_json")
+    )
+    lexical_from_records = cast(
+        Callable[..., LexicalInfo | None], getattr(module, "lexical_from_records")
+    )
+    records = records_from_json(records_raw)
+    lexical = lexical_from_records(records, query=query)
+    if lexical is None:
+        return None
+    dictionary = _first_record_dictionary(result)
+    first_markup = ""
+    first = _as_object(records_raw[0])
+    if first is not None:
+        markup = first.get("markup")
+        if isinstance(markup, str):
+            first_markup = markup
+    return AppleDefinition(lexical=lexical, dictionary=dictionary, raw=first_markup)
+
+
+def _definition_from_flat_text(
+    raw: str, *, dictionary: str, query: str
+) -> AppleDefinition | None:
+    """Fallback path: the flat ``DCSCopyTextDefinition`` string."""
+    if dictionary and not any(
+        marker in dictionary for marker in _RU_DICTIONARY_MARKERS
+    ):
+        return None
+    lexical = parse_oxford_russian(raw)
+    if lexical is None:
+        return None
+    definition = AppleDefinition(
+        lexical=lexical, dictionary=dictionary or "default", raw=raw
+    )
+    del query
+    return definition
 
 
 def parse_oxford_russian(raw: str) -> LexicalInfo | None:
