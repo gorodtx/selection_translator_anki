@@ -81,17 +81,41 @@ against the network providers:
 3. The final result merges Apple's candidates and examples into the network
    result and attaches `LexicalInfo`.
 
-Measured here on `bank` with warm caches:
+Measured here over ten single words (`bank`, `time`, `run`, `light`, `book`,
+`point`, `well`, `child`, `spring`, `match`), cold HTTP cache for the first row:
+
+| Configuration | first partial p50 | first partial p95 |
+| --- | --- | --- |
+| network only | 307 ms | 734 ms |
+| network + Apple | 16 ms | 22 ms |
+
+The dictionary answers roughly twenty times faster than the fastest network
+provider, so on macOS the popup is filled before Google has replied. The final
+merged result still waits for the network, which on a cold cache lands between
+300 ms and 1 s.
+
+Per-provider timings for a single `bank` lookup:
 
 | Stage | Time |
 | --- | --- |
-| Apple dictionary partial | 124 ms |
+| Apple dictionary partial | 124 ms (cold sidecar spawn) |
 | Google | 322 ms |
 | Cambridge | 989 ms |
 | final, merged | 990 ms |
 
-With the network unreachable the same query answers in 27 ms from the
-dictionary alone.
+### Dictionary coverage
+
+Across 22 probe words the flat `DCSCopyTextDefinition` path produced candidates
+for 18, with IPA for 18 and examples for 16, at p50 13 ms / p95 26 ms. It has
+two known gaps, which the structured record path exists to close:
+
+- **Phrasal verbs are invisible.** `make up`, `take off` and `break down` return
+  nothing; `look up` and `get over` return the whole `look` / `get` article
+  instead of the phrasal sub-entry. The pipeline guards against the second case:
+  a definition whose headword does not match is only applied to single-word
+  queries.
+- **Only the first homograph is returned.** `bank` yields the river-bank article
+  and never the financial one, even though the dictionary holds three records.
 
 ## Verified facts
 
