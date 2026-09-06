@@ -38,10 +38,27 @@ def _commands(job: str) -> str:
 def test_workflow_declares_the_expected_job_graph() -> None:
     jobs = _jobs()
 
-    assert set(jobs) == {"gate", "sidecar", "bundle", "notarize"}
-    assert jobs["bundle"]["needs"] == ["gate", "sidecar"]
+    assert set(jobs) == {"gate", "linux-parity", "sidecar", "bundle", "notarize"}
+    assert jobs["bundle"]["needs"] == ["gate", "sidecar", "linux-parity"]
     assert jobs["notarize"]["needs"] == ["bundle"]
-    assert all(str(job["runs-on"]).startswith("macos-") for job in jobs.values())
+    assert jobs["linux-parity"]["runs-on"] == "ubuntu-latest"
+    assert all(
+        str(job["runs-on"]).startswith("macos-")
+        for name, job in jobs.items()
+        if name != "linux-parity"
+    )
+    # Swift jobs need the macOS 26 SDK for TranslationSession(installedSource:).
+    assert jobs["sidecar"]["runs-on"] == "macos-26"
+    assert jobs["bundle"]["runs-on"] == "macos-26"
+
+
+def test_linux_job_proves_the_engine_is_not_forked() -> None:
+    commands = _commands("linux-parity")
+
+    assert "pytest" in commands
+    assert "mypy" in commands
+    assert "apple engines must stay off on Linux" in commands
+    assert "/tmp/cfg/translator" in commands
 
 
 def test_every_run_block_is_valid_shell() -> None:

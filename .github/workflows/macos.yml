@@ -52,6 +52,46 @@ jobs:
       - name: pytest
         run: uv run --frozen python -m pytest -q
 
+  linux-parity:
+    name: linux engine parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen --dev
+
+      - name: Tests must pass without any Apple engine
+        run: uv run --frozen python -m pytest -q
+
+      - name: Types must check on Linux too
+        run: uv run --frozen python -m mypy
+
+      - name: The GNOME paths must not have moved
+        run: |
+          set -euo pipefail
+          uv run --frozen python - <<'PY'
+          import os
+          from pathlib import Path
+
+          os.environ["XDG_CONFIG_HOME"] = "/tmp/cfg"
+          os.environ["XDG_DATA_HOME"] = "/tmp/data"
+          from desktop_app.platform import paths
+
+          assert paths.config_dir() == Path("/tmp/cfg/translator"), paths.config_dir()
+          assert paths.data_dir() == Path("/tmp/data/translator"), paths.data_dir()
+          assert not paths.is_macos()
+          from translate_logic.infrastructure.providers import apple
+
+          assert not apple.is_available(), "apple engines must stay off on Linux"
+          print("linux paths and engine gating OK")
+          PY
+
   sidecar:
     name: swift sidecar
     runs-on: macos-26
@@ -101,7 +141,7 @@ jobs:
 
   bundle:
     name: app bundle
-    needs: [gate, sidecar]
+    needs: [gate, sidecar, linux-parity]
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
