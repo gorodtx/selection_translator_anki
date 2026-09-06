@@ -38,8 +38,15 @@ def _commands(job: str) -> str:
 def test_workflow_declares_the_expected_job_graph() -> None:
     jobs = _jobs()
 
-    assert set(jobs) == {"gate", "linux-parity", "sidecar", "bundle", "notarize"}
-    assert jobs["bundle"]["needs"] == ["gate", "sidecar", "linux-parity"]
+    assert set(jobs) == {
+        "gate",
+        "linux-parity",
+        "sidecar",
+        "shell",
+        "bundle",
+        "notarize",
+    }
+    assert jobs["bundle"]["needs"] == ["gate", "sidecar", "shell", "linux-parity"]
     assert jobs["notarize"]["needs"] == ["bundle"]
     assert jobs["linux-parity"]["runs-on"] == "ubuntu-latest"
     assert all(
@@ -49,7 +56,23 @@ def test_workflow_declares_the_expected_job_graph() -> None:
     )
     # Swift jobs need the macOS 26 SDK for TranslationSession(installedSource:).
     assert jobs["sidecar"]["runs-on"] == "macos-26"
+    assert jobs["shell"]["runs-on"] == "macos-26"
     assert jobs["bundle"]["runs-on"] == "macos-26"
+
+
+def test_shell_job_builds_tests_and_checks_protocol_parity() -> None:
+    commands = _commands("shell")
+
+    assert "swift build -c release" in commands
+    assert "scripts/swift-test.sh" in commands
+    assert "swift shell is missing" in commands
+
+
+def test_bundle_verifies_a_real_shell_binary_not_the_placeholder() -> None:
+    commands = _commands("bundle")
+
+    assert 'test -x "${app}/Contents/MacOS/Translator"' in commands
+    assert "Mach-O" in commands
 
 
 def test_linux_job_proves_the_engine_is_not_forked() -> None:

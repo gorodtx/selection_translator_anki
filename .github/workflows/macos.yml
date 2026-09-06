@@ -139,9 +139,46 @@ jobs:
           path: macos/AppleLangHelper/.build/release/apple-lang-helper
           if-no-files-found: error
 
+  shell:
+    name: swiftui shell
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Translator
+        working-directory: macos/Translator
+        run: swift build -c release
+
+      - name: Run TranslatorCore tests
+        working-directory: macos/Translator
+        run: scripts/swift-test.sh
+
+      - name: The shell must speak the Python protocol
+        run: |
+          set -euo pipefail
+          # Method and event names are duplicated in Swift; drift breaks the app
+          # silently, so compare both lists.
+          python3 - <<'PY'
+          import pathlib, re
+
+          py = pathlib.Path("desktop_app/platform/macos/ipc/protocol.py").read_text()
+          swift = pathlib.Path("macos/Translator/Sources/TranslatorCore/Protocol.swift").read_text()
+
+          def literals(block: str, source: str) -> set[str]:
+              body = re.search(rf"class {block}\(StrEnum\):(.*?)\n\n\n", source, re.S)
+              assert body, block
+              return set(re.findall(r'= "([^"]+)"', body.group(1)))
+
+          methods = literals("Method", py)
+          events = literals("Event", py)
+          missing = sorted(n for n in methods | events if f'"{n}"' not in swift)
+          assert not missing, f"swift shell is missing: {missing}"
+          print(f"protocol parity OK: {len(methods)} methods, {len(events)} events")
+          PY
+
   bundle:
     name: app bundle
-    needs: [gate, sidecar, linux-parity]
+    needs: [gate, sidecar, shell, linux-parity]
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -164,6 +201,9 @@ jobs:
         run: |
           set -euo pipefail
           app="dist/Translator.app"
+          test -x "${app}/Contents/MacOS/Translator"
+          # A real SwiftUI binary, not the placeholder launcher.
+          file "${app}/Contents/MacOS/Translator" | grep -q "Mach-O"
           test -x "${app}/Contents/Resources/bin/run-backend"
           test -x "${app}/Contents/Resources/bin/apple-lang-helper"
           test -x "${app}/Contents/Resources/python/bin/python3.13"
