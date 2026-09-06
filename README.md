@@ -2,10 +2,11 @@
   <img src="icons/main_icon.png" width="180" alt="Translator icon" />
 </div>
 
-<h1 align="center">Translator for GNOME</h1>
+<h1 align="center">Translator</h1>
 
 <h4 align="center">
-Offline-first selection translator for Linux GNOME with fast popup UI, D-Bus backend, and Anki integration.
+Offline-first selection translator with a fast popup UI and Anki integration.<br/>
+Linux GNOME (GTK4 + D-Bus) and macOS (SwiftUI + Unix socket) share one translation engine.
 </h4>
 
 <div align="center">
@@ -19,8 +20,8 @@ Offline-first selection translator for Linux GNOME with fast popup UI, D-Bus bac
 
 [English](#english) | [Русский](#русский)
 
-Supported now: **Linux GNOME (Wayland/X11)**.  
-Planned (not supported yet): **macOS / Windows**.
+Supported now: **Linux GNOME (Wayland/X11)** and **macOS 26 (Apple silicon)**.  
+Planned (not supported yet): **Windows**.
 
 [![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![GTK4](https://img.shields.io/badge/GTK-4-7FE719?logo=gtk&logoColor=black)](https://www.gtk.org/)
@@ -103,6 +104,53 @@ bash scripts/install.sh rollback
 bash scripts/install.sh remove
 bash scripts/install.sh healthcheck
 ```
+
+### 3a) macOS
+
+The engine is not forked per platform: `translate_logic` and `desktop_app/application`
+are shared, and only the adapter differs — GTK4 + D-Bus on GNOME,
+a SwiftUI shell talking to a Unix-socket backend daemon on macOS.
+
+Build and install from a checkout. Xcode is not required; Command Line Tools are enough:
+
+```bash
+scripts/build_macos_app.sh          # -> dist/Translator.app (~55 MB)
+scripts/install_macos.sh install    # -> ~/Applications + launchd agent + offline bases
+scripts/install_macos.sh healthcheck
+scripts/install_macos.sh rollback
+scripts/install_macos.sh remove
+```
+
+The bundle carries a relocatable CPython 3.13, the backend sources and the
+`apple-lang-helper` sidecar. The 1.8 GB offline bases are **never** shipped inside it:
+`install_macos.sh` downloads them into `~/Library/Application Support/Translator/db`
+and verifies every file against `scripts/db-bundle.lock.json`.
+
+Run the backend from the checkout during development:
+
+```bash
+scripts/run_backend_macos.sh
+uv run python -m desktop_app.platform.macos.client ping
+uv run python -m desktop_app.platform.macos.client translate '{"text": "look up"}'
+```
+
+Paths (override with `TRANSLATOR_CONFIG_DIR`, `TRANSLATOR_DB_DIR`,
+`TRANSLATOR_SOCKET_PATH`, `TRANSLATOR_LOG_DIR`):
+
+| What | Where |
+| --- | --- |
+| config | `~/Library/Application Support/Translator/desktop_config.json` |
+| offline bases | `~/Library/Application Support/Translator/db` |
+| backend socket | `~/Library/Application Support/Translator/run/backend.sock` |
+| logs | `~/Library/Logs/Translator/backend.log` |
+
+**Apple on-device engines.** On macOS the pipeline also queries Dictionary Services —
+the Oxford Russian Dictionary behind system Look Up — and, when the language pair is
+installed, `Translation.framework`. The dictionary answers in about a millisecond and
+supplies the first partial result, IPA and sense-numbered translations while the network
+providers are still in flight. Install the en→ru pair in System Settings → General →
+Language & Region → Translation Languages; without it the machine-translation half
+degrades silently and everything else keeps working.
 
 ### 4) Troubleshooting
 
@@ -187,6 +235,53 @@ bash scripts/install.sh rollback
 bash scripts/install.sh remove
 bash scripts/install.sh healthcheck
 ```
+
+### 3a) macOS
+
+Движок не форкается по платформам: `translate_logic` и `desktop_app/application` общие,
+различается только адаптер — GTK4 + D-Bus в GNOME и оболочка SwiftUI поверх демона
+на unix-сокете в macOS.
+
+Сборка и установка из checkout. Xcode не нужен, достаточно Command Line Tools:
+
+```bash
+scripts/build_macos_app.sh          # -> dist/Translator.app (~55 МБ)
+scripts/install_macos.sh install    # -> ~/Applications + launchd-агент + офлайн-базы
+scripts/install_macos.sh healthcheck
+scripts/install_macos.sh rollback
+scripts/install_macos.sh remove
+```
+
+В бандле лежат релокейтабельный CPython 3.13, исходники бэкенда и сайдкар
+`apple-lang-helper`. Офлайн-базы на 1.8 ГБ внутрь **никогда** не кладутся:
+`install_macos.sh` качает их в `~/Library/Application Support/Translator/db`
+и сверяет каждый файл с `scripts/db-bundle.lock.json`.
+
+Запуск бэкенда из репозитория при разработке:
+
+```bash
+scripts/run_backend_macos.sh
+uv run python -m desktop_app.platform.macos.client ping
+uv run python -m desktop_app.platform.macos.client translate '{"text": "look up"}'
+```
+
+Пути (переопределяются через `TRANSLATOR_CONFIG_DIR`, `TRANSLATOR_DB_DIR`,
+`TRANSLATOR_SOCKET_PATH`, `TRANSLATOR_LOG_DIR`):
+
+| Что | Где |
+| --- | --- |
+| конфиг | `~/Library/Application Support/Translator/desktop_config.json` |
+| офлайн-базы | `~/Library/Application Support/Translator/db` |
+| сокет бэкенда | `~/Library/Application Support/Translator/run/backend.sock` |
+| логи | `~/Library/Logs/Translator/backend.log` |
+
+**Системные движки Apple.** На macOS пайплайн дополнительно спрашивает Dictionary
+Services — тот самый Oxford Russian Dictionary, который показывает системный Look Up, —
+и `Translation.framework`, когда языковая пара установлена. Словарь отвечает примерно
+за миллисекунду и отдаёт первый частичный результат, транскрипцию и переводы по
+значениям, пока сетевые провайдеры ещё в пути. Пару en→ru ставят в Системных
+настройках → Основные → Язык и регион → Языки перевода; без неё машинный перевод
+тихо отключается, всё остальное работает.
 
 ### 4) Troubleshooting / Диагностика
 
