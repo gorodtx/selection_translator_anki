@@ -145,10 +145,10 @@ class TranslationService:
             self._active.clear()
             inflight = list(self._inflight.values())
             self._inflight.clear()
-        for future in active:
-            future.cancel()
-        for future in inflight:
-            future.cancel()
+        for active_future in active:
+            active_future.cancel()
+        for inflight_future in inflight:
+            inflight_future.cancel()
         asyncio.run_coroutine_threadsafe(self._abort_session(), self.runtime.loop)
 
     async def _translate_async(
@@ -256,11 +256,12 @@ class TranslationService:
             return generation == self._generation
 
     async def _abort_session(self) -> None:
-        if self._session is None:
-            return
-        await self._session.close()
+        session = self._session
         self._session = None
         self._fetcher = None
+        if session is None:
+            return
+        await session.close()
 
 
 def _cache_key(text: str, source_lang: str, target_lang: str) -> str:
