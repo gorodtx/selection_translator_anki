@@ -79,7 +79,7 @@ struct SettingsView: View {
             StatusRow(
                 title: "Apple Dictionary",
                 detail: (model.ping?.engines.appleDictionary ?? false)
-                    ? "Available — offline definitions and examples."
+                    ? dictionarySummary
                     : "Not detected by the backend.",
                 ok: model.ping?.engines.appleDictionary ?? false
             )
@@ -87,7 +87,7 @@ struct SettingsView: View {
                 title: "Apple Translation",
                 detail: (model.ping?.engines.appleTranslation ?? false)
                     ? "Language pair installed — offline translation."
-                    : "Language pair not downloaded yet.",
+                    : "Language pair not downloaded (\(model.ping?.engines.translationStatus ?? "unknown")).",
                 ok: model.ping?.engines.appleTranslation ?? false
             )
             if !(model.ping?.engines.appleTranslation ?? false) {
@@ -167,6 +167,12 @@ struct SettingsView: View {
 
     private func statusText(_ raw: String) -> String {
         raw.isEmpty ? "—" : raw
+    }
+
+    private var dictionarySummary: String {
+        let names = model.ping?.engines.dictionaries ?? []
+        guard !names.isEmpty else { return "Available — offline definitions and examples." }
+        return names.joined(separator: ", ")
     }
 }
 

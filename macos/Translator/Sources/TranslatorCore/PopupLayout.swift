@@ -14,7 +14,7 @@ public enum PopupLayout {
         var width: CGFloat = 380
         let longestExample = state.examples.map { $0.en.count }.max() ?? 0
         let longestDefinition = state.definitionsItems.map(\.count).max() ?? 0
-        let longest = max(state.original.count, state.translation.count, longestExample, longestDefinition)
+        let longest = max(state.original.count, state.translationText.count, longestExample, longestDefinition)
         if longest > 70 { width = 430 }
         if longest > 110 { width = 480 }
         if longest > 160 { width = maxWidth }

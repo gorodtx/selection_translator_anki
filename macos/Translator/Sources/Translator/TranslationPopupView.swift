@@ -98,7 +98,7 @@ struct TranslationPopupView: View {
                     ProgressView().controlSize(.mini)
                 }
             }
-            Text(model.state.translation)
+            Text(model.state.translationText)
                 .font(.popupTranslation)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)

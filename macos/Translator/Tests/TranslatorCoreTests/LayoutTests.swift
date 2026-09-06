@@ -42,10 +42,10 @@ import Testing
     private let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
 
     @Test func widthGrowsWithContent() {
-        let short = ViewState(original: "bank", translation: "берег")
+        let short = ViewState(original: "bank", translationRaw: "берег")
         let long = ViewState(
             original: String(repeating: "word ", count: 40),
-            translation: String(repeating: "слово ", count: 40)
+            translationRaw: String(repeating: "слово ", count: 40)
         )
         #expect(PopupLayout.preferredWidth(for: short) < PopupLayout.preferredWidth(for: long))
         #expect(PopupLayout.preferredWidth(for: long) == PopupLayout.maxWidth)
@@ -53,7 +53,7 @@ import Testing
     }
 
     @Test func widthAlsoConsidersExamplesAndDefinitions() {
-        let base = ViewState(original: "run", translation: "бежать")
+        let base = ViewState(original: "run", translationRaw: "бежать")
         var wide = base
         wide.examples = [ExampleItem(en: String(repeating: "x", count: 200))]
         #expect(PopupLayout.preferredWidth(for: wide) > PopupLayout.preferredWidth(for: base))
