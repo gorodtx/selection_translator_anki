@@ -8,6 +8,9 @@ from typing import Final
 from urllib.parse import quote
 
 from translate_logic.domain import rules
+from translate_logic.infrastructure.language_base.locations import (
+    resolve_offline_base_file,
+)
 from translate_logic.shared.text import normalize_text, normalize_whitespace
 
 
@@ -18,25 +21,7 @@ _WARMUP_FORMS: Final[tuple[str, ...]] = ("time", "make up")
 
 
 def default_definitions_base_path() -> Path:
-    repo_root = Path(__file__).resolve().parents[3]
-    candidates = (
-        repo_root
-        / "translate_logic"
-        / "infrastructure"
-        / "language_base"
-        / "offline_language_base"
-        / "definitions_pack.sqlite3",
-        repo_root
-        / "translate_logic"
-        / "language_base"
-        / "offline_language_base"
-        / "definitions_pack.sqlite3",
-        repo_root / "offline_language_base" / "definitions_pack.sqlite3",
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
+    return resolve_offline_base_file("definitions_pack.sqlite3")
 
 
 @dataclass(slots=True)

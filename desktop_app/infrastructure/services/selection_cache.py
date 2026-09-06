@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from pathlib import Path
+
+from desktop_app.platform.paths import config_dir
 
 
 def selection_cache_path() -> Path:
-    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "translator" / "last_selection.txt"
+    return config_dir() / "last_selection.txt"
 
 
 @dataclass(slots=True)

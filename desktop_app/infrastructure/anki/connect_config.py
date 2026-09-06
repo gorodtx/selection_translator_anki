@@ -9,6 +9,9 @@ DEFAULT_CONFIG_PATH = Path.home() / ".local/share/Anki2/addons21/2055492159/conf
 FLATPAK_CONFIG_PATH = (
     Path.home() / ".var/app/net.ankiweb.Anki/data/Anki2/addons21/2055492159/config.json"
 )
+MACOS_CONFIG_PATH = (
+    Path.home() / "Library/Application Support/Anki2/addons21/2055492159/config.json"
+)
 
 
 def detect_anki_connect_url() -> str | None:
@@ -37,8 +40,12 @@ def _resolve_config_path() -> Path | None:
 
 
 def _candidate_config_paths() -> list[Path]:
-    candidates = [DEFAULT_CONFIG_PATH, FLATPAK_CONFIG_PATH]
-    base_dirs = [DEFAULT_CONFIG_PATH.parent.parent, FLATPAK_CONFIG_PATH.parent.parent]
+    candidates = [DEFAULT_CONFIG_PATH, FLATPAK_CONFIG_PATH, MACOS_CONFIG_PATH]
+    base_dirs = [
+        DEFAULT_CONFIG_PATH.parent.parent,
+        FLATPAK_CONFIG_PATH.parent.parent,
+        MACOS_CONFIG_PATH.parent.parent,
+    ]
     for base_dir in base_dirs:
         if not base_dir.exists():
             continue

@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Final
 
+from desktop_app.platform.paths import CONFIG_DIR_ENV, config_dir, is_macos
+
 CONFIG_DIR_NAME: Final[str] = "translator"
 CONFIG_FILE_NAME: Final[str] = "desktop_config.json"
 DEFAULT_SOURCE_LANG: Final[str] = "en"
@@ -45,6 +47,8 @@ class AppConfig:
 
 
 def config_path() -> Path:
+    if is_macos() or os.environ.get(CONFIG_DIR_ENV, "").strip():
+        return config_dir() / CONFIG_FILE_NAME
     default_base = Path.home() / ".config"
     default_path = default_base / CONFIG_DIR_NAME / CONFIG_FILE_NAME
     xdg_home = os.environ.get("XDG_CONFIG_HOME")

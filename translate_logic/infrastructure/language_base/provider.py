@@ -14,6 +14,9 @@ from translate_logic.shared.example_selection import (
     select_examples_v3,
     selector_stats_snapshot,
 )
+from translate_logic.infrastructure.language_base.locations import (
+    resolve_offline_base_file,
+)
 from translate_logic.infrastructure.language_base.validation import (
     MIN_EXAMPLE_WORDS,
     contains_word,
@@ -43,21 +46,7 @@ def default_fallback_language_base_path() -> Path:
 
 
 def _resolve_examples_db_path(filename: str) -> Path:
-    repo_root = Path(__file__).resolve().parents[3]
-    candidates = (
-        repo_root
-        / "translate_logic"
-        / "infrastructure"
-        / "language_base"
-        / "offline_language_base",
-        repo_root / "translate_logic" / "language_base" / "offline_language_base",
-        repo_root / "offline_language_base",
-    )
-    for base_dir in candidates:
-        candidate = base_dir / filename
-        if candidate.exists():
-            return candidate
-    return candidates[0] / filename
+    return resolve_offline_base_file(filename)
 
 
 def _fts_phrase_query(text: str) -> str | None:
