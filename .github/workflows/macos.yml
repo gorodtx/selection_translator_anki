@@ -248,12 +248,40 @@ jobs:
           set -euo pipefail
           mkdir -p out
           ditto -c -k --sequesterRsrc --keepParent dist/Translator.app out/Translator-macos.zip
+          cp scripts/install_macos.sh out/
+          shasum -a 256 out/Translator-macos.zip out/install_macos.sh \
+            | sed 's| out/|  |' > out/macos-assets.sha256
+          cat out/macos-assets.sha256
+
+      - name: Installer must verify what the release ships
+        run: |
+          set -euo pipefail
+          # The installer resolves the app from dist/ by default and from
+          # TRANSLATOR_APP_PATH otherwise; both must exist for a tag build.
+          grep -q 'TRANSLATOR_APP_PATH' scripts/install_macos.sh
+          bash -n out/install_macos.sh
+          uv run --frozen python - <<'PY'
+          import pathlib
+
+          expected = {"Translator-macos.zip", "install_macos.sh"}
+          from dev.scripts.release_metadata import OPTIONAL_CODE_ASSET_FILES
+
+          assert set(OPTIONAL_CODE_ASSET_FILES) == expected, OPTIONAL_CODE_ASSET_FILES
+          names = {line.split("  ")[-1].strip()
+                   for line in pathlib.Path("out/macos-assets.sha256").read_text().splitlines()
+                   if line.strip()}
+          assert names == expected, names
+          print("release asset names match the manifest contract")
+          PY
 
       - name: Upload bundle
         uses: actions/upload-artifact@v4
         with:
           name: Translator-macos
-          path: out/Translator-macos.zip
+          path: |
+            out/Translator-macos.zip
+            out/install_macos.sh
+            out/macos-assets.sha256
           if-no-files-found: error
 
   notarize:
