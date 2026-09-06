@@ -1,0 +1,248 @@
+name: macos
+
+on:
+  push:
+    branches: [mac]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: lint, types, tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen --dev
+
+      - name: ruff check
+        run: uv run --frozen ruff check desktop_app translate_logic tests
+
+      - name: ruff format (changed files only)
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [[ -z "${base}" || "${base}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "no base commit; skipping format gate"
+            exit 0
+          fi
+          files="$(git diff --name-only --diff-filter=ACMR "${base}" HEAD -- '*.py')"
+          if [[ -z "${files}" ]]; then
+            echo "no python files changed"
+            exit 0
+          fi
+          echo "${files}"
+          echo "${files}" | tr '\n' '\0' | xargs -0 uv run --frozen ruff format --check
+
+      - name: mypy
+        run: uv run --frozen python -m mypy
+
+      - name: pytest
+        run: uv run --frozen python -m pytest -q
+
+  sidecar:
+    name: swift sidecar
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version && xcrun --show-sdk-version
+
+      - name: Build apple-lang-helper
+        working-directory: macos/AppleLangHelper
+        run: swift build -c release
+
+      - name: Smoke the sidecar protocol
+        working-directory: macos/AppleLangHelper
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            '{"id":"1","op":"ping"}' \
+            '{"id":"2","op":"dictionaries"}' \
+            '{"id":"3","op":"shutdown"}' \
+            | ./.build/release/apple-lang-helper | tee /tmp/sidecar.jsonl
+          python3 - <<'PY'
+          import json, pathlib, sys
+          lines = [json.loads(l) for l in pathlib.Path("/tmp/sidecar.jsonl").read_text().splitlines() if l.strip()]
+          assert [m["id"] for m in lines] == ["1", "2", "3"], lines
+          assert all(m["ok"] for m in lines), lines
+          assert lines[0]["result"]["pong"] is True
+          print("sidecar protocol OK")
+          PY
+
+      - name: Upload sidecar
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-lang-helper
+          path: macos/AppleLangHelper/.build/release/apple-lang-helper
+          if-no-files-found: error
+
+  bundle:
+    name: app bundle
+    needs: [gate, sidecar]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install CPython 3.13 for the bundle
+        run: uv python install 3.13
+
+      - name: Sync dependencies
+        run: uv sync --frozen --dev
+
+      - name: Build Translator.app
+        run: scripts/build_macos_app.sh --out dist
+
+      - name: Verify bundle contract
+        run: |
+          set -euo pipefail
+          app="dist/Translator.app"
+          test -x "${app}/Contents/Resources/bin/run-backend"
+          test -x "${app}/Contents/Resources/bin/apple-lang-helper"
+          test -x "${app}/Contents/Resources/python/bin/python3.13"
+          test -d "${app}/Contents/Resources/app/desktop_app"
+          test -d "${app}/Contents/Resources/app/translate_logic"
+          # Offline bases are downloaded at first run; they must never ship.
+          if find "${app}" -name '*.sqlite3' | grep -q .; then
+            echo "offline databases leaked into the bundle"; exit 1
+          fi
+          codesign -v --deep --strict "${app}"
+          du -sh "${app}"
+
+      - name: Backend smoke from inside the bundle
+        run: |
+          set -euo pipefail
+          export TRANSLATOR_CONFIG_DIR="${RUNNER_TEMP}/tr/cfg"
+          export TRANSLATOR_DB_DIR="${RUNNER_TEMP}/tr/db"
+          export TRANSLATOR_RUNTIME_DIR="/tmp/tr-run"
+          export TRANSLATOR_LOG_DIR="${RUNNER_TEMP}/tr/logs"
+          mkdir -p "${TRANSLATOR_DB_DIR}" "${TRANSLATOR_RUNTIME_DIR}"
+          dist/Translator.app/Contents/Resources/bin/run-backend --log-level INFO &
+          backend_pid=$!
+          for _ in $(seq 1 30); do
+            [[ -S "${TRANSLATOR_RUNTIME_DIR}/backend.sock" ]] && break
+            sleep 1
+          done
+          test -S "${TRANSLATOR_RUNTIME_DIR}/backend.sock"
+          # No offline bases on the runner: ping must still answer and report them missing.
+          uv run --frozen python -m desktop_app.platform.macos.client ping --timeout 10 > ping.json
+          python3 - <<'PY'
+          import json
+          data = json.load(open("ping.json"))["result"]
+          assert data["protocol"] == 1, data
+          assert data["db"] == {"primary": False, "fallback": False, "definitions": False, "dir": data["db"]["dir"]}, data["db"]
+          print("bundle backend OK:", data["version"])
+          PY
+          uv run --frozen python -m desktop_app.platform.macos.client shutdown --timeout 10 || true
+          wait "${backend_pid}" 2>/dev/null || true
+
+      - name: Package bundle
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          ditto -c -k --sequesterRsrc --keepParent dist/Translator.app out/Translator-macos.zip
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Translator-macos
+          path: out/Translator-macos.zip
+          if-no-files-found: error
+
+  notarize:
+    name: notarize
+    needs: [bundle]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: Translator-macos
+          path: out
+
+      - name: Check notarization secrets
+        id: secrets
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [[ -n "${APPLE_ID}" && -n "${APPLE_TEAM_ID}" && -n "${APPLE_APP_PASSWORD}" && -n "${APPLE_SIGNING_IDENTITY}" ]]; then
+            echo "ready=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "ready=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Developer ID secrets absent; skipping notarization."
+          fi
+
+      - name: Import signing certificate
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          CERT_BASE64: ${{ secrets.APPLE_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="${RUNNER_TEMP}/build.keychain"
+          security create-keychain -p actions "${keychain}"
+          security set-keychain-settings -lut 3600 "${keychain}"
+          security unlock-keychain -p actions "${keychain}"
+          echo "${CERT_BASE64}" | base64 --decode > "${RUNNER_TEMP}/cert.p12"
+          security import "${RUNNER_TEMP}/cert.p12" -k "${keychain}" -P "${CERT_PASSWORD}" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s "${keychain}" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "${keychain}"
+          rm -f "${RUNNER_TEMP}/cert.p12"
+
+      - name: Sign, notarize and staple
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          ditto -x -k out/Translator-macos.zip unpacked
+          app="unpacked/Translator.app"
+          find "${app}/Contents/Resources" -type f \( -name '*.so' -o -name '*.dylib' \) \
+            -exec codesign --force --timestamp --options runtime --sign "${APPLE_SIGNING_IDENTITY}" {} +
+          codesign --force --timestamp --options runtime --sign "${APPLE_SIGNING_IDENTITY}" \
+            "${app}/Contents/Resources/python/bin/python3.13" \
+            "${app}/Contents/Resources/bin/apple-lang-helper"
+          codesign --force --timestamp --options runtime --sign "${APPLE_SIGNING_IDENTITY}" "${app}"
+          ditto -c -k --sequesterRsrc --keepParent "${app}" notarize.zip
+          xcrun notarytool submit notarize.zip --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" --password "${APPLE_APP_PASSWORD}" --wait
+          xcrun stapler staple "${app}"
+          spctl -a -vvv "${app}"
+          mkdir -p signed
+          ditto -c -k --sequesterRsrc --keepParent "${app}" signed/Translator-macos.zip
+
+      - name: Upload notarized bundle
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Translator-macos-notarized
+          path: signed/Translator-macos.zip
+          if-no-files-found: error
