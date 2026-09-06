@@ -105,17 +105,35 @@ Per-provider timings for a single `bank` lookup:
 
 ### Dictionary coverage
 
-Across 22 probe words the flat `DCSCopyTextDefinition` path produced candidates
-for 18, with IPA for 18 and examples for 16, at p50 13 ms / p95 26 ms. It has
-two known gaps, which the structured record path exists to close:
+Two paths exist. The structured one parses the entry markup returned by
+`DCSCopyRecordsForSearchString`; the flat one parses the plain text of
+`DCSCopyTextDefinition` and is only a fallback. Measured over the same 22 probe
+words:
 
-- **Phrasal verbs are invisible.** `make up`, `take off` and `break down` return
-  nothing; `look up` and `get over` return the whole `look` / `get` article
-  instead of the phrasal sub-entry. The pipeline guards against the second case:
-  a definition whose headword does not match is only applied to single-word
-  queries.
-- **Only the first homograph is returned.** `bank` yields the river-bank article
+| Path | words with candidates | with IPA | with examples | p50 | p95 |
+| --- | --- | --- | --- | --- | --- |
+| structured markup | 21 / 22 | 21 | 20 | 17 ms | 21 ms |
+| flat text | 18 / 22 | 18 | 16 | 13 ms | 26 ms |
+
+The flat path has two gaps the structured one closes:
+
+- **Phrasal verbs are invisible to it.** `make up`, `take off` and `break down`
+  return nothing; `look up` and `get over` return the whole `look` / `get`
+  article instead of the phrasal sub-entry. Through the structured path they
+  resolve correctly: `look up` to навещать / отыскивать, `make up` to
+  доплачивать / возмещать, `take off` to снимать / уводить.
+- **Only the first homograph reaches it.** `bank` yields the river-bank article
   and never the financial one, even though the dictionary holds three records.
+  The structured path merges all of them into one card.
+
+Whichever path answers, the pipeline still guards against a mismatched entry:
+a definition whose headword does not match is only applied to single-word
+queries.
+
+**Entries are big.** The Oxford article for `set` is about 106 KB of markup and
+arrives as a single NDJSON line, and `run` is 87 KB. asyncio's default stream
+limit is 64 KB, so the client raises its subprocess limit to 8 MB and drops an
+oversized line rather than letting the reader task die with it.
 
 Both gaps close once `markup` is present, measured on the same words through
 `apple_dcs`:

@@ -114,6 +114,10 @@ jobs:
         working-directory: macos/AppleLangHelper
         run: swift build -c release
 
+      - name: Run AppleLangHelperCore tests
+        working-directory: macos/AppleLangHelper
+        run: scripts/swift-test.sh
+
       - name: Smoke the sidecar protocol
         working-directory: macos/AppleLangHelper
         run: |

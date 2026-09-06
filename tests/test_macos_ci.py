@@ -60,6 +60,14 @@ def test_workflow_declares_the_expected_job_graph() -> None:
     assert jobs["bundle"]["runs-on"] == "macos-26"
 
 
+def test_sidecar_job_runs_its_swift_tests() -> None:
+    commands = _commands("sidecar")
+
+    assert "swift build -c release" in commands
+    assert "scripts/swift-test.sh" in commands
+    assert "macOS 26 SDK required" in commands
+
+
 def test_shell_job_builds_tests_and_checks_protocol_parity() -> None:
     commands = _commands("shell")
 
