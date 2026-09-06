@@ -55,7 +55,7 @@ struct AnkiUpsertSheet: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Add to Anki").font(.system(size: 17, weight: .semibold))
-                Text(model.state.original).font(.secondaryText).foregroundStyle(.secondary).lineLimit(1)
+                Text(model.state.displayOriginal).font(.secondaryText).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             if !model.ankiStatus.deckName.isEmpty {

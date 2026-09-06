@@ -190,6 +190,9 @@ public struct ViewState: Codable, Equatable, Hashable, Sendable {
     public var original: String
     public var originalRaw: String
     public var translation: String
+    /// Unwrapped translation. `translation` is hard-wrapped at 52 columns for the
+    /// GTK label; a native layout must wrap it itself.
+    public var translationRaw: String
     public var definitionsItems: [String]
     public var examples: [ExampleItem]
     public var canRefreshExamples: Bool
@@ -203,6 +206,7 @@ public struct ViewState: Codable, Equatable, Hashable, Sendable {
         original: String = "",
         originalRaw: String = "",
         translation: String = "",
+        translationRaw: String = "",
         definitionsItems: [String] = [],
         examples: [ExampleItem] = [],
         canRefreshExamples: Bool = false,
@@ -215,6 +219,7 @@ public struct ViewState: Codable, Equatable, Hashable, Sendable {
         self.original = original
         self.originalRaw = originalRaw
         self.translation = translation
+        self.translationRaw = translationRaw
         self.definitionsItems = definitionsItems
         self.examples = examples
         self.canRefreshExamples = canRefreshExamples
@@ -230,6 +235,7 @@ public struct ViewState: Codable, Equatable, Hashable, Sendable {
         original = c.value(String.self, .original, default: "")
         originalRaw = c.value(String.self, .originalRaw, default: "")
         translation = c.value(String.self, .translation, default: "")
+        translationRaw = c.value(String.self, .translationRaw, default: translation)
         definitionsItems = c.value([String].self, .definitionsItems, default: [])
         examples = c.value([ExampleItem].self, .examples, default: [])
         canRefreshExamples = c.value(Bool.self, .canRefreshExamples, default: false)
@@ -242,6 +248,16 @@ public struct ViewState: Codable, Equatable, Hashable, Sendable {
 
     public var hasTranslation: Bool { !translation.isEmpty }
     public var isEmpty: Bool { original.isEmpty && translation.isEmpty }
+
+    /// Text to render: the unwrapped forms, falling back to the wrapped ones so
+    /// an older backend still displays correctly.
+    public var displayTranslation: String {
+        translationRaw.isEmpty ? translation : translationRaw
+    }
+
+    public var displayOriginal: String {
+        originalRaw.isEmpty ? original : originalRaw
+    }
 }
 
 // MARK: - Responses

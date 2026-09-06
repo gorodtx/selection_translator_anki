@@ -250,3 +250,38 @@ import Testing
         #expect(!ping.engines.appleTranslation)
     }
 }
+
+@Suite("Unwrapped text")
+struct UnwrappedTextTests {
+    /// The backend hard-wraps `translation`/`original` at 52 columns for the GTK
+    /// label. A native layout must render the `_raw` variants instead.
+    @Test func prefersRawFieldsOverWrappedOnes() throws {
+        let json = """
+        {"original":"a very long\\nquery","original_raw":"a very long query",
+         "translation":"перевод\\nв две строки","translation_raw":"перевод в две строки",
+         "definitions_items":[],"examples":[],"can_refresh_examples":false,
+         "refreshing_examples":false,"loading":false,"can_add_anki":true,"entry_id":1}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let state = try decoder.decode(ViewState.self, from: Data(json.utf8))
+
+        #expect(state.displayTranslation == "перевод в две строки")
+        #expect(state.displayOriginal == "a very long query")
+        #expect(!state.displayTranslation.contains("\n"))
+    }
+
+    @Test func fallsBackToWrappedWhenRawIsAbsent() throws {
+        let json = """
+        {"original":"bank","translation":"банк","definitions_items":[],"examples":[],
+         "can_refresh_examples":false,"refreshing_examples":false,"loading":false,
+         "can_add_anki":true}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let state = try decoder.decode(ViewState.self, from: Data(json.utf8))
+
+        #expect(state.displayTranslation == "банк")
+        #expect(state.displayOriginal == "bank")
+    }
+}
