@@ -21,6 +21,13 @@ CODE_ASSET_FILES = (
     "translator-extension.zip",
 )
 
+# Shipped only by releases built on macOS. A Linux-only release stays valid
+# without them, so they are recorded when present instead of being required.
+OPTIONAL_CODE_ASSET_FILES = (
+    "Translator-macos.zip",
+    "install_macos.sh",
+)
+
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -37,7 +44,11 @@ def sha256_file(path: Path) -> str:
 def resolve_local_base_paths(root: Path) -> dict[str, Path]:
     resolved: dict[str, Path] = {}
     candidates = (
-        root / "translate_logic" / "infrastructure" / "language_base" / "offline_language_base",
+        root
+        / "translate_logic"
+        / "infrastructure"
+        / "language_base"
+        / "offline_language_base",
         root / "translate_logic" / "language_base" / "offline_language_base",
         root / "offline_language_base",
     )
@@ -92,10 +103,7 @@ def build_release_manifest(
     install_script: Path,
     db_bundle: Mapping[str, Any],
 ) -> dict[str, Any]:
-    code_assets = {
-        name: assets_dir / name
-        for name in CODE_ASSET_FILES
-    }
+    code_assets = {name: assets_dir / name for name in CODE_ASSET_FILES}
     missing = [name for name, path in code_assets.items() if not path.is_file()]
     if missing:
         raise FileNotFoundError(f"missing code assets: {', '.join(missing)}")
@@ -113,6 +121,14 @@ def build_release_manifest(
         "name": "install.sh",
         "sha256": sha256_file(install_script),
     }
+    for name in OPTIONAL_CODE_ASSET_FILES:
+        path = assets_dir / name
+        if path.is_file():
+            code_entries[name] = {"name": name, "sha256": sha256_file(path)}
+
+    platforms = ["linux-gnome"]
+    if all((assets_dir / name).is_file() for name in OPTIONAL_CODE_ASSET_FILES):
+        platforms.append("macos")
 
     return {
         "format_version": 1,
@@ -122,17 +138,22 @@ def build_release_manifest(
         },
         "code_manifest_asset": "release-assets.sha256",
         "code_assets": code_entries,
+        "platforms": platforms,
         "db_bundle": dict(db_bundle),
     }
 
 
-def write_sha_manifest(path: Path, entries: Mapping[str, str], order: tuple[str, ...]) -> None:
+def write_sha_manifest(
+    path: Path, entries: Mapping[str, str], order: tuple[str, ...]
+) -> None:
     lines = [f"{entries[name]}  {name}" for name in order]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def cmd_build_db_bundle(args: argparse.Namespace) -> int:

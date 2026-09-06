@@ -197,6 +197,21 @@ gh release create vX.Y.Z \
 
 Detailed gate checklist: `dev/docs/release_gate.md`.
 
+macOS artifacts ride in the same release when they are built on a Mac. Add them
+to the assets directory before generating the manifest and they are recorded
+automatically; a Linux-only release stays valid without them.
+
+```bash
+scripts/build_macos_app.sh --out dist
+ditto -c -k --sequesterRsrc --keepParent dist/Translator.app \
+  dev/dist/release/assets/Translator-macos.zip
+cp scripts/install_macos.sh dev/dist/release/assets/
+```
+
+The manifest then lists `platforms: ["linux-gnome", "macos"]` and carries the
+sha256 of `Translator-macos.zip` and `install_macos.sh`. Notarization happens in
+CI on the tag, and only when the Apple secrets are configured.
+
 ---
 
 ## Русский

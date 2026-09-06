@@ -57,7 +57,9 @@ def test_build_db_bundle_cli_emits_lock_and_assets(tmp_path: Path) -> None:
     assert json.loads(lock_file.read_text(encoding="utf-8")) == payload
 
 
-def test_build_release_manifest_cli_includes_db_bundle_reference(tmp_path: Path) -> None:
+def test_build_release_manifest_cli_includes_db_bundle_reference(
+    tmp_path: Path,
+) -> None:
     assets_dir = tmp_path / "dist" / "release"
     assets_dir.mkdir(parents=True)
     (assets_dir / "translator-app.tar.gz").write_bytes(b"app-archive")
@@ -128,3 +130,59 @@ def test_build_release_manifest_cli_includes_db_bundle_reference(tmp_path: Path)
         "translator-extension.zip",
     }
     assert payload["db_bundle"]["tag"] == "db-123456789abc"
+
+
+def test_release_manifest_stays_linux_only_without_macos_assets(tmp_path: Path) -> None:
+    from dev.scripts.release_metadata import build_release_manifest
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    for name in ("translator-app.tar.gz", "translator-extension.zip"):
+        (assets / name).write_bytes(b"code")
+    install = tmp_path / "install.sh"
+    install.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    manifest = build_release_manifest(
+        repo="gorodtx/selection_translator_anki",
+        release_tag="v9.9.9",
+        assets_dir=assets,
+        install_script=install,
+        db_bundle={"tag": "db-test"},
+    )
+
+    assert manifest["platforms"] == ["linux-gnome"]
+    assert set(manifest["code_assets"]) == {
+        "translator-app.tar.gz",
+        "translator-extension.zip",
+        "install.sh",
+    }
+
+
+def test_release_manifest_records_macos_assets_when_they_are_built(
+    tmp_path: Path,
+) -> None:
+    from dev.scripts.release_metadata import build_release_manifest, sha256_file
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    for name in ("translator-app.tar.gz", "translator-extension.zip"):
+        (assets / name).write_bytes(b"code")
+    (assets / "Translator-macos.zip").write_bytes(b"macos-bundle")
+    (assets / "install_macos.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    install = tmp_path / "install.sh"
+    install.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    manifest = build_release_manifest(
+        repo="gorodtx/selection_translator_anki",
+        release_tag="v9.9.9",
+        assets_dir=assets,
+        install_script=install,
+        db_bundle={"tag": "db-test"},
+    )
+
+    assert manifest["platforms"] == ["linux-gnome", "macos"]
+    entry = manifest["code_assets"]["Translator-macos.zip"]
+    assert entry["sha256"] == sha256_file(assets / "Translator-macos.zip")
+    assert "install_macos.sh" in manifest["code_assets"]
+    # The offline bases still travel in their own bundle, never in a code asset.
+    assert manifest["db_bundle"]["tag"] == "db-test"
