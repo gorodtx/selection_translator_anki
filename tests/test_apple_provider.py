@@ -400,11 +400,7 @@ def test_helper_client_reads_entries_larger_than_the_default_stream_limit(
             seen.append(len(markup))
             return LexicalInfo(headword="x")
 
-    def _import_module(name: str) -> object:
-        assert name.endswith("apple_dcs")
-        return _FakeDcs
-
-    monkeypatch.setattr(apple.importlib, "import_module", _import_module)
+    monkeypatch.setattr(apple, "apple_dcs", _FakeDcs)
 
     async def scenario() -> None:
         helper = apple.AppleLangHelper(binary=script)

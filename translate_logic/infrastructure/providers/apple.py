@@ -10,8 +10,6 @@ structured senses, IPA and EN→RU example pairs.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
-import importlib
 from dataclasses import dataclass, field
 import json
 import logging
@@ -22,13 +20,14 @@ import sys
 import time
 from typing import Final, cast
 
+from translate_logic.infrastructure.providers import apple_dcs
 from translate_logic.domain.models import (
     ExamplePair,
     LexicalEntry,
     LexicalInfo,
     LexicalSense,
 )
-from translate_logic.shared.text import count_words, normalize_whitespace
+from translate_logic.shared.text import normalize_whitespace
 
 HELPER_ENV: Final[str] = "TRANSLATOR_APPLE_HELPER"
 HELPER_BINARY_NAME: Final[str] = "apple-lang-helper"
@@ -108,17 +107,7 @@ class AppleDefinition:
         return _normalize_key(self.lexical.headword) == _normalize_key(query)
 
     def candidates(self) -> list[str]:
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for entry in self.lexical.entries:
-            for sense in entry.senses:
-                for candidate in _translation_candidates(sense.translation):
-                    key = candidate.casefold()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    ordered.append(candidate)
-        return ordered
+        return apple_dcs.translation_candidates(self.lexical)
 
     def example_sentences(self) -> list[str]:
         sentences: list[str] = []
@@ -560,20 +549,8 @@ def _definition_from_records(
         for item in records_raw
     ):
         return None
-    try:
-        module = importlib.import_module(
-            "translate_logic.infrastructure.providers.apple_dcs"
-        )
-    except ImportError:
-        return None
-    records_from_json = cast(
-        Callable[[object], Sequence[object]], getattr(module, "records_from_json")
-    )
-    lexical_from_records = cast(
-        Callable[..., LexicalInfo | None], getattr(module, "lexical_from_records")
-    )
-    records = records_from_json(records_raw)
-    lexical = lexical_from_records(records, query=query)
+    records = apple_dcs.records_from_json(records_raw)
+    lexical = apple_dcs.lexical_from_records(records, query=query)
     if lexical is None:
         return None
     lexical = focus_on_query(lexical, query=query)
@@ -747,46 +724,6 @@ def _parse_examples(part: str) -> list[ExamplePair]:
             continue
         pairs.append(ExamplePair(en=en, ru=ru))
     return pairs
-
-
-def _unwrap(fragment: str) -> str:
-    """Drop brackets that wrap a whole fragment, keeping an ordinary qualifier intact.
-
-    ``strip("()")`` would also eat the closing bracket of "настоя́щее (вре́мя)".
-    """
-    if fragment.startswith("(") and fragment.endswith(")"):
-        return fragment[1:-1].strip()
-    return fragment
-
-
-def _translation_candidates(translation: str) -> list[str]:
-    if not translation:
-        return []
-    cleaned = translation.replace(_COMBINING_ACUTE, "")
-    cleaned = _ASPECT_RE.sub("", cleaned)
-    cleaned = cleaned.replace("|", "")
-    cleaned = re.sub(r"\((?:[^()]*[A-Za-z][^()]*)\)", "", cleaned)
-    cleaned = _CASE_MARKER_RE.sub("", cleaned)
-    candidates: list[str] = []
-    for piece in re.split(r"[/,;]", cleaned):
-        piece = _unwrap(piece.strip())
-        if piece.count("(") != piece.count(")"):
-            # A qualifier the split cut in half; the halves are not translations.
-            continue
-        tokens = piece.split()
-        # Dangling prefixes/endings ("по-", "-ать") mark inflection notes, not
-        # standalone translations; drop the whole fragment.
-        if any(token.startswith("-") or token.endswith("-") for token in tokens):
-            continue
-        piece = normalize_whitespace(" ".join(tokens))
-        if not piece or not _CYRILLIC_RE.search(piece):
-            continue
-        if _LATIN_OR_OPERATOR_RE.search(piece):
-            continue
-        if count_words(piece) > _MAX_CANDIDATE_WORDS:
-            continue
-        candidates.append(piece)
-    return candidates
 
 
 def _as_object(value: object) -> JsonObject | None:
