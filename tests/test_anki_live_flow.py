@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import Future
+import json
 from pathlib import Path
 import struct
+import subprocess
+import sys
+import urllib.request
 import zlib
 
 import pytest
@@ -241,3 +245,35 @@ def test_empty_lists_are_answers_not_protocol_errors(
     assert preview.preview is not None
     assert preview.preview.matches == ()
     assert preview.preview.available_fields == tuple(DEFAULT_MODEL_FIELDS)
+
+
+def test_the_stand_in_can_be_served_standalone() -> None:
+    """`python -m tests.fakes.anki_connect` is how a machine without Anki
+
+    drives the real flow: it prints the URL to feed to `ANKI_CONNECT_URL`.
+    """
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "tests.fakes.anki_connect"],
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        line = proc.stdout.readline().strip()
+        assert line.startswith("ANKI_CONNECT_URL=http://127.0.0.1:")
+        url = line.split("=", 1)[1]
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"action": "modelNames", "version": 6}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read())
+        # A model is pre-created so the flow has something to add notes to.
+        assert payload["error"] is None
+        assert payload["result"] == [DEFAULT_MODEL_NAME]
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)

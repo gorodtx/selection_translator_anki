@@ -158,7 +158,13 @@ remove_app() {
   rm -f "${AGENT_PLIST}" "${LINK_DIR}/${APP_NAME}.app"
   rm -rf "${RELEASES_DIR}"
   log "removed app; offline bases kept in ${DB_DIR}"
-  log "delete them with: rm -rf \"${DB_DIR}\""
+  if [[ -n "${TRANSLATOR_DB_DIR:-}" ]]; then
+    # The store was supplied from outside, so it is not ours to suggest
+    # deleting: the same directory is very likely the user's only copy.
+    log "the base store is external (TRANSLATOR_DB_DIR); leaving it untouched"
+  else
+    log "delete them with: rm -rf \"${DB_DIR}\""
+  fi
 }
 
 healthcheck() {

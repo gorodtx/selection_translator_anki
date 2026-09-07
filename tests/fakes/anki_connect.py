@@ -236,3 +236,51 @@ class FakeAnkiConnect:
         self._server.shutdown()
         self._server.server_close()
         self._thread.join(timeout=2)
+
+
+def _serve() -> int:
+    """Run the stand-in until interrupted, printing its URL.
+
+        uv run --frozen python -m tests.fakes.anki_connect
+        ANKI_CONNECT_URL=<printed url> scripts/run_backend_macos.sh
+
+    Lets the whole add/upsert flow be driven through the daemon on a machine
+    where Anki cannot be installed.
+    """
+    import argparse
+    import time
+
+    from desktop_app.infrastructure.anki.templates import (
+        DEFAULT_MODEL_FIELDS,
+        DEFAULT_MODEL_NAME,
+    )
+
+    parser = argparse.ArgumentParser(description="Fake AnkiConnect for manual runs")
+    parser.add_argument(
+        "--no-model",
+        action="store_true",
+        help="start with no models, so createModel has something to do",
+    )
+    args = parser.parse_args()
+
+    state = FakeAnkiState()
+    if not args.no_model:
+        state.models[DEFAULT_MODEL_NAME] = list(DEFAULT_MODEL_FIELDS)
+    with FakeAnkiConnect(state) as server:
+        print(f"ANKI_CONNECT_URL={server.url}", flush=True)
+        try:
+            while True:
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            print(f"\nactions: {[action for action, _ in state.calls]}", flush=True)
+            for note in state.notes.values():
+                print(f"note {note.note_id}: {note.fields}", flush=True)
+            if state.media:
+                print(f"media: {sorted(state.media)}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_serve())

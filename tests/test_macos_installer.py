@@ -119,3 +119,14 @@ def test_installer_unloads_agent_before_swapping_releases() -> None:
     assert install_block.index("agent_unload") < install_block.index(
         'mv "${RELEASES_DIR}/current"'
     )
+
+
+def test_remove_does_not_suggest_deleting_an_external_store() -> None:
+    """With `TRANSLATOR_DB_DIR` set, the store is very likely the user's only
+
+    copy of 1.8 GB; printing `rm -rf` at it is a footgun even when accurate.
+    """
+    text = INSTALLER.read_text(encoding="utf-8")
+
+    assert 'if [[ -n "${TRANSLATOR_DB_DIR:-}" ]]; then' in text
+    assert "the base store is external" in text
