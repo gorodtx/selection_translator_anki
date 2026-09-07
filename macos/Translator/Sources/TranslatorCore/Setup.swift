@@ -140,7 +140,7 @@ public enum SetupPlanner {
             return SetupStep(
                 id: .backend,
                 title: "Backend",
-                detail: "Running as a login agent; it holds the dictionaries open.",
+                detail: "Runs at login, listed in Login Items as Translator; it holds the dictionaries open.",
                 state: .done,
                 isOptional: false
             )

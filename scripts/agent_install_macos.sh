@@ -113,6 +113,7 @@ report() {
   # The program itself arrives on stdin, so the ping result cannot: it travels in the
   # environment instead. Piping into `python -` silently feeds the heredoc, not the data.
   PING_JSON="${raw}" ACCESSIBILITY="${ACCESSIBILITY_GRANTED}" APP="${INSTALLED_APP}" \
+    LOGIN_ITEM="$(login_item_state)" \
     uv run --frozen python - <<'PY'
 import json, os
 
@@ -133,6 +134,7 @@ state = {
     "dictionaries": engines.get("dictionaries", []),
     "apple_translation": bool(engines.get("apple_translation")),
     "translation_status": engines.get("translation_status", "unknown"),
+    "login_item": os.environ.get("LOGIN_ITEM", "unknown"),
     "accessibility_granted": granted,
     # "unknown" means the app has not run since installing, not that it was refused.
     "accessibility_state": accessibility,
@@ -156,7 +158,11 @@ if not state["apple_translation"] and state["translation_status"] != "unsupporte
     )
 if not state["apple_dictionary"]:
     automatable.append("apple dictionary: enable a Russian dictionary in Dictionary.app settings")
-needs_purchase = ["apple developer id: required only to notarise a build for other machines"]
+needs_purchase = [
+    "apple developer id: only to give the build a team identity. Without it macOS "
+    "announces the login item as coming from an unidentified developer. The item is "
+    "still enabled and allowed, and the app works; nothing needs clicking."
+]
 
 print("=== TRANSLATOR_INSTALL_REPORT_BEGIN ===")
 print(json.dumps(
@@ -167,6 +173,22 @@ print("=== TRANSLATOR_INSTALL_REPORT_END ===")
 if blocked:
     raise SystemExit(1)
 PY
+}
+
+# How macOS recorded the login item. A name of "Translator" means the system tied the
+# agent to this app; a bare program name means it could not, which is what the user sees
+# in the notification.
+login_item_state() {
+  local dump
+  dump="$(sfltool dumpbtm 2>/dev/null || true)"
+  [[ -n "${dump}" ]] || { echo "unknown"; return; }
+  if printf '%s' "${dump}" | /usr/bin/grep -q 'Executable Path:.*TranslatorBackend'; then
+    echo "registered as Translator"
+  elif printf '%s' "${dump}" | /usr/bin/grep -q 'com.translator.desktop'; then
+    echo "registered, not attributed to the app"
+  else
+    echo "absent"
+  fi
 }
 
 # Whether the app itself holds the Accessibility grant. Asking from a script would answer

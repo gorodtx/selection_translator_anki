@@ -77,6 +77,29 @@ Without the Accessibility grant the shortcut cannot read a selection — neither
 accessibility API nor through a synthesized copy, since both need the same permission. The
 Services menu item on any selected text needs no permission at all and keeps working.
 
+## The notification about an unidentified developer
+
+Installing adds a login item, and macOS announces it. On a locally built app the notice
+says the item is from an unidentified developer, because an ad-hoc signature carries no
+team identity — only a paid Apple Developer ID does, and buying one is the user's
+decision. Nothing is wrong and nothing needs clicking: the item is enabled and allowed.
+
+What the notice names, however, was worth fixing. The login agent used to run a shell
+script, and a script cannot carry a signature, so the system could not tie it to the app
+and announced a bare `run-backend` — indistinguishable from something the user never
+installed. It now runs a signed executable inside the bundle, and the system records it as
+the app:
+
+```
+Name: Translator
+Identifier: 8.com.translator.desktop
+Executable Path: …/Translator.app/Contents/MacOS/TranslatorBackend
+Disposition: [enabled, allowed]
+```
+
+Read that back with `sfltool dumpbtm` (no root needed) and look for the entry named
+Translator. The `Developer Name: (null)` line is the part a Developer ID would fill in.
+
 ## Uninstalling
 
 ```bash

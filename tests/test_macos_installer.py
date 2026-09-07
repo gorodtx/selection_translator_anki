@@ -8,6 +8,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = REPO_ROOT / "scripts" / "install_macos.sh"
 LINUX_INSTALLER = REPO_ROOT / "scripts" / "install.sh"
+BUILDER = REPO_ROOT / "scripts" / "build_macos_app.sh"
 
 
 def _text() -> str:
@@ -84,7 +85,11 @@ def test_installer_registers_launch_agent_for_the_backend() -> None:
     text = _text()
 
     assert "com.translator.desktop.plist" in text
-    assert "Contents/Resources/bin/run-backend" in text
+    # What launchd runs is what the user sees in Login Items, and a shell script carries
+    # no signature: the system could not attribute one to this app and announced a bare
+    # "run-backend" from an unidentified developer. It must be the signed executable.
+    assert "Contents/MacOS/TranslatorBackend" in text
+    assert "Contents/Resources/bin/run-backend" not in text
     assert "launchctl bootstrap" in text and "launchctl bootout" in text
     assert "<key>KeepAlive</key>" in text
 
@@ -172,3 +177,14 @@ def test_installing_a_bundle_built_from_other_sources_is_refused() -> None:
         if "rsync" in body
         else True
     )
+
+def test_build_signs_the_backend_launcher_before_sealing_the_bundle() -> None:
+    text = BUILDER.read_text(encoding="utf-8")
+
+    assert 'cp "${BACKEND_BIN}" "${CONTENTS}/MacOS/TranslatorBackend"' in text
+    # A second Mach-O in Contents/MacOS is nested code, not a sealed resource, so an
+    # unsigned one leaves the bundle seal broken and the login item unattributable.
+    signing = text.index("TranslatorBackend" + '"', text.index("codesign"))
+    sealing = text.index('codesign "${SIGN_FLAGS[@]}" --identifier "${BUNDLE_ID}" "${APP_DIR}"')
+    assert signing < sealing, "the launcher must be signed before the bundle is sealed"
+    assert '--identifier "${BUNDLE_ID}.backend"' in text
