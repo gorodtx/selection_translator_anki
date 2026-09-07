@@ -24,6 +24,38 @@ The shell owns input, presentation and the pasteboard. The daemon owns the
 translation pipeline, history, cache and Anki. Nothing under
 `desktop_app/presentation` (GTK) is imported by the daemon.
 
+### Who starts what
+
+The two halves start by different mechanisms, and confusing them costs the user
+the whole app: the hot key, the popup and Settings all live in the shell, so a
+login that brings up only the daemon leaves nothing the user can reach.
+
+- **The daemon** is a LaunchAgent, `com.translator.desktop`, with
+  `RunAtLoad`, so it comes up at login. `KeepAlive` is
+  `{SuccessfulExit: false}` — restart only after an unsuccessful exit — and the
+  daemon installs a SIGTERM handler and exits 0. Measured: `launchctl kill
+  SIGTERM` leaves it `not running` and launchd does **not** bring it back;
+  `SIGKILL` is unsuccessful, and it returns within about two seconds, with no
+  ten-second throttle in between. So `launchctl kickstart -k` is the way to
+  restart it deliberately.
+- **The shell** is not a LaunchAgent. It registers itself through
+  `SMAppService.mainApp.register()` behind the "Open at login" stage in
+  Settings, so the user can see it and revoke it. Read the state from
+  `SMAppService.mainApp.status`, never from `sfltool dumpbtm` — the dump tool
+  can hang indefinitely while `SMAppService` keeps working.
+- **One trap in that status**: an app that was never registered answers
+  `.notFound`, not `.notRegistered`. Read literally, that renders as "the
+  system cannot find the bundle" and hides the button on every fresh install.
+  Both values mean the same thing here: not enabled, offer the button.
+- **After an install** the installer stops the old shell and opens the new
+  bundle, then confirms a process actually appeared. `open` exiting 0 only
+  means LaunchServices accepted the request; it has reported success with
+  nothing left running.
+- The bundle path `releases/current/Translator.app` is stable across updates,
+  but the directory's **inode is not** — the release is swapped by moving a
+  staging directory into place. If a login-item registration ever survives the
+  path but not the swap, that is where to look.
+
 ## Backend protocol
 
 `desktop_app/platform/macos/ipc/protocol.py` is the single source of truth. One
