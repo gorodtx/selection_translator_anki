@@ -38,6 +38,7 @@ from desktop_app.infrastructure.anki.templates import (
     DEFAULT_MODEL_NAME,
 )
 from desktop_app.infrastructure.services.runtime import AsyncRuntime
+from desktop_app.platform.macos.ipc.protocol import field_list_to_json
 from tests.fakes.anki_connect import FakeAnkiConnect, FakeAnkiState, Note
 from translate_logic.models import Example, FieldValue, TranslationResult
 
@@ -390,3 +391,65 @@ def test_model_fields_come_from_anki_and_say_when_they_cannot(
     unset = ask("")
     assert unset.items == []
     assert unset.error == "No note type is configured."
+
+
+def test_model_fields_tells_a_closed_anki_from_an_unknown_note_type(
+    anki: tuple[FakeAnkiConnect, AnkiFlow],
+) -> None:
+    """Both answer with no fields, and the client must not treat them alike.
+
+    An empty list is read as "nothing to compare against", so a shape that
+    quietly drifted to empty would look exactly like healthy ignorance and
+    never surface. These two states pin the difference: only one carries an
+    error, and the other is why an empty list can never mean "no fields".
+    """
+    server, flow = anki
+    server.state.models["Translator"] = ["Word", "Translation"]
+
+    def ask(use: AnkiFlow, model: str) -> AnkiListResult:
+        settings = SettingsFlow(
+            config=AppConfig(
+                languages=LanguageConfig(source="en", target="ru"),
+                anki=AnkiConfig(deck="English", model=model, fields=FIELDS),
+            ),
+            runtime=use.service.runtime,
+            anki_flow=use,
+            on_save=lambda _: None,
+        )
+        received: list[AnkiListResult] = []
+        settings.list_model_fields(received.append)
+        deadline = time.monotonic() + DEFAULT_TIMEOUT_SECONDS + 5
+        while not received and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert received, "list_model_fields never answered"
+        return received[0]
+
+    # A note type that does not exist answers exactly like one with no fields.
+    unknown = ask(flow, "NoSuchNoteType")
+    assert unknown.items == []
+    assert unknown.error is None
+
+    # Anki closed: same empty list, but the reason is there to be read.
+    down = AnkiService(
+        flow.service.runtime, timeout_seconds=1.0, base_url="http://127.0.0.1:1"
+    )
+    try:
+        unreachable = ask(AnkiFlow(service=down), "Translator")
+    finally:
+        asyncio.run_coroutine_threadsafe(down.close(), down.runtime.loop).result(5)
+    assert unreachable.items == []
+    assert unreachable.error is not None
+    assert unreachable.error.startswith("AnkiConnect error:"), unreachable.error
+
+
+def test_field_list_json_keeps_the_two_keys_a_client_reads() -> None:
+    """The wire shape, not just the flow behind it.
+
+    A client reads an empty `fields` as "nothing to compare against", so a
+    renamed or dropped key would arrive as silence rather than as an error.
+    """
+    named = field_list_to_json(AnkiListResult(items=["Word", "Image"], error=None))
+    assert named == {"fields": ["Word", "Image"], "error": None}
+
+    failed = field_list_to_json(AnkiListResult(items=[], error="AnkiConnect error: x"))
+    assert failed == {"fields": [], "error": "AnkiConnect error: x"}
