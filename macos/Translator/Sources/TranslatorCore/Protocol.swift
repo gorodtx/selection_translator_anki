@@ -308,19 +308,25 @@ public struct PingInfo: Codable, Equatable, Sendable {
         public var translationStatus: String
         public var dictionaries: [String]
         public var helper: String?
+        /// Which sources the user has left on. Availability and consent are different
+        /// answers: a dictionary can be installed and still switched off, and setup must
+        /// not report that as something to fix.
+        public var enabled: SourceSettings
 
         public init(
             appleDictionary: Bool = false,
             appleTranslation: Bool = false,
             translationStatus: String = "unknown",
             dictionaries: [String] = [],
-            helper: String? = nil
+            helper: String? = nil,
+            enabled: SourceSettings = SourceSettings()
         ) {
             self.appleDictionary = appleDictionary
             self.appleTranslation = appleTranslation
             self.translationStatus = translationStatus
             self.dictionaries = dictionaries
             self.helper = helper
+            self.enabled = enabled
         }
 
         public init(from decoder: Decoder) throws {
@@ -330,6 +336,8 @@ public struct PingInfo: Codable, Equatable, Sendable {
             translationStatus = c.value(String.self, .translationStatus, default: "unknown")
             dictionaries = c.value([String].self, .dictionaries, default: [])
             helper = c.optional(String.self, .helper)
+            // An older backend does not send it; everything is on until told otherwise.
+            enabled = c.value(SourceSettings.self, .enabled, default: SourceSettings())
         }
     }
 
@@ -799,16 +807,36 @@ public struct SourceSettings: Codable, Equatable, Sendable {
         self.definitionsPack = definitionsPack
     }
 
+    /// The same flags arrive through both coders: settings keep keys verbatim so unknown
+    /// ones survive, while the ping goes through `convertFromSnakeCase`. Reading either
+    /// spelling costs one extra lookup and removes a silent all-on answer.
+    private struct EitherKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ stringValue: String) { self.stringValue = stringValue }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let c = try decoder.container(keyedBy: EitherKey.self)
         // A source the backend has not heard of stays on: a missing key must not read as
         // "the user switched this off".
-        appleDictionary = c.value(Bool.self, .appleDictionary, default: true)
-        appleTranslation = c.value(Bool.self, .appleTranslation, default: true)
-        google = c.value(Bool.self, .google, default: true)
-        cambridge = c.value(Bool.self, .cambridge, default: true)
-        offlineExamples = c.value(Bool.self, .offlineExamples, default: true)
-        definitionsPack = c.value(Bool.self, .definitionsPack, default: true)
+        func flag(_ verbatim: String, _ converted: String) -> Bool {
+            if let value = try? c.decodeIfPresent(Bool.self, forKey: EitherKey(verbatim)) {
+                return value
+            }
+            if let value = try? c.decodeIfPresent(Bool.self, forKey: EitherKey(converted)) {
+                return value
+            }
+            return true
+        }
+        appleDictionary = flag("apple_dictionary", "appleDictionary")
+        appleTranslation = flag("apple_translation", "appleTranslation")
+        google = flag("google", "google")
+        cambridge = flag("cambridge", "cambridge")
+        offlineExamples = flag("offline_examples", "offlineExamples")
+        definitionsPack = flag("definitions_pack", "definitionsPack")
     }
 }
 

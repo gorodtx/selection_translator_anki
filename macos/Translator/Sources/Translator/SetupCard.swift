@@ -121,6 +121,12 @@ struct SetupCard: View {
                 .font(.secondaryText)
         case .waiting:
             ProgressView().controlSize(.mini)
+        case .switchedOff:
+            // A deliberate choice, so neither a tick that claims it works nor a warning
+            // that asks to be fixed.
+            Image(systemName: "minus.circle")
+                .foregroundStyle(.tertiary)
+                .font(.secondaryText)
         }
     }
 

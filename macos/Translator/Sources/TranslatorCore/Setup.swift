@@ -26,6 +26,9 @@ public enum SetupState: Equatable, Sendable {
     case actionNeeded
     /// Working on it, or not known yet; no action would help.
     case waiting
+    /// The user switched this source off. Not a gap to close and not a fault to report —
+    /// so it counts as neither finished nor outstanding, and offers no button.
+    case switchedOff
 }
 
 /// What the one button on a step does. The view maps these to handlers; keeping them as
@@ -80,12 +83,13 @@ public struct SetupPlan: Equatable, Sendable {
 
     /// Steps that block the app from doing its job.
     public var blocking: [SetupStep] {
-        steps.filter { !$0.isOptional && $0.state != .done }
+        steps.filter { !$0.isOptional && $0.state != .done && $0.state != .switchedOff }
     }
 
-    /// Optional steps still worth doing.
+    /// Optional steps still worth doing. A source the user switched off is a decision,
+    /// not a suggestion, so it is not counted here.
     public var suggested: [SetupStep] {
-        steps.filter { $0.isOptional && $0.state != .done }
+        steps.filter { $0.isOptional && $0.state != .done && $0.state != .switchedOff }
     }
 
     public var isReady: Bool { blocking.isEmpty }
@@ -245,6 +249,18 @@ public enum SetupPlanner {
                 isOptional: true
             )
         }
+        // Availability says the Mac has dictionaries; consent says the user wants them
+        // consulted. Claiming five dictionaries while the source is off promises an answer
+        // that will not arrive.
+        if !engines.enabled.appleDictionary {
+            return SetupStep(
+                id: .dictionary,
+                title: "Apple Dictionary",
+                detail: "Switched off in Sources below.",
+                state: .switchedOff,
+                isOptional: true
+            )
+        }
         if engines.appleDictionary {
             let names = engines.dictionaries.prefix(2).joined(separator: ", ")
             return SetupStep(
@@ -275,6 +291,15 @@ public enum SetupPlanner {
                 title: "Offline translation",
                 detail: "Unknown until the backend answers.",
                 state: .waiting,
+                isOptional: true
+            )
+        }
+        if !engines.enabled.appleTranslation {
+            return SetupStep(
+                id: .translationPair,
+                title: "Offline translation",
+                detail: "Switched off in Sources below. Phrases go over the network.",
+                state: .switchedOff,
                 isOptional: true
             )
         }

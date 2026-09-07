@@ -308,7 +308,16 @@ struct HotKeyRecorder: View {
         .glassSurface(radius: Layout.chipRadius, interactive: true, tint: isRecording ? .accentColor.opacity(0.35) : nil)
         .animation(Motion.stateChange, value: isRecording)
         .onDisappear { stop() }
-        .accessibilityLabel("Shortcut \(combo.displayString)")
+        // The visible text changes to "Press keys…" while recording, so the label must not
+        // pin the old combination: the name says what the control is, the value says what
+        // it holds or that it is waiting.
+        .accessibilityLabel("Shortcut")
+        .accessibilityValue(isRecording ? "Waiting for a key combination" : combo.displayString)
+        .accessibilityHint(
+            isRecording
+                ? "Press the keys to use, or Escape to cancel."
+                : "Activate, then press the keys to use."
+        )
     }
 
     private func start() {

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import TranslatorCore
 
@@ -29,7 +30,8 @@ private func readyPing(
     dictionary: Bool = true,
     translation: Bool = true,
     translationStatus: String = "installed",
-    dictionaries: [String] = ["Oxford Russian Dictionary", "Apple Dictionary"]
+    dictionaries: [String] = ["Oxford Russian Dictionary", "Apple Dictionary"],
+    enabled: SourceSettings = SourceSettings()
 ) -> PingInfo {
     PingInfo(
         version: "0.3.0",
@@ -43,7 +45,8 @@ private func readyPing(
             appleDictionary: dictionary,
             appleTranslation: translation,
             translationStatus: translationStatus,
-            dictionaries: dictionaries
+            dictionaries: dictionaries,
+            enabled: enabled
         )
     )
 }
@@ -177,4 +180,103 @@ private func step(_ plan: SetupPlan, _ id: SetupStepID) -> SetupStep {
     @Test func oneBlockingStepReadsAsSingular() {
         #expect(plan(trusted: false).summary == "One step left: Accessibility")
     }
+
+    /// A source the user switched off is a decision. Reporting five installed
+    /// dictionaries as working would promise an answer that will not arrive; reporting it
+    /// as broken would send the user to fix something they chose.
+    @Test func aDictionarySwitchedOffIsNeitherDoneNorOutstanding() {
+        let result = plan(ping: readyPing(enabled: SourceSettings(appleDictionary: false)))
+        let dictionary = step(result, .dictionary)
+        #expect(dictionary.state == .switchedOff)
+        #expect(dictionary.action == nil)
+        #expect(dictionary.detail.contains("Sources"))
+        #expect(!result.suggested.contains(where: { $0.id == .dictionary }))
+        #expect(result.isReady)
+        #expect(result.summary == "Everything is set up.")
+    }
+
+    /// Offering a download for a source the user turned off is worse than saying nothing.
+    @Test func translationSwitchedOffOffersNoDownload() {
+        let result = plan(
+            ping: readyPing(
+                translation: false,
+                translationStatus: "supported",
+                enabled: SourceSettings(appleTranslation: false)
+            )
+        )
+        let pair = step(result, .translationPair)
+        #expect(pair.state == .switchedOff)
+        #expect(pair.action == nil)
+        #expect(result.suggested.isEmpty)
+    }
+
+    /// Consent is checked before availability, so a switched-off source is not also told
+    /// that no dictionary is enabled in system settings.
+    @Test func consentIsReportedBeforeAvailability() {
+        let result = plan(
+            ping: readyPing(
+                dictionary: false,
+                dictionaries: [],
+                enabled: SourceSettings(appleDictionary: false)
+            )
+        )
+        #expect(step(result, .dictionary).state == .switchedOff)
+    }
 }
+
+@Suite struct SourceSettingsCodingTests {
+    /// Settings travel with keys kept verbatim; the ping travels through
+    /// `convertFromSnakeCase`. Both must land, or a switched-off source silently reads as
+    /// on and setup lies about it.
+    @Test func bothKeySpellingsDecode() throws {
+        let verbatim = #"{"apple_dictionary": false, "offline_examples": false}"#
+        let a = try IPCCoding.plainDecoder.decode(SourceSettings.self, from: Data(verbatim.utf8))
+        #expect(a.appleDictionary == false)
+        #expect(a.offlineExamples == false)
+        #expect(a.google, "a key that is absent stays on")
+
+        let converted = #"{"appleDictionary": false, "offlineExamples": false}"#
+        let b = try IPCCoding.decoder.decode(SourceSettings.self, from: Data(converted.utf8))
+        #expect(b.appleDictionary == false)
+        #expect(b.offlineExamples == false)
+    }
+
+    /// The ping is decoded by the snake_case coder, which is where the spellings meet.
+    @Test func pingCarriesConsentThroughItsOwnCoder() throws {
+        let json = #"""
+        {"version": "0.3.0", "protocol": 1, "pid": 1, "platform": "darwin",
+         "db": {"primary": true, "fallback": true, "definitions": true, "dir": "/db"},
+         "engines": {"apple_dictionary": true, "apple_translation": true,
+                     "translation_status": "installed", "dictionaries": ["A"],
+                     "enabled": {"apple_dictionary": false, "google": false}}}
+        """#
+        let ping = try IPCCoding.decoder.decode(PingInfo.self, from: Data(json.utf8))
+        #expect(ping.engines.appleDictionary, "the dictionary is installed")
+        #expect(!ping.engines.enabled.appleDictionary, "and switched off")
+        #expect(!ping.engines.enabled.google)
+        #expect(ping.engines.enabled.cambridge, "absent keys stay on")
+    }
+
+    /// An older backend sends no consent at all; nothing must read as switched off.
+    @Test func aPingWithoutConsentLeavesEverythingOn() throws {
+        let json = #"""
+        {"version": "0.3.0", "protocol": 1, "pid": 1, "platform": "darwin",
+         "db": {"primary": true, "fallback": true, "definitions": true, "dir": "/db"},
+         "engines": {"apple_dictionary": true, "apple_translation": true,
+                     "translation_status": "installed", "dictionaries": []}}
+        """#
+        let ping = try IPCCoding.decoder.decode(PingInfo.self, from: Data(json.utf8))
+        #expect(ping.engines.enabled == SourceSettings())
+    }
+
+    /// Saving must write the keys the backend reads, whatever the decoder did.
+    @Test func savingKeepsTheBackendSpelling() throws {
+        var settings = BackendSettings()
+        settings.sources.cambridge = false
+        let data = try IPCCoding.plainEncoder.encode(settings)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains(#""cambridge":false"#))
+        #expect(text.contains(#""apple_dictionary":true"#))
+    }
+}
+
