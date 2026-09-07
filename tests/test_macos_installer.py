@@ -130,3 +130,49 @@ def test_remove_does_not_suggest_deleting_an_external_store() -> None:
 
     assert 'if [[ -n "${TRANSLATOR_DB_DIR:-}" ]]; then' in text
     assert "the base store is external" in text
+
+
+def test_launchd_is_left_alone_when_home_is_redirected() -> None:
+    """launchd labels are per account, not per `$HOME`.
+
+    An install run with a redirected HOME — which is how anyone tests it —
+    used to `bootout` the real installation by label and then bootstrap a
+    plist from the sandbox, silently breaking the working setup.
+    """
+    text = INSTALLER.read_text(encoding="utf-8")
+
+    assert "launchd_is_ours()" in text
+    assert "NFSHomeDirectory" in text
+    assert text.count("leaving launchd alone") == 2  # load and unload
+    # The guard has to come before every launchctl call that mutates state.
+    for block in ("agent_load()", "agent_unload()"):
+        body = text.split(block, 1)[1].split("\n}", 1)[0]
+        assert "launchd_is_ours" in body, block
+        assert body.index("launchd_is_ours") < body.index("launchctl"), block
+
+
+def test_agent_install_script_is_present_and_strict() -> None:
+    script = REPO_ROOT / "scripts" / "agent_install_macos.sh"
+
+    assert script.exists() and script.stat().st_mode & 0o111
+    text = script.read_text(encoding="utf-8")
+    assert "set -euo pipefail" in text
+    result = subprocess.run(
+        ["bash", "-n", str(script)], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_agent_install_reports_every_manual_step() -> None:
+    """An agent needs the leftovers as data, not prose."""
+    text = (REPO_ROOT / "scripts" / "agent_install_macos.sh").read_text(
+        encoding="utf-8"
+    )
+
+    for item in ("language_pair", "anki_connect", "developer_id", "accessibility"):
+        assert f'"id": "{item}"' in text, item
+    # Every entry says who has to act and how, so the caller need not guess.
+    assert '"who": "person"' in text
+    assert text.count('"how"') >= 4
+    # Never interactive: an agent cannot answer a prompt.
+    assert "read -p" not in text and "read -r" not in text

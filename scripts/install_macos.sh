@@ -113,13 +113,37 @@ write_launch_agent() {
 PLIST
 }
 
+# launchd is not scoped by $HOME: the label is per user, so an install run with
+# a redirected HOME — which is how anyone tests this — would bootout the real
+# installation and then bootstrap a plist from the sandbox. That silently
+# breaks the working setup. Touch launchd only when HOME really is the account's
+# home directory.
+real_home() {
+  local home
+  home="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+  printf '%s\n' "${home:-${HOME}}"
+}
+
+launchd_is_ours() {
+  [[ "${HOME}" == "$(real_home)" ]]
+}
+
 agent_load() {
+  if ! launchd_is_ours; then
+    log "HOME is not the account home; leaving launchd alone (agent not loaded)"
+    log "plist written to ${AGENT_PLIST}; load it by hand if that is what you meant"
+    return 0
+  fi
   launchctl bootout "gui/$(id -u)/${BUNDLE_ID}" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "${AGENT_PLIST}"
   log "launch agent loaded"
 }
 
 agent_unload() {
+  if ! launchd_is_ours; then
+    log "HOME is not the account home; leaving launchd alone (agent not unloaded)"
+    return 0
+  fi
   launchctl bootout "gui/$(id -u)/${BUNDLE_ID}" 2>/dev/null || true
 }
 
