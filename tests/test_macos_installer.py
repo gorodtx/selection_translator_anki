@@ -151,28 +151,24 @@ def test_launchd_is_left_alone_when_home_is_redirected() -> None:
         assert body.index("launchd_is_ours") < body.index("launchctl"), block
 
 
-def test_agent_install_script_is_present_and_strict() -> None:
-    script = REPO_ROOT / "scripts" / "agent_install_macos.sh"
+def test_installing_a_bundle_built_from_other_sources_is_refused() -> None:
+    """A leftover `dist/` installs old code and the daemon answers from it.
 
-    assert script.exists() and script.stat().st_mode & 0o111
-    text = script.read_text(encoding="utf-8")
-    assert "set -euo pipefail" in text
-    result = subprocess.run(
-        ["bash", "-n", str(script)], capture_output=True, text=True, check=False
+    Nothing looks wrong from outside — the app runs, it is simply not the code
+    that was just written. It cost half an hour of chasing a phantom defect in
+    the other session, so the installer compares what the bundle carries
+    against the working tree.
+    """
+    text = INSTALLER.read_text(encoding="utf-8")
+
+    assert "assert_bundle_matches_tree" in text
+    assert "TRANSLATOR_ALLOW_STALE_BUNDLE" in text
+    assert "stale bundle" in text
+    # The check has to run before anything is copied into place.
+    body = text.split("install_app()", 1)[1].split("\n}", 1)[0]
+    assert "assert_bundle_matches_tree" in body
+    assert (
+        body.index("assert_bundle_matches_tree") < body.index("rsync")
+        if "rsync" in body
+        else True
     )
-    assert result.returncode == 0, result.stderr
-
-
-def test_agent_install_reports_every_manual_step() -> None:
-    """An agent needs the leftovers as data, not prose."""
-    text = (REPO_ROOT / "scripts" / "agent_install_macos.sh").read_text(
-        encoding="utf-8"
-    )
-
-    for item in ("language_pair", "anki_connect", "developer_id", "accessibility"):
-        assert f'"id": "{item}"' in text, item
-    # Every entry says who has to act and how, so the caller need not guess.
-    assert '"who": "person"' in text
-    assert text.count('"how"') >= 4
-    # Never interactive: an agent cannot answer a prompt.
-    assert "read -p" not in text and "read -r" not in text

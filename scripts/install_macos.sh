@@ -147,8 +147,31 @@ agent_unload() {
   launchctl bootout "gui/$(id -u)/${BUNDLE_ID}" 2>/dev/null || true
 }
 
+# A bundle carries a copy of the Python sources, so a `dist/` left over from an
+# earlier commit installs old code and the daemon then answers from it. That is
+# invisible from the outside: the app runs, it is simply not the code you just
+# wrote. Compare what the bundle carries against the working tree.
+assert_bundle_matches_tree() {
+  local bundled="${SOURCE_APP}/Contents/Resources/app"
+  [[ -d "${bundled}" ]] || return 0
+  local tree_sum bundle_sum
+  tree_sum="$(cd "${ROOT_DIR}" && find desktop_app translate_logic -name '*.py' -type f \
+    -exec shasum -a 256 {} + | sort -k2 | shasum -a 256 | cut -d' ' -f1)"
+  bundle_sum="$(cd "${bundled}" && find desktop_app translate_logic -name '*.py' -type f \
+    -exec shasum -a 256 {} + | sort -k2 | shasum -a 256 | cut -d' ' -f1)"
+  if [[ "${tree_sum}" != "${bundle_sum}" ]]; then
+    log "the bundle in ${SOURCE_APP} was built from different sources than the"
+    log "working tree, so installing it would run stale code."
+    log "rebuild first: scripts/build_macos_app.sh --out $(dirname "${SOURCE_APP}")"
+    log "or set TRANSLATOR_ALLOW_STALE_BUNDLE=1 if that is deliberate"
+    [[ "${TRANSLATOR_ALLOW_STALE_BUNDLE:-}" == "1" ]] || fail "stale bundle"
+    log "installing a stale bundle on request"
+  fi
+}
+
 install_app() {
   [[ -d "${SOURCE_APP}" ]] || fail "app bundle not found: ${SOURCE_APP} (run scripts/build_macos_app.sh)"
+  assert_bundle_matches_tree
   mkdir -p "${RELEASES_DIR}" "${LINK_DIR}"
   agent_unload
   if [[ -d "${RELEASES_DIR}/current" ]]; then
