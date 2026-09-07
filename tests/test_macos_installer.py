@@ -134,6 +134,27 @@ def test_healthcheck_asks_the_daemon_instead_of_stating_the_socket() -> None:
     assert '"method":"translate"' not in text
 
 
+def test_installer_restarts_rather_than_reregisters_an_unchanged_agent() -> None:
+    """Re-registering a login item on every update is churn macOS records.
+
+    kickstart restarts the job; bootstrap registers it, and only the second
+    touches the login item. Verified with a stubbed launchctl: two runs with an
+    identical plist gave bootout, bootstrap, print, kickstart — no second
+    registration; a plist whose path changed gave bootout, bootstrap twice; and
+    when `launchctl print` fails, the unchanged case still falls back to
+    bootout, bootstrap, because kickstart cannot start what is not loaded.
+    """
+    text = _text()
+    block = text[text.index("agent_load()") : text.index("agent_unload()")]
+
+    assert "kickstart -k" in block
+    assert "AGENT_PLIST_CHANGED == 0" in block
+    # The fallback has to stay: kickstart cannot help an un-bootstrapped agent.
+    assert "launchctl bootstrap" in block
+    # And the plist is only replaced when it actually differs.
+    assert 'cmp -s "${staged}" "${AGENT_PLIST}"' in text
+
+
 def test_installer_unloads_agent_before_swapping_releases() -> None:
     text = _text()
     install_block = text[text.index("install_app()") : text.index("rollback()")]

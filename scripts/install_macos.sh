@@ -30,6 +30,7 @@ SOURCE_APP="${TRANSLATOR_APP_PATH:-${ROOT_DIR}/dist/${APP_NAME}.app}"
 DB_FILES=("primary.sqlite3" "fallback.sqlite3" "definitions_pack.sqlite3")
 # The signed Mach-O launchd starts; a shell script cannot carry a signature.
 BACKEND_LAUNCHER="TranslatorBackend"
+AGENT_PLIST_CHANGED=1
 # Long enough for a cold daemon that waits on the first engine probe (capped at 5s).
 PING_TIMEOUT_S="${TRANSLATOR_PING_TIMEOUT_S:-8}"
 
@@ -97,7 +98,8 @@ write_launch_agent() {
   local program="${RELEASES_DIR}/current/${APP_NAME}.app/Contents/MacOS/${BACKEND_LAUNCHER}"
   [[ -x "${program}" ]] || fail "bundle has no ${BACKEND_LAUNCHER}: rebuild it (make macos-app) — ${program}"
   mkdir -p "$(dirname "${AGENT_PLIST}")" "${LOG_DIR}"
-  cat > "${AGENT_PLIST}" <<PLIST
+  local staged; staged="$(mktemp)"
+  cat > "${staged}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -122,6 +124,18 @@ write_launch_agent() {
 </dict>
 </plist>
 PLIST
+  # Re-registering a login item is not free: every bootout/bootstrap pair makes
+  # macOS record the item afresh, and ten update cycles in one session left this
+  # machine's BTM store wedged — `sfltool dumpbtm` hangs on it while every other
+  # sfltool subcommand answers. Unproven as the cause, but needless churn either
+  # way: an unchanged plist needs no new registration, only a restarted process.
+  if [[ -f "${AGENT_PLIST}" ]] && cmp -s "${staged}" "${AGENT_PLIST}"; then
+    AGENT_PLIST_CHANGED=0
+    rm -f "${staged}"
+  else
+    AGENT_PLIST_CHANGED=1
+    mv "${staged}" "${AGENT_PLIST}"
+  fi
 }
 
 # launchd is not scoped by $HOME: the label is per user, so an install run with
@@ -143,6 +157,16 @@ agent_load() {
   if ! launchd_is_ours; then
     log "HOME is not the account home; leaving launchd alone (agent not loaded)"
     log "plist written to ${AGENT_PLIST}; load it by hand if that is what you meant"
+    return 0
+  fi
+  # kickstart restarts the job; bootstrap registers it. Only the second one
+  # touches the login item, so prefer the first whenever the registration is
+  # already correct. kickstart cannot help an un-bootstrapped agent, hence the
+  # fallback rather than a bare choice.
+  if (( AGENT_PLIST_CHANGED == 0 )) \
+    && launchctl print "gui/$(id -u)/${BUNDLE_ID}" >/dev/null 2>&1 \
+    && launchctl kickstart -k "gui/$(id -u)/${BUNDLE_ID}" >/dev/null 2>&1; then
+    log "launch agent restarted (registration unchanged)"
     return 0
   fi
   launchctl bootout "gui/$(id -u)/${BUNDLE_ID}" 2>/dev/null || true
