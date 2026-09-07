@@ -17,7 +17,10 @@ APP_NAME="Translator"
 BUNDLE_ID="com.translator.desktop"
 SUPPORT_DIR="${HOME}/Library/Application Support/${APP_NAME}"
 RELEASES_DIR="${SUPPORT_DIR}/releases"
-DB_DIR="${SUPPORT_DIR}/db"
+# The app resolves databases through TRANSLATOR_DB_DIR (see platform/paths.py), so the
+# installer has to honour the same override: without it a store that already holds the
+# 1.8 GB bundle is invisible here and every install re-downloads it.
+DB_DIR="${TRANSLATOR_DB_DIR:-${SUPPORT_DIR}/db}"
 LINK_DIR="${HOME}/Applications"
 AGENT_PLIST="${HOME}/Library/LaunchAgents/${BUNDLE_ID}.plist"
 LOG_DIR="${HOME}/Library/Logs/${APP_NAME}"
