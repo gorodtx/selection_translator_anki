@@ -87,6 +87,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.translateSelection()
             }
         }
+        // Registering as a login item is a one-press action in Settings, and an
+        // unattended check has no way to press it. Same reason as the capture hook.
+        if let wanted = environment["TRANSLATOR_DEBUG_LOGIN"] {
+            NSLog("[translator] login item before: \(LoginItem.state)")
+            switch wanted {
+            case "register":
+                do { try LoginItem.enable() } catch { NSLog("[translator] register failed: \(error)") }
+            case "unregister":
+                do { try LoginItem.disable() } catch { NSLog("[translator] unregister failed: \(error)") }
+            default: break
+            }
+            NSLog("[translator] login item after: \(LoginItem.state)")
+            NSLog("[translator] bundle: \(Bundle.main.bundleURL.path)")
+        }
         switch environment["TRANSLATOR_DEBUG_WINDOW"] {
         case "settings": DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.showSettings() }
         case "history": DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in self?.showHistory() }
@@ -148,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 accessibilityTrusted: model.accessibilityTrusted,
                 shortcutRegistered: model.shortcutRegistered,
                 shortcut: model.hotKey.displayString,
+            loginItem: LoginItem.state,
                 anki: model.ankiStatus
             )
             if plan.isReady {

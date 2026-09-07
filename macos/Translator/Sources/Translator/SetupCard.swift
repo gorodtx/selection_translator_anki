@@ -23,6 +23,7 @@ struct SetupCard: View {
             accessibilityTrusted: model.accessibilityTrusted,
             shortcutRegistered: model.shortcutRegistered,
             shortcut: model.hotKey.displayString,
+            loginItem: LoginItem.state,
             anki: model.ankiStatus
         )
     }
@@ -242,6 +243,20 @@ struct SetupCard: View {
                 source: Locale.Language(identifier: model.settings.languages.source),
                 target: Locale.Language(identifier: model.settings.languages.target)
             )
+        case .enableLoginItem:
+            do {
+                try LoginItem.enable()
+                // Registering can leave macOS waiting for approval, so the row is
+                // re-read rather than assumed to be done.
+                Task { await model.refreshAll() }
+            } catch {
+                model.show(
+                    banner: "Could not turn that on: \(error.localizedDescription)",
+                    level: .error
+                )
+            }
+        case .openLoginItemsSettings:
+            LoginItem.openSettings()
         case .downloadDatabases:
             Task { await model.downloadDatabases() }
         case .cancelDatabaseDownload:
