@@ -330,3 +330,51 @@ def test_one_source_left_on_still_translates() -> None:
 
     assert asked == ["bank"]
     assert snapshot.state.translation == "берег"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["nonsense", 123, ["google"], {"google": "yes"}, {"made_up": True}],
+)
+def test_saving_a_malformed_sources_block_is_refused(bad: object) -> None:
+    """It used to answer "Settings saved" and turn every source back on.
+
+    Reading the config file stays forgiving — one written before the key
+    existed must keep working — but a client save is the opposite case: there,
+    silence would wipe a deliberate choice.
+    """
+    from desktop_app.platform.macos.ipc.protocol import (
+        ProtocolDecodeError,
+        config_from_json,
+    )
+
+    payload = {"languages": {"source": "en", "target": "ru"}, "sources": bad}
+
+    with pytest.raises(ProtocolDecodeError) as excinfo:
+        config_from_json(cast("dict[str, object]", payload))  # type: ignore[arg-type]
+
+    assert excinfo.value.code.value == "invalid_params"
+
+
+def test_a_valid_partial_block_still_saves() -> None:
+    from desktop_app.platform.macos.ipc.protocol import config_from_json
+
+    config = config_from_json(
+        cast(
+            "dict[str, object]",
+            {
+                "languages": {"source": "en", "target": "ru"},
+                "sources": {"google": False},
+            },
+        )  # type: ignore[arg-type]
+    )
+
+    assert config.sources.google is False
+    assert config.sources.cambridge is True
+
+
+def test_reading_a_config_file_stays_forgiving() -> None:
+    # The file path must never refuse: a config from an older build has to load.
+    assert config_from_dict({"sources": cast("object", "nonsense")}).sources == (  # type: ignore[arg-type]
+        SourceToggles()
+    )

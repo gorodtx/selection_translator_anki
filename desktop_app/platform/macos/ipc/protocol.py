@@ -400,7 +400,42 @@ def anki_decision_from_json(payload: JsonObject) -> AnkiUpsertDecision:
     )
 
 
+_SOURCE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "apple_dictionary",
+        "apple_translation",
+        "google",
+        "cambridge",
+        "offline_examples",
+        "definitions_pack",
+    }
+)
+
+
 def config_from_json(payload: JsonObject) -> AppConfig:
+    """Stricter than reading the config file, deliberately.
+
+    Loading a file must be forgiving: one written before a key existed has to
+    keep working, so a missing or unreadable block falls back to "everything
+    on". A client saving settings is the opposite case — a malformed block
+    there silently re-enabled every source the user had switched off, and
+    answered "Settings saved". Refuse it instead.
+    """
+    if "sources" in payload:
+        sources = payload["sources"]
+        if not isinstance(sources, dict):
+            raise ProtocolDecodeError(
+                ErrorCode.INVALID_PARAMS, "'sources' must be an object"
+            )
+        for key, value in sources.items():
+            if key not in _SOURCE_KEYS:
+                raise ProtocolDecodeError(
+                    ErrorCode.INVALID_PARAMS, f"unknown source {key!r}"
+                )
+            if not isinstance(value, bool):
+                raise ProtocolDecodeError(
+                    ErrorCode.INVALID_PARAMS, f"source {key!r} must be true or false"
+                )
     return config_from_dict(payload)
 
 
