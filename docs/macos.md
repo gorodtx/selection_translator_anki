@@ -361,6 +361,22 @@ system styles, so nothing moved on screen — the popup measures 480×670 before
 and after — with the single exception of the BrE/AmE tag, which had no style at
 9 pt and became 10.
 
+### Running the bundled interpreter by hand
+
+`Resources/bin/run-backend` sets `PYTHONDONTWRITEBYTECODE=1`; invoking
+`Resources/python/bin/python3.13` directly does not. Without it the import
+writes `__pycache__` inside `Resources/` and the code seal breaks — the same
+failure as a shipped test helper, from a different direction. Set the variable:
+
+```bash
+APP=path/to/Translator.app/Contents/Resources
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$APP/app:$APP/site-packages" \
+  "$APP/python/bin/python3.13" -c 'import desktop_app; print(desktop_app.__file__)'
+```
+
+`test_built_bundle_seal_is_intact` catches it when it happens, and the bundle
+job in CI re-verifies the seal after running the whole toolchain.
+
 ## Permissions
 
 | Path | Permission | If denied |

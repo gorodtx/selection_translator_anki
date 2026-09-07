@@ -11,7 +11,6 @@ from typing import cast
 import pytest
 
 from desktop_app.platform.macos.db_download import (
-    Asset,
     DatabaseDownloader,
     DownloadState,
     LockError,
