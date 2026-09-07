@@ -50,6 +50,7 @@ class Method(StrEnum):
     ANKI_CREATE_MODEL = "anki.create_model"
     ANKI_PREPARE_UPSERT = "anki.prepare_upsert"
     ANKI_APPLY_UPSERT = "anki.apply_upsert"
+    ENGINES_REFRESH = "engines.refresh"
     DB_DOWNLOAD = "db.download"
     DB_CANCEL = "db.cancel"
     SETTINGS_GET = "settings.get"

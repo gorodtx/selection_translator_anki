@@ -19,6 +19,9 @@ public enum IPCMethod {
     public static let ankiCreateModel = "anki.create_model"
     public static let ankiPrepareUpsert = "anki.prepare_upsert"
     public static let ankiApplyUpsert = "anki.apply_upsert"
+    public static let enginesRefresh = "engines.refresh"
+    public static let dbDownload = "db.download"
+    public static let dbCancel = "db.cancel"
     public static let settingsGet = "settings.get"
     public static let settingsSave = "settings.save"
     public static let shutdown = "shutdown"
@@ -28,6 +31,7 @@ public enum IPCEventName {
     public static let translationState = "translation.state"
     public static let notification = "notification"
     public static let ankiAvailability = "anki.availability"
+    public static let dbProgress = "db.progress"
     /// Synthesised by the client when the socket closes; never sent by the backend.
     public static let disconnected = "_client.disconnected"
 }

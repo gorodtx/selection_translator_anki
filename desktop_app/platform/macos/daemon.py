@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 import concurrent.futures
 import contextlib
 import logging
@@ -130,6 +130,7 @@ class BackendApi:
         request_shutdown: Callable[[], None],
         engines: Callable[[], JsonObject] | None = None,
         refresh_engines: Callable[[], None] | None = None,
+        refresh_engines_async: Callable[[], Awaitable[None]] | None = None,
         downloader: DatabaseDownloader | None = None,
     ) -> None:
         self._session = session
@@ -138,6 +139,7 @@ class BackendApi:
         self._request_shutdown = request_shutdown
         self._engines = engines or (lambda: engine_status(self._session.config.sources))
         self._refresh_engines = refresh_engines
+        self._refresh_engines_async = refresh_engines_async
         self._downloader = downloader
 
     async def handle(self, request: Request) -> JsonObject:
@@ -222,6 +224,14 @@ class BackendApi:
 
             outcome = await self._await_reply(start_apply, _ANKI_TIMEOUT_S)
             return {"outcome": outcome.outcome, "message": outcome.message}
+        if method is Method.ENGINES_REFRESH:
+            # `ping` refreshes a stale status in the background, so the answer
+            # it returns is still the old one. After the app downloads the
+            # language pair it needs the new value now, or onboarding keeps
+            # offering a download for a pair that is already installed.
+            if self._refresh_engines_async is not None:
+                await self._refresh_engines_async()
+            return self._engines()
         if method is Method.DB_DOWNLOAD:
             if self._downloader is None:
                 raise ProtocolDecodeError(
@@ -350,12 +360,21 @@ class Daemon:
             target_dir=paths.db_dir(),
             emit=on_progress,
         )
+
+        async def refresh_engines_now() -> None:
+            future = asyncio.run_coroutine_threadsafe(
+                apple.refresh_status(), services.runtime.loop
+            )
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.wrap_future(future), 5.0)
+
         api = BackendApi(
             session=session,
             loop=loop,
             socket_path=self._socket_path,
             request_shutdown=self.request_stop,
             refresh_engines=refresh_engines,
+            refresh_engines_async=refresh_engines_now,
             downloader=downloader,
         )
         if apple.is_available():
