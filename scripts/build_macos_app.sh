@@ -209,11 +209,22 @@ PLIST
 
 # --- Signing -----------------------------------------------------------------------------------
 log "signing (${SIGN_IDENTITY})"
-find "${RESOURCES}/python" "${RESOURCES}/site-packages" -type f \( -name '*.so' -o -name '*.dylib' \) \
-  -exec codesign --force --sign "${SIGN_IDENTITY}" {} + 2>/dev/null || true
-codesign --force --sign "${SIGN_IDENTITY}" "${RESOURCES}/python/bin/python3.13"
-codesign --force --sign "${SIGN_IDENTITY}" "${RESOURCES}/bin/apple-lang-helper"
-codesign --force --sign "${SIGN_IDENTITY}" --identifier "${BUNDLE_ID}" "${APP_DIR}"
+# Notarisation requires the hardened runtime, so a real identity must get
+# `--options runtime --timestamp` or Apple rejects the upload. Ad-hoc builds
+# stay unhardened on purpose: with no team identity, library validation would
+# refuse to load the embedded Python's extension modules.
+SIGN_FLAGS=(--force --sign "${SIGN_IDENTITY}")
+if [[ "${SIGN_IDENTITY}" != "-" ]]; then
+  SIGN_FLAGS+=(--options runtime --timestamp)
+fi
+# A nested signature that fails silently yields a bundle whose seal is broken
+# only discovered at notarisation time, so let failures stop the build.
+find "${RESOURCES}/python" "${RESOURCES}/site-packages" -type f \
+  \( -name '*.so' -o -name '*.dylib' \) -print0 \
+  | xargs -0 -r codesign "${SIGN_FLAGS[@]}"
+codesign "${SIGN_FLAGS[@]}" "${RESOURCES}/python/bin/python3.13"
+codesign "${SIGN_FLAGS[@]}" "${RESOURCES}/bin/apple-lang-helper"
+codesign "${SIGN_FLAGS[@]}" --identifier "${BUNDLE_ID}" "${APP_DIR}"
 
 rm -rf "${STAGE}"
 

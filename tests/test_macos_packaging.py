@@ -186,3 +186,26 @@ def test_built_plist_declares_the_service_without_a_context_filter() -> None:
     assert service["NSSendTypes"] == ["NSStringPboardType"]
     assert service["NSMessage"] == "translateSelection"
     assert "NSRequiredContext" not in service
+
+
+def test_a_real_identity_gets_the_hardened_runtime() -> None:
+    """Notarisation refuses a bundle without it.
+
+    `codesign --sign <identity>` alone leaves `flags=0x2`; adding
+    `--options runtime` makes it `0x10002(runtime)`, which is what Apple
+    checks. Ad-hoc builds stay unhardened on purpose: with no team identity,
+    library validation refuses the embedded Python's extension modules.
+    """
+    text = _script()
+
+    assert 'if [[ "${SIGN_IDENTITY}" != "-" ]]; then' in text
+    assert "SIGN_FLAGS+=(--options runtime --timestamp)" in text
+
+
+def test_nested_signing_failures_stop_the_build() -> None:
+    # `-exec codesign ... 2>/dev/null || true` hid a broken nested signature
+    # until notarisation, which happens on a tag, far from the change.
+    text = _script()
+
+    assert "|| true" not in text.split('log "signing')[1].split('log "verifying')[0]
+    assert "xargs -0 -r codesign" in text
