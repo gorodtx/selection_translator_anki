@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from desktop_app.infrastructure.notifications.models import Notification, NotificationLevel
+from desktop_app.infrastructure.notifications.models import (
+    Notification,
+    NotificationLevel,
+)
 
 
 def anki_success() -> Notification:
@@ -83,6 +86,13 @@ def model_created(model_name: str) -> Notification:
 def settings_error(message: str) -> Notification:
     text = message.strip() or "Settings error."
     return Notification(text, NotificationLevel.ERROR)
+
+
+def no_sources_enabled() -> Notification:
+    return Notification(
+        "Every translation source is switched off.",
+        NotificationLevel.WARNING,
+    )
 
 
 def translation_error() -> Notification:

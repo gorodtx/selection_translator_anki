@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 from dataclasses import replace
 
 import pytest
 
 from desktop_app.config import JsonValue, config_from_dict, config_to_dict
 from desktop_app.infrastructure.services.result_cache import ResultCache
+from desktop_app.platform.macos.session import BackendSession
 from translate_logic.application.pipeline import translate as pipeline
 from translate_logic.infrastructure.providers import apple
 from translate_logic.infrastructure.providers.cambridge import CambridgeResult
@@ -218,3 +220,113 @@ def test_updating_to_the_same_toggles_keeps_the_cache() -> None:
     service.update_sources(SourceToggles())
 
     assert service.get_cached("bank", "en", "ru") == cached
+
+
+def _session_with(
+    sources: SourceToggles,
+) -> tuple[BackendSession, list[tuple[str, str]], list[str]]:
+    """A session over a stub translator, built here rather than borrowed.
+
+    The macOS IPC tests keep their own fixtures private; reaching into them
+    couples two test modules for the sake of twenty lines.
+    """
+    from concurrent.futures import Future
+
+    from desktop_app.application.dispatch import call_inline
+    from desktop_app.application.use_cases.anki_flow import AnkiFlow
+    from desktop_app.application.use_cases.translation_flow import TranslationFlow
+    from desktop_app.config import AnkiConfig, AnkiFieldMap, AppConfig, LanguageConfig
+    from desktop_app.infrastructure.services.container import AppServices
+    from desktop_app.infrastructure.services.history import HistoryStore
+    from desktop_app.infrastructure.services.runtime import AsyncRuntime
+
+    asked: list[str] = []
+
+    class _Translator:
+        def get_cached(self, text: str, source: str, target: str) -> None:
+            del text, source, target
+            return None
+
+        def translate(
+            self,
+            text: str,
+            lookup_text: str,
+            source_lang: str,
+            target_lang: str,
+            on_partial: object = None,
+        ) -> Future[TranslationResult]:
+            del lookup_text, source_lang, target_lang, on_partial
+            asked.append(text)
+            future: Future[TranslationResult] = Future()
+            future.set_result(
+                TranslationResult(
+                    translation_ru=FieldValue.present("берег"),
+                    examples=(Example("On the bank."),),
+                )
+            )
+            return future
+
+        def refresh_examples(
+            self, lookup_text: str, *, limit: int
+        ) -> Future[tuple[Example, ...]]:
+            del lookup_text, limit
+            future: Future[tuple[Example, ...]] = Future()
+            future.set_result(())
+            return future
+
+    class _Services:
+        def __init__(self) -> None:
+            self.translation_flow = TranslationFlow(
+                translator=cast("object", _Translator()),  # type: ignore[arg-type]
+                history=HistoryStore(),
+            )
+            self.anki_flow = AnkiFlow(service=cast("object", object()))  # type: ignore[arg-type]
+            self.runtime = AsyncRuntime()
+
+        def cancel_active(self) -> None:
+            return None
+
+    notes: list[tuple[str, str]] = []
+    session = BackendSession(
+        services=cast(AppServices, _Services()),
+        config=AppConfig(
+            languages=LanguageConfig(source="en", target="ru"),
+            anki=AnkiConfig(deck="", model="", fields=AnkiFieldMap("", "", "", "", "")),
+            sources=sources,
+        ),
+        dispatch=call_inline,
+        emit=lambda event, payload: (
+            notes.append(
+                (str(payload.get("level", "")), str(payload.get("message", "")))
+            )
+            if str(event) == "notification"
+            else None
+        ),
+        save_config=lambda config: None,
+    )
+    return session, notes, asked
+
+
+def test_switching_everything_off_says_so_instead_of_going_quiet() -> None:
+    """An empty popup is indistinguishable from a broken app.
+
+    With nothing enabled there is no source that could answer, so the session
+    names the cause and starts no work.
+    """
+    session, notes, asked = _session_with(ALL_OFF)
+
+    snapshot = session.translate("bank")
+
+    assert asked == [], "no source was enabled, yet work was started"
+    assert snapshot.state.translation == ""
+    assert any(level == "warning" for level, _ in notes), notes
+    assert any("switched off" in message for _, message in notes), notes
+
+
+def test_one_source_left_on_still_translates() -> None:
+    session, _, asked = _session_with(replace(ALL_OFF, offline_examples=True))
+
+    snapshot = session.translate("bank")
+
+    assert asked == ["bank"]
+    assert snapshot.state.translation == "берег"

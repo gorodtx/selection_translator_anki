@@ -57,6 +57,19 @@ class SourceToggles:
     definitions_pack: bool = True
 
     @property
+    def any_enabled(self) -> bool:
+        return any(
+            (
+                self.apple_dictionary,
+                self.apple_translation,
+                self.google,
+                self.cambridge,
+                self.offline_examples,
+                self.definitions_pack,
+            )
+        )
+
+    @property
     def any_network(self) -> bool:
         return self.google or self.cambridge
 

@@ -144,6 +144,16 @@ class BackendSession:
             raise SessionError(
                 ErrorCode.INVALID_PARAMS, "Text has no translatable English content."
             )
+        if not self._config.sources.any_enabled:
+            # An empty popup is indistinguishable from a broken app, so name
+            # the cause instead of starting work that cannot produce anything.
+            self.cancel()
+            self._state.request.next_id()
+            self._presenter.begin(prepared.display_text)
+            self._presenter.mark_error()
+            self._notify(notify_messages.no_sources_enabled())
+            self._emit_state(Phase.ERROR)
+            return self.snapshot()
         if self._state.memory.can_reuse(
             prepared.display_text, loading=self._presenter.state.loading
         ):
