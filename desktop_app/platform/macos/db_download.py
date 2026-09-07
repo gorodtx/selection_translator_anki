@@ -61,6 +61,9 @@ class Asset:
     name: str
     sha256: str
     url: str
+    # What the release says this asset weighs. 0 means the lock predates the
+    # field: callers must treat it as unknown, never as an empty file.
+    size: int = 0
 
 
 def resolve_lock_path() -> Path:
@@ -114,11 +117,14 @@ def load_assets(lock_path: Path) -> tuple[Asset, ...]:
         digest = meta.get("sha256")
         if not isinstance(digest, str):
             continue
+        raw_size = meta.get("size")
+        size = raw_size if isinstance(raw_size, int) and raw_size >= 0 else 0
         resolved.append(
             Asset(
                 name=name,
                 sha256=digest,
                 url=f"https://github.com/{repo}/releases/download/{tag}/{name}",
+                size=size,
             )
         )
     if not resolved:

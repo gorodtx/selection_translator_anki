@@ -70,7 +70,12 @@ path stays lock-free. **So `unknown` never reaches a client that asked once.**
 
 `db` reports `primary`/`fallback`/`definitions` as booleans plus a `sources`
 map naming the directory each file actually came from — one shared `dir` lied
-whenever the bases were split across directories.
+whenever the bases were split across directories. `pending_bytes` is what a
+download would pull right now, summed from the sizes the lock records for the
+files that are absent: the bases are 1.8 GB and a button that starts that
+without saying so is a surprise people meter their connection over. It is
+`null` when the lock cannot be read, which is **not** the same as nothing left
+to download — a client must not render that as ready.
 
 ### Sources, and how a client turns one off
 

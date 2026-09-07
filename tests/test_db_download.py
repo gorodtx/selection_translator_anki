@@ -59,6 +59,36 @@ def test_the_real_lock_in_this_repo_parses() -> None:
         "definitions_pack.sqlite3",
     }
     assert all(len(a.sha256) == 64 for a in assets)
+    # Onboarding shows the download's weight before starting it, so the lock
+    # has to carry real sizes. Checked against the release assets and against
+    # the installed files, which agreed byte for byte.
+    assert all(a.size > 0 for a in assets)
+    assert sum(a.size for a in assets) == 1_896_546_304
+
+
+def test_a_lock_without_sizes_still_loads() -> None:
+    """Older locks predate the field; they must not become unusable."""
+    import json as _json
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as raw:
+        path = Path(raw) / "db-bundle.lock.json"
+        path.write_text(
+            _json.dumps(
+                {
+                    "repo": "r",
+                    "tag": "t",
+                    "assets": {
+                        "primary.sqlite3": {"name": "primary.sqlite3", "sha256": "aa"}
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assets = load_assets(path)
+
+    assert assets[0].size == 0, "unknown, and callers must read it as unknown"
 
 
 @pytest.mark.parametrize(

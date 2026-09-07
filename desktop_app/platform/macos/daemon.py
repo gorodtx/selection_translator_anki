@@ -51,6 +51,7 @@ from desktop_app.platform.macos.db_download import (
     DatabaseDownloader,
     LockError,
     Progress,
+    load_assets,
     resolve_lock_path,
 )
 from desktop_app.platform.macos.ipc.server import IpcServer
@@ -117,7 +118,33 @@ def db_status() -> JsonObject:
         sources[key] = str(path.parent) if exists else None
     status["dir"] = str(paths.db_dir())
     status["sources"] = sources
+    status["pending_bytes"] = _pending_download_bytes(status)
     return status
+
+
+def _pending_download_bytes(status: JsonObject) -> int | None:
+    """How much a download would pull, so onboarding can say so beforehand.
+
+    The bases are 1.8 GB. A button that starts that without saying what it
+    costs is the kind of surprise people meter their connection over. Presence
+    is the only signal used here — verifying digests would hash 1.8 GB on every
+    ping, and a present-but-corrupt file is the downloader's business anyway.
+
+    None means the lock could not be read, which is not the same as nothing to
+    download: the client must not render it as "ready".
+    """
+    try:
+        assets = load_assets(resolve_lock_path())
+    except LockError:
+        return None
+    missing = {name for key, name in _DB_FILES.items() if status.get(key) is not True}
+    total = 0
+    for asset in assets:
+        if asset.name in missing:
+            if asset.size <= 0:
+                return None
+            total += asset.size
+    return total
 
 
 class BackendApi:

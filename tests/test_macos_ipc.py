@@ -560,3 +560,36 @@ def test_docs_list_every_method_and_event() -> None:
 
     assert not missing_methods, f"undocumented methods: {missing_methods}"
     assert not missing_events, f"undocumented events: {missing_events}"
+
+
+def test_db_status_reports_what_a_download_would_cost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bases are 1.8 GB, so the button has to say so before it is pressed."""
+    from desktop_app.platform.macos import daemon as daemon_module
+
+    store = tmp_path / "store"
+    store.mkdir()
+    monkeypatch.setenv("TRANSLATOR_DB_DIR", str(store))
+
+    empty = daemon_module.db_status()
+    assert empty["primary"] is False
+    assert empty["pending_bytes"] == 1_896_546_304
+
+    for name in ("primary.sqlite3", "fallback.sqlite3", "definitions_pack.sqlite3"):
+        (store / name).write_bytes(b"")
+    full = daemon_module.db_status()
+    assert full["primary"] is True
+    assert full["pending_bytes"] == 0
+
+    # An unreadable lock is not the same as nothing left to download, and a
+    # client must not be able to mistake one for the other.
+    monkeypatch.setattr(
+        daemon_module, "resolve_lock_path", lambda: tmp_path / "no-such-lock.json"
+    )
+    store_again = tmp_path / "store2"
+    store_again.mkdir()
+    monkeypatch.setenv("TRANSLATOR_DB_DIR", str(store_again))
+    unknown = daemon_module.db_status()
+    assert unknown["primary"] is False
+    assert unknown["pending_bytes"] is None

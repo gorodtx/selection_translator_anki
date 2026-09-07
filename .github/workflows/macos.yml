@@ -250,6 +250,9 @@ jobs:
           assert db["dir"], db
           # No base is present here, so none may claim a source directory.
           assert all(value is None for value in db["sources"].values()), db
+          # An empty store is the only place the full download cost is visible,
+          # and this runner is the only empty store we ever get.
+          assert db["pending_bytes"] == 1896546304, db
           print("bundle backend OK:", data["version"])
           PY
           uv run --frozen python -m desktop_app.platform.macos.client shutdown --timeout 10 || true
