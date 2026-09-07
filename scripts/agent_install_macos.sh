@@ -17,6 +17,7 @@ cd "${ROOT_DIR}"
 APP_NAME="Translator"
 SUPPORT_DIR="${HOME}/Library/Application Support/${APP_NAME}"
 SOCKET_PATH="${TRANSLATOR_SOCKET_PATH:-${SUPPORT_DIR}/run/backend.sock}"
+SFLTOOL_TIMEOUT_S="${TRANSLATOR_SFLTOOL_TIMEOUT_S:-5}"
 INSTALLED_APP="${HOME}/Applications/${APP_NAME}.app"
 REPORT_ONLY=0
 [[ "${1:-}" == "--report" ]] && REPORT_ONLY=1
@@ -178,9 +179,34 @@ PY
 # How macOS recorded the login item. A name of "Translator" means the system tied the
 # agent to this app; a bare program name means it could not, which is what the user sees
 # in the notification.
+# sfltool can wedge: measured hanging with no output at all while an earlier
+# invocation was still stuck on the same store, 25 minutes and counting. This
+# report must never be the thing that hangs — an agent waiting on it has
+# nothing to fall back on — so the call gets a deadline. A check that did not
+# answer reads as "unknown", which is already how an empty dump is treated:
+# "could not look" is not "not registered".
+run_with_deadline() {
+  local seconds="$1"; shift
+  local out; out="$(mktemp)"
+  "$@" >"${out}" 2>/dev/null &
+  local pid=$! ticks=0
+  while kill -0 "${pid}" 2>/dev/null && (( ticks < seconds * 10 )); do
+    sleep 0.1
+    ticks=$((ticks + 1))
+  done
+  if kill -0 "${pid}" 2>/dev/null; then
+    kill -9 "${pid}" 2>/dev/null || true
+    rm -f "${out}"
+    return 1
+  fi
+  wait "${pid}" 2>/dev/null || true
+  cat "${out}"
+  rm -f "${out}"
+}
+
 login_item_state() {
   local dump
-  dump="$(sfltool dumpbtm 2>/dev/null || true)"
+  dump="$(run_with_deadline "${SFLTOOL_TIMEOUT_S}" sfltool dumpbtm || true)"
   [[ -n "${dump}" ]] || { echo "unknown"; return; }
   if printf '%s' "${dump}" | /usr/bin/grep -q 'Executable Path:.*TranslatorBackend'; then
     echo "registered as Translator"

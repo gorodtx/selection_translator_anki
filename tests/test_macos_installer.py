@@ -225,3 +225,35 @@ def test_build_signs_the_backend_launcher_before_sealing_the_bundle() -> None:
     )
     assert signing < sealing, "the launcher must be signed before the bundle is sealed"
     assert '--identifier "${BUNDLE_ID}.backend"' in text
+
+
+AGENT_INSTALLER = REPO_ROOT / "scripts" / "agent_install_macos.sh"
+
+
+def test_agent_installer_is_executable_and_syntactically_valid() -> None:
+    assert AGENT_INSTALLER.stat().st_mode & 0o111
+    result = subprocess.run(
+        ["bash", "-n", str(AGENT_INSTALLER)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_agent_installer_never_waits_on_sfltool_without_a_deadline() -> None:
+    """The report is all an agent gets, so it must not be able to hang.
+
+    Measured: `sfltool dumpbtm` returned nothing and never exited — 25 minutes
+    and counting on one invocation, while every later one blocked behind it.
+    With the deadline the whole report finishes in 6s and answers exit 0.
+    """
+    text = AGENT_INSTALLER.read_text(encoding="utf-8")
+
+    assert "run_with_deadline" in text
+    # Every sfltool call goes through the deadline, none of them bare.
+    for line in text.splitlines():
+        if "sfltool" in line and not line.lstrip().startswith("#"):
+            assert "run_with_deadline" in line, f"bare sfltool call: {line.strip()}"
+    # A check that could not answer is "unknown", never "absent".
+    assert 'echo "unknown"' in text
