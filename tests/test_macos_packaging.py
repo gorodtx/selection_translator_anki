@@ -145,3 +145,44 @@ def test_built_bundle_seal_is_intact() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_service_is_offered_on_any_selection() -> None:
+    """`NSRequiredContext` with `NSTextContent: Word` hides the Service on
+
+    anything but a single word, and the app translates phrases and sentences
+    too — a selected sentence produces a popup just as a word does.
+    """
+    text = _script()
+
+    assert "NSSendTypes" in text
+    assert "NSRequiredContext" not in text
+    assert "NSTextContent" not in text
+
+
+def test_bundle_identifier_matches_the_project_identity() -> None:
+    # The same string is the D-Bus bus name on Linux and the launchd label in
+    # the installer; a second identifier would earn a second, separate
+    # Accessibility grant from the user.
+    text = _script()
+    installer = (REPO_ROOT / "scripts" / "install_macos.sh").read_text(encoding="utf-8")
+
+    assert 'BUNDLE_ID="com.translator.desktop"' in text
+    assert 'BUNDLE_ID="com.translator.desktop"' in installer
+
+
+@pytest.mark.skipif(
+    not (REPO_ROOT / "dist" / "Translator.app" / "Contents" / "Info.plist").exists(),
+    reason="no bundle built (scripts/build_macos_app.sh)",
+)
+def test_built_plist_declares_the_service_without_a_context_filter() -> None:
+    plist = plistlib.loads(
+        (REPO_ROOT / "dist" / "Translator.app" / "Contents" / "Info.plist").read_bytes()
+    )
+
+    assert plist["CFBundleIdentifier"] == "com.translator.desktop"
+    assert plist["LSUIElement"] is True
+    service = plist["NSServices"][0]
+    assert service["NSSendTypes"] == ["NSStringPboardType"]
+    assert service["NSMessage"] == "translateSelection"
+    assert "NSRequiredContext" not in service

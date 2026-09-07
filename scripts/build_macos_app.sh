@@ -201,7 +201,6 @@ cat > "${CONTENTS}/Info.plist" <<PLIST
       <key>NSMessage</key><string>translateSelection</string>
       <key>NSPortName</key><string>${APP_NAME}</string>
       <key>NSSendTypes</key><array><string>NSStringPboardType</string></array>
-      <key>NSRequiredContext</key><dict><key>NSTextContent</key><string>Word</string></dict>
     </dict>
   </array>
 </dict>
