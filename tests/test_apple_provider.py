@@ -40,6 +40,11 @@ LOOK_RAW = (
 )
 OXFORD_RU = "Oxford Russian Dictionary - Русско-Английский • Англо-Русский"
 
+# The stand-in helper is a Python interpreter that has to boot. The
+# production default (0.6 s) suits a warm sidecar and makes these tests
+# flake on a loaded machine.
+TEST_TIMEOUT_S = 15.0
+
 # Structured entry markup, the shape ``DCSRecordCopyData`` returns. Content is
 # invented; only the class names and nesting match the real dictionary.
 BANK_MARKUP = (
@@ -271,21 +276,28 @@ def test_helper_client_defines_translates_and_reports_status(fake_helper: Path) 
     async def scenario() -> None:
         helper = apple.AppleLangHelper(binary=fake_helper)
         try:
-            status = await helper.status()
+            status = await helper.status(timeout=TEST_TIMEOUT_S)
             assert status.translation_status == "supported"
             assert status.dictionaries == (OXFORD_RU,)
             assert not status.translation_installed
 
             # No markup in the records, so the client falls back to the flat
             # DCSCopyTextDefinition text and parses it itself.
-            definition = await helper.define("bank")
+            definition = await helper.define("bank", timeout=TEST_TIMEOUT_S)
             assert definition is not None
             assert definition.lexical.headword == "bank"
             assert definition.dictionary == OXFORD_RU
-            assert await helper.define("zzz") is None
+            assert await helper.define("zzz", timeout=TEST_TIMEOUT_S) is None
 
-            assert await helper.translate("hello", source="en", target="ru") is None
-            translated = await helper.translate("ok:hello", source="en", target="ru")
+            assert (
+                await helper.translate(
+                    "hello", source="en", target="ru", timeout=TEST_TIMEOUT_S
+                )
+                is None
+            )
+            translated = await helper.translate(
+                "ok:hello", source="en", target="ru", timeout=TEST_TIMEOUT_S
+            )
             assert translated == "перевод hello"
         finally:
             await helper.close()
@@ -303,7 +315,7 @@ def test_helper_client_prefers_structured_records_when_markup_present(
     async def scenario() -> apple.AppleDefinition | None:
         helper = apple.AppleLangHelper(binary=script)
         try:
-            return await helper.define("bank")
+            return await helper.define("bank", timeout=TEST_TIMEOUT_S)
         finally:
             await helper.close()
 
@@ -328,11 +340,13 @@ def test_helper_client_survives_process_crash(fake_helper: Path) -> None:
         helper = apple.AppleLangHelper(binary=fake_helper)
         try:
             with pytest.raises(apple.AppleHelperError):
-                await helper.translate("crash", source="en", target="ru")
+                await helper.translate(
+                    "crash", source="en", target="ru", timeout=TEST_TIMEOUT_S
+                )
             # A fresh process is spawned for the next request.
-            assert await helper.translate("ok:again", source="en", target="ru") == (
-                "перевод again"
-            )
+            assert await helper.translate(
+                "ok:again", source="en", target="ru", timeout=TEST_TIMEOUT_S
+            ) == ("перевод again")
         finally:
             await helper.close()
 

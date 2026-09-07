@@ -469,6 +469,27 @@ def _sidecar() -> Path | None:
     return binary if binary.exists() and os.access(binary, os.X_OK) else None
 
 
+def _dictionary_names(payload: object) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    listed = cast(dict[str, object], payload).get("dictionaries", [])
+    if not isinstance(listed, list):
+        return []
+    names: list[str] = []
+    for item in cast(list[object], listed):
+        if isinstance(item, dict):
+            name = cast(dict[str, object], item).get("name")
+            if isinstance(name, str):
+                names.append(name)
+    return names
+
+
+def _has_russian_dictionary(payload: object) -> bool:
+    return any(
+        "Russian" in name or "Русско" in name for name in _dictionary_names(payload)
+    )
+
+
 @pytest.mark.skipif(
     sys.platform != "darwin", reason="Dictionary Services is macOS only"
 )
@@ -510,6 +531,11 @@ def test_live_sidecar_records_parse_into_a_card(
                 return body["result"]
 
             dictionaries = await call('{"id":"1","op":"dictionaries"}')
+            # The define below names a dictionary, so it errors outright where
+            # none is enabled — the skip has to be decided before that call,
+            # not after. A CI runner has no Russian dictionary at all.
+            if not _has_russian_dictionary(dictionaries):
+                return dictionaries, None
             bank = await call(
                 '{"id":"2","op":"define","term":"bank","dictionary":"Oxford Russian"}'
             )
@@ -519,17 +545,10 @@ def test_live_sidecar_records_parse_into_a_card(
             await process.wait()
 
     dictionaries, bank = asyncio.run(scenario())
-    assert isinstance(dictionaries, dict)
-    listed = cast(dict[str, object], dictionaries).get("dictionaries", [])
-    assert isinstance(listed, list)
-    names: list[str] = []
-    for item in cast(list[object], listed):
-        if isinstance(item, dict):
-            name = cast(dict[str, object], item).get("name")
-            if isinstance(name, str):
-                names.append(name)
-    if not any("Russian" in name or "Русско" in name for name in names):
-        pytest.skip(f"no English-Russian dictionary enabled: {names}")
+    if bank is None:
+        pytest.skip(
+            f"no English-Russian dictionary enabled: {_dictionary_names(dictionaries)}"
+        )
 
     records = records_from_json(bank)
     assert records, bank
