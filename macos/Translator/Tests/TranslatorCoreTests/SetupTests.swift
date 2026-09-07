@@ -181,6 +181,15 @@ private func step(_ plan: SetupPlan, _ id: SetupStepID) -> SetupStep {
         #expect(plan(trusted: false).summary == "One step left: Accessibility")
     }
 
+    /// With the backend down, the database stage is unknown rather than broken. Naming
+    /// both would report two problems where fixing one resolves the other.
+    @Test func aSilentBackendIsTheOnlyStepNamed() {
+        let result = plan(connected: false, ping: nil)
+        #expect(result.blocking.map(\.id) == [.backend, .databases])
+        #expect(result.summary == "One step left: Backend")
+        #expect(!result.isReady)
+    }
+
     /// A source the user switched off is a decision. Reporting five installed
     /// dictionaries as working would promise an answer that will not arrive; reporting it
     /// as broken would send the user to fix something they chose.

@@ -96,6 +96,12 @@ public struct SetupPlan: Equatable, Sendable {
 
     /// One line for the top of the section, so the state is legible without reading rows.
     public var summary: String {
+        // Everything the backend reports is unknown until it answers, not wrong. Listing
+        // those stages alongside it tells the user they have several problems when they
+        // have one, and the rest resolve themselves the moment it starts.
+        if let backend = steps.first(where: { $0.id == .backend }), backend.state != .done {
+            return "One step left: \(backend.title)"
+        }
         if !blocking.isEmpty {
             let names = blocking.map(\.title).joined(separator: ", ")
             return blocking.count == 1
