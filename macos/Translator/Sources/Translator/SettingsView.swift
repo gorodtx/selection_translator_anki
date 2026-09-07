@@ -8,6 +8,7 @@ import TranslatorCore
 /// two rows claiming the same state is how they drift apart.
 struct SettingsView: View {
     @State private var fieldMappingOpen = false
+    @State private var backgroundOpen = false
     @Bindable var model: AppModel
     var onHotKeyChange: (KeyCombo) -> Void
 
@@ -29,13 +30,13 @@ struct SettingsView: View {
                     enginesCard
                     ankiCard
                     databaseCard
-                    backgroundCard
                     HStack {
                         Spacer()
                         Button("Save settings") { Task { await model.saveSettings() } }
                             .buttonStyle(.borderedProminent)
                             .disabled(!model.isConnected)
                     }
+                    footer
                 }
                 .padding(Layout.gutter)
             }
@@ -146,20 +147,38 @@ struct SettingsView: View {
         }
     }
 
-    /// Three processes never stop, and until now they were called "python3.13" and
-    /// "apple-lang-helper" in Activity Monitor — a user who found them there had no way
-    /// to tell whose they were or why they were still running. Four lines, because that
-    /// is all it takes to answer both questions.
-    private var backgroundCard: some View {
-        Card("What keeps running") {
-            processRow("Translator", "This window, the shortcut and the popup.")
-            processRow("TranslatorEngine", "Holds the offline dictionaries open so a lookup answers in milliseconds. Starts at login and idles.")
-            processRow("TranslatorLookup", "Asks macOS for its own dictionary and offline translation.")
-            Text("Nothing leaves this Mac unless a network source above is switched on.")
-                .font(.captionText)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+    private static let repository = URL(string: "https://github.com/gorodtx/selection_translator_anki")
+
+    /// The answer to a question asked once, usually after finding an unfamiliar process
+    /// in Activity Monitor: whose is it, and what was allowed. Folded away, because an
+    /// answer nobody is asking is noise, and last, because it is not a setting.
+    @ViewBuilder
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            DisclosureGroup(isExpanded: $backgroundOpen) {
+                VStack(alignment: .leading, spacing: 5) {
+                    processRow("Translator", "This window, the shortcut and the popup.")
+                    processRow("TranslatorEngine", "Keeps the offline dictionaries open, so a lookup answers in milliseconds. Starts at login and then idles.")
+                    processRow("TranslatorLookup", "Asks macOS for its own dictionary and offline translation.")
+                    Text("Nothing leaves this Mac unless a network source above is switched on.")
+                        .font(.captionText)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("What runs here?")
+                    .font(.captionText)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityHint("Names the three background processes and what each one does.")
+
+            if let repository = Self.repository {
+                Link("Source on GitHub", destination: repository)
+                    .font(.captionText)
+            }
         }
+        .padding(.top, 2)
     }
 
     private func processRow(_ name: String, _ detail: String) -> some View {
