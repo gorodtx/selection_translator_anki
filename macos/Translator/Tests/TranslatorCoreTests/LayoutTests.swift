@@ -136,3 +136,39 @@ import Testing
         #expect(frame.height <= screen.height - 2 * PopupLayout.screenMargin)
     }
 }
+
+@Suite struct ReconnectPolicyTests {
+    /// The burst has to stay short so an already-running backend appears instantly.
+    @Test func firstRoundStartsImmediately() {
+        let policy = ReconnectPolicy()
+        #expect(policy.delayBeforeRound(1) == 0)
+        #expect(policy.burstAttempts == 40)
+        #expect(policy.burstDelay == 0.1)
+    }
+
+    /// This backend needs 6 to 14 seconds to start, so later rounds back off but keep
+    /// coming: a restarting daemon is picked up within a second of listening.
+    @Test func laterRoundsBackOffAndAreCapped() {
+        let policy = ReconnectPolicy()
+        #expect(policy.delayBeforeRound(2) == 1.0)
+        #expect(policy.delayBeforeRound(3) == 2.0)
+        #expect(policy.delayBeforeRound(4) == 4.0)
+        #expect(policy.delayBeforeRound(5) == 5.0)
+        #expect(policy.delayBeforeRound(50) == 5.0)
+    }
+
+    @Test func degenerateValuesAreClamped() {
+        let policy = ReconnectPolicy(burstAttempts: 0, burstDelay: -1, idleDelay: -1, maxIdleDelay: -1)
+        #expect(policy.burstAttempts == 1)
+        #expect(policy.burstDelay == 0)
+        #expect(policy.idleDelay == 0)
+        #expect(policy.maxIdleDelay == 0)
+        #expect(policy.delayBeforeRound(3) == 0)
+    }
+
+    @Test func waitingMessageReadsAsStillTrying() {
+        let message = ReconnectPolicy().waitingMessage(socketPath: "/tmp/x.sock")
+        #expect(message.contains("Waiting"))
+        #expect(message.contains("/tmp/x.sock"))
+    }
+}

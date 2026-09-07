@@ -15,9 +15,10 @@ final class IPCClient: @unchecked Sendable {
         case failed(String)
     }
 
-    /// Matches the GNOME extension's retry shape: 40 attempts, 100 ms apart.
-    static let retryLimit = 40
-    static let retryDelay: TimeInterval = 0.1
+    /// Burst shape from the GNOME extension, plus a retry that never gives up: see
+    /// `ReconnectPolicy`.
+    static let retryLimit = ReconnectPolicy().burstAttempts
+    static let retryDelay: TimeInterval = ReconnectPolicy().burstDelay
     static let requestTimeout: TimeInterval = 30
 
     private let socketPath: String
@@ -28,6 +29,7 @@ final class IPCClient: @unchecked Sendable {
     private var pending: [String: (Result<Data, Error>) -> Void] = [:]
     private var stopping = false
     private var framer = LineFramer()
+    private let policy: ReconnectPolicy
 
     var onEvent: (@MainActor (IPCEvent) -> Void)?
     var onStateChange: (@MainActor (ConnectionState) -> Void)?
@@ -40,8 +42,9 @@ final class IPCClient: @unchecked Sendable {
         }
     }
 
-    init(socketPath: String) {
+    init(socketPath: String, policy: ReconnectPolicy = ReconnectPolicy()) {
         self.socketPath = socketPath
+        self.policy = policy
     }
 
     static func defaultSocketPath() -> String {
@@ -149,23 +152,42 @@ final class IPCClient: @unchecked Sendable {
     // MARK: - Socket thread
 
     private func runLoop() {
+        // A thread that has finished must not leave `reader` set, or `start()` sees a
+        // live reader and refuses to revive the client.
+        defer {
+            lock.lock()
+            if reader === Thread.current { reader = nil }
+            lock.unlock()
+        }
+        var round = 0
         while true {
             lock.lock(); let shouldStop = stopping; lock.unlock()
             if shouldStop { break }
 
+            round += 1
+            let wait = policy.delayBeforeRound(round)
+            if wait > 0 {
+                Thread.sleep(forTimeInterval: wait)
+                lock.lock(); let cancelled = stopping; lock.unlock()
+                if cancelled { break }
+            }
+
             var socket: Int32 = -1
-            for attempt in 1...Self.retryLimit {
+            for attempt in 1...policy.burstAttempts {
                 lock.lock(); let cancelled = stopping; lock.unlock()
                 if cancelled { return }
                 state = .connecting(attempt: attempt)
                 socket = Self.connect(to: socketPath)
                 if socket >= 0 { break }
-                Thread.sleep(forTimeInterval: Self.retryDelay)
+                Thread.sleep(forTimeInterval: policy.burstDelay)
             }
             guard socket >= 0 else {
-                state = .failed("Backend socket not available at \(socketPath)")
-                return
+                // The backend takes seconds to start, so an expired burst means "not yet",
+                // never "never": keep waiting instead of killing the client for good.
+                state = .failed(policy.waitingMessage(socketPath: socketPath))
+                continue
             }
+            round = 0
             lock.lock()
             fd = socket
             framer = LineFramer()
@@ -183,7 +205,7 @@ final class IPCClient: @unchecked Sendable {
             emit(IPCEvent(name: IPCEventName.disconnected, payload: Data("{}".utf8)))
             if wasStopping { return }
             state = .idle
-            Thread.sleep(forTimeInterval: Self.retryDelay)
+            Thread.sleep(forTimeInterval: policy.burstDelay)
         }
     }
 
