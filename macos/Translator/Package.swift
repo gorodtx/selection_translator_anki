@@ -6,6 +6,9 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .executable(name: "Translator", targets: ["Translator"]),
+        // Signed launcher for the login agent, so the background item the user sees in
+        // Login Items belongs to this app instead of being an unsigned loose script.
+        .executable(name: "TranslatorBackend", targets: ["TranslatorBackend"]),
         .library(name: "TranslatorCore", targets: ["TranslatorCore"]),
     ],
     targets: [
@@ -26,6 +29,10 @@ let package = Package(
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("Translation"),
             ]
+        ),
+        .executableTarget(
+            name: "TranslatorBackend",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
             name: "TranslatorCoreTests",

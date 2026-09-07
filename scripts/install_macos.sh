@@ -96,7 +96,7 @@ write_launch_agent() {
   <key>Label</key><string>${BUNDLE_ID}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${RELEASES_DIR}/current/${APP_NAME}.app/Contents/Resources/bin/run-backend</string>
+    <string>${RELEASES_DIR}/current/${APP_NAME}.app/Contents/MacOS/TranslatorBackend</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

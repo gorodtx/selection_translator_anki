@@ -2,17 +2,29 @@ import SwiftUI
 import Translation
 import TranslatorCore
 
-/// Settings: shortcut, permissions, engines, Anki, database status.
+/// Settings: setup stages first, then shortcut, engines, Anki and database detail.
+///
+/// The permissions card is gone: it said the same thing as the setup stage above it, and
+/// two rows claiming the same state is how they drift apart.
 struct SettingsView: View {
     @Bindable var model: AppModel
     var onHotKeyChange: (KeyCombo) -> Void
 
+    private static let shortcutAnchor = "shortcut-card"
+
     var body: some View {
         GlassEffectContainer(spacing: 12) {
+            ScrollViewReader { scroller in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    shortcutCard
-                    permissionsCard
+                    // What a fresh install still has to do, before the detail below.
+                    SetupCard(model: model) {
+                        // The recorder lives further down this window, so the stage hands
+                        // the user to it instead of opening a second place to do it.
+                        withAnimation(Motion.stateChange) { scroller.scrollTo(Self.shortcutAnchor, anchor: .top) }
+                    }
+                    shortcutCard.id(Self.shortcutAnchor)
+                    sourcesCard
                     enginesCard
                     ankiCard
                     databaseCard
@@ -26,6 +38,7 @@ struct SettingsView: View {
                 .padding(Layout.gutter)
             }
             .scrollContentBackground(.hidden)
+            }
         }
         .frame(minWidth: 480, minHeight: 520)
         .task {
@@ -53,25 +66,63 @@ struct SettingsView: View {
         }
     }
 
-    private var permissionsCard: some View {
-        Card("Permissions") {
-            StatusRow(
-                title: "Accessibility",
-                detail: model.accessibilityTrusted
-                    ? "Granted — the shortcut can read the selection anywhere."
-                    : "Not granted — the shortcut falls back to the Services menu.",
-                ok: model.accessibilityTrusted
+    /// Which sources may answer a lookup.
+    ///
+    /// Switching one off is a real question — is the network worth the wait, is a
+    /// dictionary card too much — so each row says what it contributes and what happens
+    /// without it, rather than leaving the user to experiment.
+    private var sourcesCard: some View {
+        Card("Sources") {
+            sourceToggle(
+                "Apple Dictionary",
+                "Senses, transcription and example pairs, offline in milliseconds.",
+                isOn: $model.settings.sources.appleDictionary
             )
-            if !model.accessibilityTrusted {
-                HStack(spacing: 8) {
-                    Button("Request access") { SelectionCapture.requestTrust() }
-                    Button("Open Accessibility Settings") { SelectionCapture.openAccessibilitySettings() }
-                    Button("Re-check") { model.refreshAccessibilityTrust() }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            sourceToggle(
+                "Apple Translation",
+                "Phrases and sentences offline. Off, they wait for the network.",
+                isOn: $model.settings.sources.appleTranslation
+            )
+            sourceToggle(
+                "Google",
+                "Network fallback, and the only source for rarer phrasing.",
+                isOn: $model.settings.sources.google
+            )
+            sourceToggle(
+                "Cambridge",
+                "Network dictionary; the slowest source and the most fragile.",
+                isOn: $model.settings.sources.cambridge
+            )
+            sourceToggle(
+                "Offline examples",
+                "The 1.7 GB corpus behind most of the example sentences.",
+                isOn: $model.settings.sources.offlineExamples
+            )
+            sourceToggle(
+                "Definitions pack",
+                "English definitions from the offline pack.",
+                isOn: $model.settings.sources.definitionsPack
+            )
+            Text("Changes apply after Save settings.")
+                .font(.captionText)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func sourceToggle(_ title: String, _ detail: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.controlLabel)
+                Text(detail).font(.captionText).foregroundStyle(.secondary)
             }
         }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        // A two-line label built from a stack reaches assistive technology as an unnamed
+        // switch, and six of them are indistinguishable. Name each one, and let the
+        // explanation be the hint rather than part of the name.
+        .accessibilityLabel(title)
+        .accessibilityHint(detail)
     }
 
     private var enginesCard: some View {
@@ -257,7 +308,16 @@ struct HotKeyRecorder: View {
         .glassSurface(radius: Layout.chipRadius, interactive: true, tint: isRecording ? .accentColor.opacity(0.35) : nil)
         .animation(Motion.stateChange, value: isRecording)
         .onDisappear { stop() }
-        .accessibilityLabel("Shortcut \(combo.displayString)")
+        // The visible text changes to "Press keys…" while recording, so the label must not
+        // pin the old combination: the name says what the control is, the value says what
+        // it holds or that it is waiting.
+        .accessibilityLabel("Shortcut")
+        .accessibilityValue(isRecording ? "Waiting for a key combination" : combo.displayString)
+        .accessibilityHint(
+            isRecording
+                ? "Press the keys to use, or Escape to cancel."
+                : "Activate, then press the keys to use."
+        )
     }
 
     private func start() {

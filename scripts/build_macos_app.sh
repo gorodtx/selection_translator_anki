@@ -84,6 +84,12 @@ HELPER_BIN="${ROOT_DIR}/macos/AppleLangHelper/.build/release/apple-lang-helper"
 [[ -x "${HELPER_BIN}" ]] || fail "sidecar binary missing: ${HELPER_BIN}"
 cp "${HELPER_BIN}" "${RESOURCES}/bin/apple-lang-helper"
 
+# The login agent runs this instead of the shell script: a script carries no signature,
+# so the system could not attribute the background item to this app and showed the user a
+# bare "run-backend" from an unidentified developer.
+BACKEND_BIN="${ROOT_DIR}/macos/Translator/.build/release/TranslatorBackend"
+[[ -x "${BACKEND_BIN}" ]] && cp "${BACKEND_BIN}" "${CONTENTS}/MacOS/TranslatorBackend"
+
 SHELL_BIN="${ROOT_DIR}/macos/Translator/.build/release/Translator"
 if [[ -x "${SHELL_BIN}" ]]; then
   cp "${SHELL_BIN}" "${CONTENTS}/MacOS/${APP_NAME}"
@@ -224,6 +230,13 @@ find "${RESOURCES}/python" "${RESOURCES}/site-packages" -type f \
   | xargs -0 -r codesign "${SIGN_FLAGS[@]}"
 codesign "${SIGN_FLAGS[@]}" "${RESOURCES}/python/bin/python3.13"
 codesign "${SIGN_FLAGS[@]}" "${RESOURCES}/bin/apple-lang-helper"
+# A second Mach-O in Contents/MacOS is nested code, not a sealed resource, so it needs its
+# own signature before the bundle is sealed around it.
+# The identifier is what the system shows and what it attributes the login item to, so
+# name it after the app rather than leaving SwiftPM's hash.
+[[ -f "${CONTENTS}/MacOS/TranslatorBackend" ]] \
+  && codesign "${SIGN_FLAGS[@]}" --identifier "${BUNDLE_ID}.backend" \
+       "${CONTENTS}/MacOS/TranslatorBackend"
 codesign "${SIGN_FLAGS[@]}" --identifier "${BUNDLE_ID}" "${APP_DIR}"
 
 rm -rf "${STAGE}"
