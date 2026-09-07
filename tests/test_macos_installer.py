@@ -46,6 +46,20 @@ def test_installer_verifies_database_checksums_before_installing() -> None:
     assert 'mv -f "${tmp}" "${target}"' in text
 
 
+def test_installer_reuses_an_existing_database_store() -> None:
+    """The app resolves databases through TRANSLATOR_DB_DIR, so the installer must too.
+
+    Deriving the directory from HOME alone made a store that already held the 1.8 GB
+    bundle invisible, and every install re-downloaded the lot.
+    """
+    text = _text()
+
+    assert 'DB_DIR="${TRANSLATOR_DB_DIR:-${SUPPORT_DIR}/db}"' in text
+    # The chosen directory is also what the agent gets pinned to, so the backend and
+    # the installer never disagree about where the databases live.
+    assert "<key>TRANSLATOR_DB_DIR</key><string>${DB_DIR}</string>" in text
+
+
 def test_installer_keeps_previous_release_and_can_roll_back() -> None:
     text = _text()
 
