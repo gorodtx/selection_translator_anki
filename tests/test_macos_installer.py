@@ -203,6 +203,13 @@ def test_installer_restarts_the_shell_app_not_only_the_daemon() -> None:
     assert "launchd_is_ours" in restart, "a redirected HOME must not touch the app"
     # A failure to launch is reported, not swallowed into a silent success.
     assert "could not launch the app" in restart
+    # And `open` exiting 0 is not proof: it reported success once with nothing
+    # left running, so the pid is looked for before the log claims it.
+    assert 'pgrep -x "${APP_NAME}"' in restart
+    assert "app did not stay running" in restart
+    # pgrep exits 1 when nothing matches, which under `set -e` with `pipefail`
+    # would abort the installer on the loop's first turn.
+    assert "|| true" in restart
 
 
 def test_installer_swaps_the_release_before_restarting_the_daemon() -> None:

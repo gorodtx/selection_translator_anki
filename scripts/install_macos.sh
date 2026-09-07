@@ -30,6 +30,8 @@ SOURCE_APP="${TRANSLATOR_APP_PATH:-${ROOT_DIR}/dist/${APP_NAME}.app}"
 DB_FILES=("primary.sqlite3" "fallback.sqlite3" "definitions_pack.sqlite3")
 # The signed Mach-O launchd starts; a shell script cannot carry a signature.
 BACKEND_LAUNCHER="TranslatorBackend"
+# How long to wait for the shell to appear after `open` accepts the request.
+APP_LAUNCH_WAIT_S="${TRANSLATOR_APP_LAUNCH_WAIT_S:-5}"
 AGENT_PLIST_CHANGED=1
 # Long enough for a cold daemon that waits on the first engine probe (capped at 5s).
 PING_TIMEOUT_S="${TRANSLATOR_PING_TIMEOUT_S:-8}"
@@ -253,10 +255,26 @@ restart_app() {
   if pkill -x "${APP_NAME}" 2>/dev/null; then
     log "stopped the previous shell"
   fi
-  if open "${LINK_DIR}/${APP_NAME}.app" 2>/dev/null; then
-    log "app launched"
-  else
+  if ! open "${LINK_DIR}/${APP_NAME}.app" 2>/dev/null; then
     log "could not launch the app; open ${LINK_DIR}/${APP_NAME}.app by hand"
+    return 0
+  fi
+  # `open` exiting 0 means LaunchServices accepted the request, not that the app
+  # is running — it reported success once while nothing was left running at all.
+  # An install an agent reads the log of must not claim a process that is absent.
+  local waited=0 pid=""
+  while (( waited < APP_LAUNCH_WAIT_S * 10 )); do
+    # `|| true`: pgrep exits 1 when nothing matches, and under `set -e` with
+    # `pipefail` that aborts the installer on the loop's very first turn.
+    pid="$(pgrep -x "${APP_NAME}" 2>/dev/null | head -1 || true)"
+    [[ -n "${pid}" ]] && break
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  if [[ -n "${pid}" ]]; then
+    log "app running (pid ${pid})"
+  else
+    log "app did not stay running; check ~/Library/Logs/DiagnosticReports/${APP_NAME}-*.ips"
   fi
 }
 
