@@ -111,6 +111,23 @@ def test_healthcheck_waits_for_the_socket_before_failing() -> None:
     assert 'while [[ ! -S "${socket}"' in block
 
 
+def test_healthcheck_asks_the_daemon_instead_of_stating_the_socket() -> None:
+    """A socket file outlives the process that bound it.
+
+    `kill -9` leaves the node on disk, so a stat-only check reports a healthy
+    install with nothing listening — the one answer an agent-run install must
+    never get wrong. Verified locally on both: an orphaned socket and the live
+    one both satisfy `[[ -S ]]`, only the live one answers `ping`.
+    """
+    text = _text()
+    block = text[text.index("healthcheck()") : text.index("status_report()")]
+
+    assert "backend_answers" in block, "healthcheck must ask the daemon"
+    assert '"method":"ping"' in text, "ping is the only side-effect-free method"
+    # translate would leave a history entry behind on every healthcheck.
+    assert '"method":"translate"' not in text
+
+
 def test_installer_unloads_agent_before_swapping_releases() -> None:
     text = _text()
     install_block = text[text.index("install_app()") : text.index("rollback()")]

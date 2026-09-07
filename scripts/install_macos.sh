@@ -28,6 +28,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB_BUNDLE_LOCK_PATH="${TRANSLATOR_DB_BUNDLE_LOCK_PATH:-${ROOT_DIR}/scripts/db-bundle.lock.json}"
 SOURCE_APP="${TRANSLATOR_APP_PATH:-${ROOT_DIR}/dist/${APP_NAME}.app}"
 DB_FILES=("primary.sqlite3" "fallback.sqlite3" "definitions_pack.sqlite3")
+# Long enough for a cold daemon that waits on the first engine probe (capped at 5s).
+PING_TIMEOUT_S="${TRANSLATOR_PING_TIMEOUT_S:-8}"
 
 log() { printf '[translator] %s\n' "$*" >&2; }
 fail() { log "error: $*"; exit 1; }
@@ -214,6 +216,19 @@ remove_app() {
   fi
 }
 
+# A socket file outlives the process that bound it: kill -9 the daemon and the
+# node stays behind, so `[[ -S ... ]]` reports a healthy install where nothing
+# is listening. Ask the daemon instead. `ping` is the only method with no side
+# effects — `translate` would leave an entry in the user's history on every
+# healthcheck.
+backend_answers() {
+  local socket="$1" reply
+  reply="$(printf '%s\n' '{"id":1,"method":"ping","params":{}}' \
+    | nc -U "${socket}" -w "${PING_TIMEOUT_S}" 2>/dev/null || true)"
+  # Test the payload, never the pipeline's exit code: that belongs to nc.
+  [[ "${reply}" == *'"ok":true'* ]]
+}
+
 healthcheck() {
   local status=0
   local socket="${SUPPORT_DIR}/run/backend.sock"
@@ -231,10 +246,12 @@ healthcheck() {
       log "FAIL: missing ${filename}"; status=1
     fi
   done
-  if [[ -S "${socket}" ]]; then
-    log "OK: backend socket present"
-  else
+  if [[ ! -S "${socket}" ]]; then
     log "FAIL: backend socket missing (${socket})"; status=1
+  elif backend_answers "${socket}"; then
+    log "OK: backend answers on the socket"
+  else
+    log "FAIL: backend socket exists but nothing answers (${socket})"; status=1
   fi
   launchctl print "gui/$(id -u)/${BUNDLE_ID}" >/dev/null 2>&1 \
     && log "OK: launch agent running" || { log "FAIL: launch agent not running"; status=1; }
