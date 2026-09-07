@@ -87,3 +87,49 @@ import Testing
         #expect(AnkiFieldCheck.issues(configured: ["word"], modelFields: answer.fields).isEmpty)
     }
 }
+
+/// What the user reads when Anki refuses the card. Measured from a live run against a
+/// stand-in that fails the way the real server does: a mistyped first field name makes
+/// Anki answer "cannot create note because it is empty", which is true of the note and
+/// useless about the cause.
+@Suite struct AnkiFailureExplanationTests {
+    private let refusal = "cannot create note because it is empty"
+
+    @Test func aMistypedNameIsNamedAlongsideAnkisWords() {
+        let text = AnkiFieldCheck.explain(
+            failure: refusal,
+            issues: AnkiFieldCheck.issues(
+                configured: ["Woord", "translation"],
+                modelFields: ["word", "translation", "example_en"]
+            )
+        )
+        #expect(text.hasPrefix(refusal), "Anki's own words come first")
+        #expect(text.contains("Woord"))
+        #expect(text.contains("Settings"))
+        #expect(!text.contains("translation"), "a name that is fine is not mentioned")
+    }
+
+    /// The common mistake deserves the answer, not just the complaint.
+    @Test func aCaseMismatchPointsAtTheRealName() {
+        let text = AnkiFieldCheck.explain(
+            failure: refusal,
+            issues: AnkiFieldCheck.issues(configured: ["word"], modelFields: ["Word"])
+        )
+        #expect(text.contains("Anki has “Word”"))
+    }
+
+    /// With nothing known — Anki closed, note type absent, section never opened — the
+    /// refusal stands alone rather than being decorated with a guess.
+    @Test func withNothingKnownAnkisWordsStandAlone() {
+        #expect(AnkiFieldCheck.explain(failure: refusal, issues: []) == refusal)
+    }
+
+    @Test func severalWrongNamesReadAsPlural() {
+        let text = AnkiFieldCheck.explain(
+            failure: refusal,
+            issues: AnkiFieldCheck.issues(configured: ["A", "B"], modelFields: ["word"])
+        )
+        #expect(text.contains("none of"))
+        #expect(text.contains("“A”, “B”"))
+    }
+}

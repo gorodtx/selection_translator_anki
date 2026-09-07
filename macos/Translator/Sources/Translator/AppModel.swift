@@ -369,13 +369,29 @@ final class AppModel {
             let outcome = try await client.send(
                 IPCMethod.ankiApplyUpsert, params: ["decision": payload], as: UpsertOutcome.self
             )
-            show(banner: outcome.message, level: outcome.isSuccess ? .success : .warning)
+            if outcome.isSuccess {
+                show(banner: outcome.message, level: .success)
+            } else {
+                show(banner: await explain(ankiFailure: outcome.message), level: .warning)
+            }
             await refreshAnkiStatus()
             return outcome.isSuccess
         } catch {
             show(banner: message(for: error), level: .error)
             return false
         }
+    }
+
+    /// Anki's own words plus what they mean here.
+    ///
+    /// A mistyped field name makes Anki answer "cannot create note because it is empty",
+    /// which sends the user looking at the card — the note is not empty, the name is
+    /// wrong. The app knows both halves and can say so, so it does.
+    private func explain(ankiFailure message: String) async -> String {
+        // The field list may never have been read: nobody has to open the mapping
+        // section for this to be the cause.
+        if ankiModelFields.isEmpty, ankiModelFieldsError == nil { await loadModelFields() }
+        return AnkiFieldCheck.explain(failure: message, issues: ankiFieldIssues)
     }
 
     // MARK: - Settings
