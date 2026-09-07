@@ -161,7 +161,7 @@ class BackendApi:
     async def _dispatch(self, method: Method, params: JsonObject) -> JsonObject:
         session = self._session
         if method is Method.PING:
-            return self._ping()
+            return await self._ping()
         if method is Method.TRANSLATE:
             return _snapshot_json(session.translate(get_str(params, "text")))
         if method is Method.CANCEL or method is Method.CLOSE:
@@ -262,10 +262,27 @@ class BackendApi:
             return {}
         raise ProtocolDecodeError(ErrorCode.UNKNOWN_METHOD, f"Unhandled {method}.")
 
-    def _ping(self) -> JsonObject:
-        engines = self._engines()
-        if engines.get("stale") is True and self._refresh_engines is not None:
+    async def _fresher_engines(self, engines: JsonObject) -> JsonObject:
+        """A stale snapshot is either aged or absent, and they differ.
+
+        Aged is answered from cache and refreshed behind the reply: `ping` runs
+        on every connect and must stay fast. Absent means the startup probe is
+        still in flight, and `unknown` would reach the shell as "no Apple
+        engines" — the onboarding stages cannot tell that from a real absence,
+        so it is worth waiting for the real answer instead.
+        """
+        never_probed = engines.get("translation_status") == "unknown"
+        if never_probed and self._refresh_engines_async is not None:
+            await self._refresh_engines_async()
+            return self._engines()
+        if self._refresh_engines is not None:
             self._refresh_engines()
+        return engines
+
+    async def _ping(self) -> JsonObject:
+        engines = self._engines()
+        if engines.get("stale") is True:
+            engines = await self._fresher_engines(engines)
         return {
             "version": BACKEND_VERSION,
             "protocol": PROTOCOL_VERSION,

@@ -479,3 +479,67 @@ def test_stop_does_not_wait_for_an_idle_client() -> None:
 
     assert elapsed < 2.0, f"stop() took {elapsed:.1f}s with an idle client attached"
     assert not socket_path.exists()
+
+
+def test_backend_api_ping_waits_for_the_first_engine_probe(tmp_path: Path) -> None:
+    """A snapshot that was never taken must not reach the shell as "unknown".
+
+    The startup probe is fire-and-forget, so a client that connects fast can
+    beat it. `unknown` is then indistinguishable from "this Mac has no Apple
+    engines", and onboarding renders a red stage over a healthy machine.
+    """
+    session, _, _ = _build_session(_FakeTranslator(final=_result("x")))
+    absent: JsonObject = {
+        "apple_dictionary": False,
+        "apple_translation": False,
+        "translation_status": "unknown",
+        "dictionaries": [],
+        "stale": True,
+    }
+    probed: JsonObject = {
+        "apple_dictionary": True,
+        "apple_translation": True,
+        "translation_status": "installed",
+        "dictionaries": ["Oxford"],
+        "stale": False,
+    }
+    snapshot = absent
+    awaited = 0
+
+    async def refresh_async() -> None:
+        nonlocal snapshot, awaited
+        awaited += 1
+        snapshot = probed
+
+    async def scenario() -> None:
+        api = BackendApi(
+            session=session,
+            loop=asyncio.get_running_loop(),
+            socket_path=tmp_path / "s.sock",
+            request_shutdown=lambda: None,
+            engines=lambda: snapshot,
+            refresh_engines=lambda: None,
+            refresh_engines_async=refresh_async,
+        )
+        ping = await api.handle(Request(id=1, method="ping", params={}))
+        assert ping["engines"] == probed
+        assert awaited == 1
+
+        # A snapshot that merely aged is answered from cache: `ping` runs on
+        # every connect, so that path must not wait on the sidecar.
+        snapshot_aged = dict(probed)
+        snapshot_aged["stale"] = True
+        again = BackendApi(
+            session=session,
+            loop=asyncio.get_running_loop(),
+            socket_path=tmp_path / "s.sock",
+            request_shutdown=lambda: None,
+            engines=lambda: snapshot_aged,
+            refresh_engines=lambda: None,
+            refresh_engines_async=refresh_async,
+        )
+        aged = await again.handle(Request(id=2, method="ping", params={}))
+        assert aged["engines"] == snapshot_aged
+        assert awaited == 1, "an aged snapshot must not await the probe"
+
+    asyncio.run(scenario())
