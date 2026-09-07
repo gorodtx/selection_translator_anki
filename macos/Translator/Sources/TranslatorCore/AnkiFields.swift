@@ -23,6 +23,21 @@ public struct AnkiFieldIssue: Equatable, Sendable, Identifiable {
 }
 
 public enum AnkiFieldCheck {
+    /// Anki's own refusal, plus what it means here.
+    ///
+    /// A mistyped field name makes Anki answer "cannot create note because it is empty",
+    /// which sends the user to look at the card — the note is not empty, the name is
+    /// wrong. Both halves are known on this side, so the message says both. With nothing
+    /// known, Anki's words stand alone rather than being decorated with a guess.
+    public static func explain(failure: String, issues: [AnkiFieldIssue]) -> String {
+        guard !issues.isEmpty else { return failure }
+        let names = issues.map { "“\($0.configured)”" }.joined(separator: ", ")
+        let plural = issues.count == 1 ? "no" : "none of"
+        let suggestion = issues.compactMap(\.suggestion).first
+        let fix = suggestion.map { " Anki has “\($0)”." } ?? ""
+        return "\(failure) The note type has \(plural) \(names).\(fix) Fix the field mapping in Settings."
+    }
+
     /// Configured names the note type does not have. Empty when nothing can be concluded.
     public static func issues(configured: [String], modelFields: [String]) -> [AnkiFieldIssue] {
         // Nothing to compare against is not the same as everything being wrong.
