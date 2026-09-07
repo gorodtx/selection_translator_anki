@@ -477,9 +477,7 @@ def test_available_fields_is_what_the_sheet_offers_not_what_anki_has(
         definitions_en="definitions_en",
         image="image",
     )
-    config = AnkiConfig(
-        deck="English", model=DEFAULT_MODEL_NAME, fields=misconfigured
-    )
+    config = AnkiConfig(deck="English", model=DEFAULT_MODEL_NAME, fields=misconfigured)
 
     preview = _wait(flow.prepare_upsert(config, "cat", _result())).preview
 
