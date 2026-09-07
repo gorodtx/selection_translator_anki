@@ -20,6 +20,8 @@ final class AppModel {
 
     // Ambient
     var banner: BannerMessage?
+    /// Progress per database file while a download runs; empty when none is.
+    var databaseDownloads: [String: DatabaseProgressEvent] = [:]
     var history: [HistoryItem] = []
     var ankiStatus = AnkiStatus()
     var ankiDecks: [String] = []
@@ -36,6 +38,9 @@ final class AppModel {
 
     private let client: IPCClient
     private var bannerDismissTask: Task<Void, Never>?
+    /// The last warning the backend sent, so an error phase can say why instead of
+    /// "Translation failed."
+    private var pendingNotice: String?
 
     struct BannerMessage: Equatable, Identifiable {
         let id = UUID()
@@ -93,10 +98,18 @@ final class AppModel {
             activeRequestId = payload.requestId
             phase = payload.phase
             withAnimation(Motion.stateChange) { state = payload.state }
-            if payload.phase == .error { lastError = "Translation failed." }
+            // The backend names the reason in a notification just before it reports the
+            // error — "Every translation source is switched off." is not a failure to
+            // retry, and calling it one sends the user looking for a fault.
+            if payload.phase == .error { lastError = pendingNotice ?? "Translation failed." }
+            pendingNotice = nil
         case IPCEventName.notification:
             guard let payload = try? event.decode(NotificationEvent.self) else { return }
+            if payload.level != .info { pendingNotice = payload.message }
             show(banner: payload.message, level: payload.level)
+        case IPCEventName.dbProgress:
+            guard let payload = try? event.decode(DatabaseProgressEvent.self) else { return }
+            apply(databaseProgress: payload)
         case IPCEventName.ankiAvailability:
             guard let payload = try? event.decode(AnkiAvailabilityEvent.self) else { return }
             ankiStatus.available = payload.available
@@ -129,6 +142,69 @@ final class AppModel {
     func refreshPing() async {
         ping = try? await client.send(IPCMethod.ping, as: PingInfo.self)
         if let ping { appleTranslationReady = ping.engines.appleTranslation }
+    }
+
+    /// The engine snapshot is cached for five minutes, so straight after a language pair
+    /// finishes downloading the ping still reports it as merely supported and the setup
+    /// stage keeps offering a download for a pair already on disk. This asks the backend
+    /// to look again and answer in the same call.
+    func refreshEngines() async {
+        guard let engines = try? await client.send(
+            IPCMethod.enginesRefresh, as: PingInfo.Engines.self
+        ) else { return }
+        ping?.engines = engines
+        appleTranslationReady = engines.appleTranslation
+    }
+
+    // MARK: - Offline databases
+
+    /// Only the app can ask for the 1.8 GB the offline sources need; until now the answer
+    /// was "run a shell script", which is not something a setup stage can offer.
+    func downloadDatabases() async {
+        guard let start = try? await client.send(
+            IPCMethod.dbDownload, as: DatabaseDownloadStart.self
+        ) else {
+            show(banner: "Could not start the download.", level: .error)
+            return
+        }
+        guard start.started else {
+            // Nothing missing: the button is safe to press and says so rather than
+            // pretending to work.
+            await refreshPing()
+            show(banner: "The offline databases are already complete.", level: .info)
+            return
+        }
+        databaseDownloads = start.files.reduce(into: [:]) { out, file in
+            out[file] = DatabaseProgressEvent(file: file, state: .downloading)
+        }
+    }
+
+    func cancelDatabaseDownload() async {
+        _ = try? await client.send(IPCMethod.dbCancel)
+    }
+
+    private func apply(databaseProgress payload: DatabaseProgressEvent) {
+        guard !payload.file.isEmpty else {
+            // An empty file name is the whole operation ending, not one download.
+            databaseDownloads = [:]
+            if let error = payload.error { show(banner: error, level: .error) }
+            Task { await refreshPing() }
+            return
+        }
+        databaseDownloads[payload.file] = payload
+        switch payload.state {
+        case .failed:
+            show(banner: payload.error ?? "\(payload.file) failed to download.", level: .error)
+        case .done, .present:
+            // Ask what the backend now sees rather than assuming the store is complete:
+            // the other two files may still be arriving.
+            Task { await refreshPing() }
+        default:
+            break
+        }
+        if databaseDownloads.values.allSatisfy({ $0.state == .done || $0.state == .present }) {
+            databaseDownloads = [:]
+        }
     }
 
     func translate(_ text: String) async {

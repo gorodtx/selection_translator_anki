@@ -284,12 +284,23 @@ public struct PingInfo: Codable, Equatable, Sendable {
         public var fallback: Bool
         public var definitions: Bool
         public var dir: String
+        /// How much would travel if the download started now. Optional on purpose: nil
+        /// means the backend cannot read its lock file, which is not the same as nothing
+        /// to fetch, and the two must not render alike.
+        public var pendingBytes: Int?
 
-        public init(primary: Bool = false, fallback: Bool = false, definitions: Bool = false, dir: String = "") {
+        public init(
+            primary: Bool = false,
+            fallback: Bool = false,
+            definitions: Bool = false,
+            dir: String = "",
+            pendingBytes: Int? = nil
+        ) {
             self.primary = primary
             self.fallback = fallback
             self.definitions = definitions
             self.dir = dir
+            self.pendingBytes = pendingBytes
         }
 
         public init(from decoder: Decoder) throws {
@@ -298,6 +309,7 @@ public struct PingInfo: Codable, Equatable, Sendable {
             fallback = c.value(Bool.self, .fallback, default: false)
             definitions = c.value(Bool.self, .definitions, default: false)
             dir = c.value(String.self, .dir, default: "")
+            pendingBytes = c.optional(Int.self, .pendingBytes)
         }
     }
 
@@ -951,6 +963,57 @@ public struct AnkiAvailabilityEvent: Codable, Equatable, Sendable {
     public var available: Bool
 
     public init(available: Bool) { self.available = available }
+}
+
+/// The answer to `db.download`. `files` names only what is missing, so an empty list with
+/// `started: false` means the store is already complete rather than that nothing worked.
+public struct DatabaseDownloadStart: Codable, Equatable, Sendable {
+    public var started: Bool
+    public var files: [String]
+
+    public init(started: Bool = false, files: [String] = []) {
+        self.started = started
+        self.files = files
+    }
+}
+
+/// Progress for one database file. An empty `file` is the whole operation failing or being
+/// cancelled rather than any one download.
+public struct DatabaseProgressEvent: Codable, Equatable, Sendable {
+    public enum State: String, Codable, Sendable {
+        case present, downloading, verifying, done, failed, cancelled
+    }
+
+    public var file: String
+    public var state: State
+    public var received: Int
+    public var total: Int
+    public var error: String?
+
+    public init(
+        file: String = "",
+        state: State = .downloading,
+        received: Int = 0,
+        total: Int = 0,
+        error: String? = nil
+    ) {
+        self.file = file
+        self.state = state
+        self.received = received
+        self.total = total
+        self.error = error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        file = c.value(String.self, .file, default: "")
+        // A state this build has not heard of must not throw the event away; treat it as
+        // work in progress, which is what every unknown state has in common.
+        state = c.value(State.self, .state, default: .downloading)
+        received = c.value(Int.self, .received, default: 0)
+        total = c.value(Int.self, .total, default: 0)
+        error = c.optional(String.self, .error)
+    }
 }
 
 // MARK: - Generic JSON value (for settings passthrough)

@@ -51,7 +51,9 @@ struct SetupCard: View {
                     pairWorking = false
                     pairConfiguration = nil
                 }
-                await model.refreshPing()
+                // The snapshot is cached for five minutes, so without this the stage
+                // would keep offering a download for the pair just installed.
+                await model.refreshEngines()
             } catch {
                 await MainActor.run {
                     pairMessage = "Download failed: \(error.localizedDescription)"
@@ -97,14 +99,53 @@ struct SetupCard: View {
                             .innerSurface(radius: 5)
                     }
                 }
-                Text(step.detail)
+                Text(detail(for: step))
                     .font(.captionText)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if step.id == .databases, !model.databaseDownloads.isEmpty {
+                    ProgressView(value: databaseFraction)
+                        .progressViewStyle(.linear)
+                        .controlSize(.small)
+                }
             }
             Spacer(minLength: 8)
             action(for: step)
         }
+    }
+
+    /// While files are arriving the row says which one and how far, because 1.8 GB with no
+    /// sign of movement is indistinguishable from a stall.
+    private func detail(for step: SetupStep) -> String {
+        guard step.id == .databases, !model.databaseDownloads.isEmpty else { return step.detail }
+        let active = model.databaseDownloads.values
+            .filter { $0.state == .downloading || $0.state == .verifying }
+            .sorted { $0.file < $1.file }
+        guard let current = active.first else { return "Checking what arrived…" }
+        let done = model.databaseDownloads.values.filter { $0.state == .done || $0.state == .present }
+        let queue = model.databaseDownloads.count > 1
+            ? " (\(done.count + 1) of \(model.databaseDownloads.count))"
+            : ""
+        if current.state == .verifying { return "Verifying \(current.file)\(queue)" }
+        guard current.total > 0 else { return "Downloading \(current.file)\(queue)" }
+        let received = ByteCountFormatter.string(fromByteCount: Int64(current.received), countStyle: .file)
+        let total = ByteCountFormatter.string(fromByteCount: Int64(current.total), countStyle: .file)
+        return "\(current.file) — \(received) of \(total)\(queue)"
+    }
+
+    /// One bar for the whole operation: per-file bars jumping back to zero read as failure.
+    private var databaseFraction: Double {
+        let files = model.databaseDownloads.values
+        guard !files.isEmpty else { return 0 }
+        let share = files.reduce(0.0) { total, file in
+            switch file.state {
+            case .done, .present: return total + 1
+            case .downloading where file.total > 0:
+                return total + Double(file.received) / Double(file.total)
+            default: return total
+            }
+        }
+        return share / Double(files.count)
     }
 
     /// Shape carries the state, not colour alone: a check, a chevron or a spinner.
@@ -134,6 +175,10 @@ struct SetupCard: View {
     private func action(for step: SetupStep) -> some View {
         if step.id == .translationPair, pairWorking {
             ProgressView().controlSize(.mini)
+        } else if step.id == .databases, !model.databaseDownloads.isEmpty {
+            Button("Stop") { perform(.cancelDatabaseDownload) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
         } else if let action = step.action, let label = step.actionLabel {
             Button(label) { perform(action) }
                 .buttonStyle(.bordered)
@@ -197,6 +242,10 @@ struct SetupCard: View {
                 source: Locale.Language(identifier: model.settings.languages.source),
                 target: Locale.Language(identifier: model.settings.languages.target)
             )
+        case .downloadDatabases:
+            Task { await model.downloadDatabases() }
+        case .cancelDatabaseDownload:
+            Task { await model.cancelDatabaseDownload() }
         case .openDictionarySettings:
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Dictionary.app"))
         case .connectAnki:

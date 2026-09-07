@@ -39,6 +39,8 @@ public enum SetupAction: Equatable, Sendable {
     case openAccessibilitySettings
     case recordShortcut
     case downloadLanguagePair
+    case downloadDatabases
+    case cancelDatabaseDownload
     case openDictionarySettings
     case connectAnki
     case recheck
@@ -189,16 +191,33 @@ public enum SetupPlanner {
                 isOptional: false
             )
         }
-        // The app cannot fetch 1.8 GB itself; the installer verifies checksums and does.
+        // The backend fetches them, verifies each against the lock file and only then
+        // moves it into place, so this is a button rather than an instruction to go and
+        // run a shell script.
         return SetupStep(
             id: .databases,
             title: "Offline databases",
-            detail: "Missing: \(missing.joined(separator: ", ")). Run scripts/install_macos.sh to fetch them.",
+            // The size comes from the backend, which sums only the missing files: the
+            // full set is about 1.8 GB but one absent file can be forty megabytes, and
+            // overstating the cost by forty times is worse than saying nothing. A nil
+            // means the backend cannot read its lock, so no number is claimed — never a
+            // zero, which would read as "nothing to fetch" beside a list of what is
+            // missing.
+            detail: pendingSize(db.pendingBytes).map {
+                "Missing: \(missing.joined(separator: ", ")). \($0) to download."
+            } ?? "Missing: \(missing.joined(separator: ", ")).",
             state: .actionNeeded,
             isOptional: false,
-            action: .recheck,
-            actionLabel: "Re-check"
+            action: .downloadDatabases,
+            actionLabel: "Download…"
         )
+    }
+
+    /// A size worth showing, or nothing. Both an unreadable lock and a zero leave the
+    /// stage silent about cost rather than guessing at it.
+    private static func pendingSize(_ bytes: Int?) -> String? {
+        guard let bytes, bytes > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
     private static func accessibilityStep(trusted: Bool) -> SetupStep {
@@ -318,7 +337,20 @@ public enum SetupPlanner {
                 isOptional: true
             )
         }
+        // Only "supported" means Apple will hand over the pair if asked. Every other
+        // answer — not offered here, the engine not reachable, no probe yet — is not
+        // something a Download button can fix, and offering one would waste the press.
         switch engines.translationStatus {
+        case "supported":
+            return SetupStep(
+                id: .translationPair,
+                title: "Offline translation",
+                detail: "Language pair not downloaded. Phrases go over the network until it is.",
+                state: .actionNeeded,
+                isOptional: true,
+                action: .downloadLanguagePair,
+                actionLabel: "Download…"
+            )
         case "unsupported":
             return SetupStep(
                 id: .translationPair,
@@ -331,11 +363,9 @@ public enum SetupPlanner {
             return SetupStep(
                 id: .translationPair,
                 title: "Offline translation",
-                detail: "Language pair not downloaded. Phrases go over the network until it is.",
-                state: .actionNeeded,
-                isOptional: true,
-                action: .downloadLanguagePair,
-                actionLabel: "Download…"
+                detail: "The translation engine is not answering. Phrases go over the network.",
+                state: .waiting,
+                isOptional: true
             )
         }
     }
