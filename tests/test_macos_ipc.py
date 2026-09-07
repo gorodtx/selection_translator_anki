@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import tempfile
+import time
 from typing import cast
 
 import pytest
@@ -442,3 +443,39 @@ def test_settings_flow_reports_anki_reachability() -> None:
     reachability.clear()
     build(AnkiListResult(items=["Translator"], error=None))
     assert reachability == [True]
+
+
+def test_stop_does_not_wait_for_an_idle_client() -> None:
+    """`wait_closed()` waits for handlers, and a handler blocks in `readline()`.
+
+    An idle client used to pin the daemon alive indefinitely: it logged that it
+    was shutting down, unlinked the socket, then waited forever. launchd
+    restarts an agent with SIGTERM, so the backend could never be replaced.
+    """
+    socket_path = _short_socket_path()
+
+    async def handler(request: Request) -> JsonObject:
+        return {"echo": request.method}
+
+    async def scenario() -> float:
+        server = IpcServer(socket_path=socket_path, handler=handler)
+        await server.start()
+        reader, writer = await asyncio.open_unix_connection(path=str(socket_path))
+        try:
+            writer.write(encode_line({"id": 1, "method": "ping"}))
+            await writer.drain()
+            assert _read_json(await reader.readline())["ok"] is True
+            # The client now sits idle with the socket open, which is exactly
+            # what the shell does between hot-key presses.
+            await asyncio.sleep(0)
+            assert server.client_count == 1
+            started = time.monotonic()
+            await server.stop()
+            return time.monotonic() - started
+        finally:
+            writer.close()
+
+    elapsed = asyncio.run(scenario())
+
+    assert elapsed < 2.0, f"stop() took {elapsed:.1f}s with an idle client attached"
+    assert not socket_path.exists()

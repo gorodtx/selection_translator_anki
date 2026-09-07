@@ -28,6 +28,9 @@ type RequestHandler = Callable[[Request], Awaitable[JsonObject]]
 
 # sun_path is 104 bytes on Darwin (108 on Linux) including the terminator.
 MAX_SOCKET_PATH_BYTES = 103
+# Closed clients let `wait_closed()` return at once; the bound only exists so
+# one wedged handler cannot hang the shutdown.
+_SHUTDOWN_TIMEOUT_S = 2.0
 
 
 class IpcServer:
@@ -74,14 +77,32 @@ class IpcServer:
             await self._server.serve_forever()
 
     async def stop(self) -> None:
+        """Shut down without waiting on clients that will never speak again.
+
+        `wait_closed()` waits for the connection handlers, and a handler sits
+        in `readline()` for as long as its client holds the socket open. An
+        idle client therefore pinned the daemon alive indefinitely: it logged
+        that it was shutting down, unlinked the socket, and then waited. Since
+        launchd restarts an agent with SIGTERM, the backend could never be
+        replaced — only `kill -9` ended it. Close the clients first.
+        """
         server = self._server
         self._server = None
         if server is not None:
             server.close()
-            with contextlib.suppress(Exception):
-                await server.wait_closed()
         for writer in list(self._writers):
             self._drop_writer(writer)
+        if server is not None:
+            close_clients = getattr(server, "close_clients", None)
+            if callable(close_clients):
+                with contextlib.suppress(Exception):
+                    close_clients()
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await asyncio.wait_for(server.wait_closed(), _SHUTDOWN_TIMEOUT_S)
+            abort_clients = getattr(server, "abort_clients", None)
+            if callable(abort_clients):
+                with contextlib.suppress(Exception):
+                    abort_clients()
         if not self._owns_socket:
             # A failed start (for example: another backend already listening)
             # must never remove the socket that instance is serving.
