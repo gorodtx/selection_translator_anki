@@ -182,6 +182,29 @@ def test_install_does_not_deregister_the_login_item() -> None:
     assert ".staging" in block, "nothing may read a half-copied release"
 
 
+def test_installer_restarts_the_shell_app_not_only_the_daemon() -> None:
+    """The daemon autostarts at login; the shell does not, and owns the hot key.
+
+    An install that starts no shell leaves an app the user cannot reach, and an
+    update that leaves the old shell running leaves them on old code. Measured
+    on a real install: "stopped the previous shell", "app launched", shell pid
+    49590 -> 65796.
+
+    The kill pattern must match the process name exactly. `TranslatorBackend`
+    starts with `Translator`, so a prefix match would take the backend launcher
+    down too and start a fight with launchd.
+    """
+    text = _text()
+    install_block = text[text.index("install_app()") : text.index("restart_app()")]
+
+    assert "restart_app" in install_block
+    restart = text[text.index("restart_app()") : text.index("rollback()")]
+    assert 'pkill -x "${APP_NAME}"' in restart, "an exact name match, never a prefix"
+    assert "launchd_is_ours" in restart, "a redirected HOME must not touch the app"
+    # A failure to launch is reported, not swallowed into a silent success.
+    assert "could not launch the app" in restart
+
+
 def test_installer_swaps_the_release_before_restarting_the_daemon() -> None:
     """The old daemon serves until the new files are in place, then is replaced.
 

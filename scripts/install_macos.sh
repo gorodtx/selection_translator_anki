@@ -233,7 +233,31 @@ install_app() {
   ensure_databases
   write_launch_agent
   agent_load
+  restart_app
   log "installed to ${LINK_DIR}/${APP_NAME}.app"
+}
+
+# The daemon starts itself at login (RunAtLoad), the shell does not — and the
+# shell is where the hot key, the popup and Settings live. So an install that
+# starts no shell leaves an app the user cannot reach, and an update that leaves
+# the old shell running leaves them on old code. Both are fixed here.
+#
+# `pkill -x` matches the process name exactly. Anything looser is a trap: the
+# backend launcher is called TranslatorBackend, so a prefix match on
+# "Translator" would take it down too and start a fight with launchd.
+restart_app() {
+  if ! launchd_is_ours; then
+    log "HOME is not the account home; not touching the running app"
+    return 0
+  fi
+  if pkill -x "${APP_NAME}" 2>/dev/null; then
+    log "stopped the previous shell"
+  fi
+  if open "${LINK_DIR}/${APP_NAME}.app" 2>/dev/null; then
+    log "app launched"
+  else
+    log "could not launch the app; open ${LINK_DIR}/${APP_NAME}.app by hand"
+  fi
 }
 
 rollback() {
@@ -245,6 +269,7 @@ rollback() {
   mv "${RELEASES_DIR}/.rollback" "${RELEASES_DIR}/previous"
   ln -sfn "${RELEASES_DIR}/current/${APP_NAME}.app" "${LINK_DIR}/${APP_NAME}.app"
   agent_load
+  restart_app
   log "rolled back"
 }
 
