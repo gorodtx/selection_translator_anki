@@ -208,14 +208,24 @@ install_app() {
   [[ -d "${SOURCE_APP}" ]] || fail "app bundle not found: ${SOURCE_APP} (run scripts/build_macos_app.sh)"
   assert_bundle_matches_tree
   mkdir -p "${RELEASES_DIR}" "${LINK_DIR}"
-  agent_unload
+  # Copy into a staging directory and swap it in, rather than unloading the
+  # agent and rsyncing over the live release. Two reasons, both measured.
+  # `launchctl kill` keeps the login-item registration but KeepAlive respawns
+  # the job within a second, so stopping the daemon before the copy would have
+  # launchd exec a half-copied bundle. And booting it out to prevent that is the
+  # churn worth avoiding: it deregisters the login item on every update. With a
+  # staging swap nothing ever reads a partly written `current`, the old daemon
+  # keeps serving until the files are in place, and one kickstart replaces it.
+  local staging="${RELEASES_DIR}/.staging"
+  rm -rf "${staging}"
+  mkdir -p "${staging}"
+  rsync -a --delete "${SOURCE_APP}/" "${staging}/${APP_NAME}.app/"
   if [[ -d "${RELEASES_DIR}/current" ]]; then
     rm -rf "${RELEASES_DIR}/previous"
     mv "${RELEASES_DIR}/current" "${RELEASES_DIR}/previous"
     log "kept previous release"
   fi
-  mkdir -p "${RELEASES_DIR}/current"
-  rsync -a --delete "${SOURCE_APP}/" "${RELEASES_DIR}/current/${APP_NAME}.app/"
+  mv "${staging}" "${RELEASES_DIR}/current"
   ln -sfn "${RELEASES_DIR}/current/${APP_NAME}.app" "${LINK_DIR}/${APP_NAME}.app"
   ensure_databases
   write_launch_agent

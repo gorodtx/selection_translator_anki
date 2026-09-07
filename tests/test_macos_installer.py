@@ -155,14 +155,50 @@ def test_installer_restarts_rather_than_reregisters_an_unchanged_agent() -> None
     assert 'cmp -s "${staged}" "${AGENT_PLIST}"' in text
 
 
-def test_installer_unloads_agent_before_swapping_releases() -> None:
+def test_install_does_not_deregister_the_login_item() -> None:
+    """The branch that avoids re-registration has to be reachable on install.
+
+    It was not: install_app booted the agent out before calling agent_load, and
+    real launchctl refuses `print` for a booted-out agent, so every update fell
+    back to bootout + bootstrap and recorded the login item afresh. A stubbed
+    launchctl answered `print` with success after bootout and hid this — the
+    stub was more forgiving than the system in the one place the branch turned
+    on.
+
+    Measured on a disposable agent: `print` fails after bootout; `launchctl
+    kill` keeps the registration but KeepAlive respawns within a second, which
+    is why the copy goes to a staging directory instead of over the live one.
+    Three real installs after the change: "launch agent restarted (registration
+    unchanged)" each time, pid 54995 -> 55876, healthcheck 0.
+    """
+    text = _text()
+    block = text[text.index("install_app()") : text.index("rollback()")]
+
+    assert "agent_unload" not in block, "install must not deregister the item"
+    assert "agent_load" in block
+    assert ".staging" in block, "nothing may read a half-copied release"
+
+
+def test_installer_swaps_the_release_before_restarting_the_daemon() -> None:
+    """The old daemon serves until the new files are in place, then is replaced.
+
+    This used to unload the agent first, so that swapping under a running
+    daemon could not leave a stale socket. The copy now lands in a staging
+    directory and only the finished tree is moved into `current`, so the live
+    release is never half-written and the unload is no longer the thing
+    protecting it. Confirmed by running it: three installs, then healthcheck 0
+    with "backend answers on the socket", and no .staging left behind.
+    """
     text = _text()
     install_block = text[text.index("install_app()") : text.index("rollback()")]
 
-    # Swapping the bundle under a running daemon leaves a stale socket.
-    assert install_block.index("agent_unload") < install_block.index(
-        'mv "${RELEASES_DIR}/current"'
+    assert install_block.index('rsync -a --delete "${SOURCE_APP}/" "${staging}') < (
+        install_block.index('mv "${staging}" "${RELEASES_DIR}/current"')
     )
+    assert install_block.index('mv "${staging}"') < install_block.index("agent_load")
+    # rollback and remove still deregister: there the item should go away.
+    rest = text[text.index("rollback()") :]
+    assert "agent_unload" in rest
 
 
 def test_remove_does_not_suggest_deleting_an_external_store() -> None:
