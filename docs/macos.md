@@ -157,6 +157,20 @@ produced nothing at all. Stripping the marker before the Latin check recovered
 38 candidates over 30 words and lost none: `come across` went from 0 to 7,
 `look after` from 1 to 6, `account for` from 4 to 11.
 
+**`TRANSLATOR_DB_DIR` is a directive, not a hint.** With it set, that is the
+only place the bases are looked for. It behaved as a hint once, and the two
+halves of the system then disagreed: the installer decided what to download
+from the override while the runtime happily read the bases from the shared
+store and answered "present" for a directory that was empty. With no override
+the chain still falls through per file, which is what lets a repo checkout work
+alongside the shared store.
+
+`ping` reports, per base, the directory it actually resolved from, and `dir`
+separately as the place a download would go. A single directory plus three
+booleans could lie in either direction — naming the download directory while
+the files came from a checkout, or naming an empty override while answering
+"present".
+
 **Entries are big.** The Oxford article for `set` is about 106 KB of markup and
 arrives as a single NDJSON line, and `run` is 87 KB. asyncio's default stream
 limit is 64 KB, so the client raises its subprocess limit to 8 MB and drops an

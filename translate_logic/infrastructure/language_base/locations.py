@@ -38,10 +38,22 @@ def default_offline_base_dir() -> Path:
 
 
 def offline_base_dir_candidates() -> tuple[Path, ...]:
-    candidates: list[Path] = []
+    """Where to look for an offline base, in order.
+
+    An explicit ``TRANSLATOR_DB_DIR`` is the only candidate. Every other
+    override in this project is a directive — config dir, runtime dir, socket
+    path, log dir all return immediately — and this one behaving as a hint
+    made the two halves of the system disagree: the installer decides what to
+    download from the override, while the runtime would happily read the bases
+    from somewhere else and report success for a directory that is empty.
+
+    With no override the chain still falls through per file, which is what
+    makes a repo checkout work alongside the shared store.
+    """
     override = os.environ.get(DB_DIR_ENV, "").strip()
     if override:
-        candidates.append(Path(override).expanduser())
+        return (Path(override).expanduser(),)
+    candidates: list[Path] = []
     if is_macos():
         candidates.append(user_data_dir() / "db")
     candidates.extend(repo_offline_base_candidates())

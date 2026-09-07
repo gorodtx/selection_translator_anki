@@ -346,11 +346,22 @@ def test_db_status_points_at_the_real_location_not_the_download_dir(
     monkeypatch.setattr(
         locations, "offline_base_dir_candidates", lambda: (download_dir, real_dir)
     )
+    # `resolve_offline_base_file` ends on `default_offline_base_dir()` for a
+    # file no candidate holds; leaving that unpatched let the machine's own
+    # store answer for `fallback` and the test measured the real disk.
+    monkeypatch.setattr(locations, "default_offline_base_dir", lambda: download_dir)
 
     status = db_status()
 
     assert status["primary"] is True
-    assert status["dir"] == str(real_dir)
+    # `dir` is where a download would go; `sources` is where the file really is.
+    assert status["dir"] == str(download_dir)
+    sources = status["sources"]
+    assert isinstance(sources, dict)
+    assert sources["primary"] == str(real_dir)
+    # A base that is absent reports no source rather than a plausible guess.
+    assert sources["fallback"] is None
+    assert status["fallback"] is False
 
 
 def test_server_rejects_socket_paths_longer_than_af_unix_allows(tmp_path: Path) -> None:

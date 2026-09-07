@@ -91,19 +91,39 @@ def test_offline_base_resolution_prefers_existing_override_file(
     )
 
 
-def test_offline_base_candidates_are_unique_and_ordered(
+def test_an_explicit_db_dir_is_the_only_candidate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Every other override in this project is a directive; so is this one.
+
+    Treating it as a hint let the installer decide what to download from the
+    override while the runtime read the bases from somewhere else and reported
+    success for a directory that was empty.
+    """
     _force_platform(monkeypatch, "darwin")
     monkeypatch.setenv("TRANSLATOR_DB_DIR", str(tmp_path / "db"))
 
+    assert locations.offline_base_dir_candidates() == (tmp_path / "db",)
+    # Even for a file that is not there: no silent fall-through to another store.
+    assert locations.resolve_offline_base_file("primary.sqlite3") == (
+        tmp_path / "db" / "primary.sqlite3"
+    )
+
+
+def test_without_an_override_the_chain_falls_through_per_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _force_platform(monkeypatch, "darwin")
+    monkeypatch.delenv("TRANSLATOR_DB_DIR", raising=False)
+
     candidates = locations.offline_base_dir_candidates()
 
-    assert candidates[0] == tmp_path / "db"
     assert (
-        candidates[1]
+        candidates[0]
         == tmp_path / "Library" / "Application Support" / "Translator" / "db"
     )
+    assert candidates[1:] == locations.repo_offline_base_candidates()
+    assert len(candidates) == len(set(candidates))
     assert len(candidates) == len(set(candidates))
 
 

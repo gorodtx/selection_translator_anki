@@ -75,21 +75,24 @@ def engine_status() -> JsonObject:
 
 
 def db_status() -> JsonObject:
-    """Report which offline bases are reachable and where they live.
+    """Report which offline bases are reachable, and where each one really is.
 
-    ``dir`` is the directory the primary base actually resolved from, which is
-    not always the download directory: an explicit override or a repo checkout
-    can supply the files from elsewhere.
+    Reporting only a single directory alongside three booleans could lie in
+    both directions: name the download directory while the files were read
+    from a repo checkout, or name an override that is empty while answering
+    "present". Each base now carries the directory it resolved from, so the
+    client can tell "present" from "present, but not where you think".
+    ``dir`` stays the directory a download would go to.
     """
     status: JsonObject = {}
-    resolved_dir = paths.db_dir()
+    sources: JsonObject = {}
     for key, name in _DB_FILES.items():
         path = resolve_offline_base_file(name)
         exists = path.exists()
         status[key] = exists
-        if exists and key == "primary":
-            resolved_dir = path.parent
-    status["dir"] = str(resolved_dir)
+        sources[key] = str(path.parent) if exists else None
+    status["dir"] = str(paths.db_dir())
+    status["sources"] = sources
     return status
 
 
