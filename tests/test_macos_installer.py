@@ -165,9 +165,12 @@ def test_install_does_not_deregister_the_login_item() -> None:
     stub was more forgiving than the system in the one place the branch turned
     on.
 
-    Measured on a disposable agent: `print` fails after bootout; `launchctl
-    kill` keeps the registration but KeepAlive respawns within a second, which
-    is why the copy goes to a staging directory instead of over the live one.
+    Measured on a disposable agent: `print` fails after bootout. `launchctl
+    kill` does keep the registration, and on this daemon KeepAlive does not
+    respawn — it exits 0 on SIGTERM and {SuccessfulExit: false} leaves it "not
+    running". The copy still goes to a staging directory because that safety
+    would otherwise rest on the exit code staying 0: a job whose program dies
+    by signal gets "spawn scheduled" instead, straight into a partial bundle.
     Three real installs after the change: "launch agent restarted (registration
     unchanged)" each time, pid 54995 -> 55876, healthcheck 0.
     """

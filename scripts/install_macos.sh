@@ -209,13 +209,16 @@ install_app() {
   assert_bundle_matches_tree
   mkdir -p "${RELEASES_DIR}" "${LINK_DIR}"
   # Copy into a staging directory and swap it in, rather than unloading the
-  # agent and rsyncing over the live release. Two reasons, both measured.
-  # `launchctl kill` keeps the login-item registration but KeepAlive respawns
-  # the job within a second, so stopping the daemon before the copy would have
-  # launchd exec a half-copied bundle. And booting it out to prevent that is the
-  # churn worth avoiding: it deregisters the login item on every update. With a
-  # staging swap nothing ever reads a partly written `current`, the old daemon
-  # keeps serving until the files are in place, and one kickstart replaces it.
+  # agent and rsyncing over the live release. Booting the agent out is the churn
+  # worth avoiding — it deregisters the login item on every update — and the
+  # obvious alternative, stopping the daemon first, is safe only by accident:
+  # the daemon handles SIGTERM and exits 0 (measured), and KeepAlive here is
+  # {SuccessfulExit: false}, so launchd leaves it "not running" rather than
+  # respawning. Let that handler go away, or let the daemon die on a signal
+  # instead, and launchd schedules a spawn straight into a half-copied bundle
+  # (measured too, on a job whose program dies by signal: "spawn scheduled").
+  # Staging depends on none of that: nothing stops, nothing reads a partly
+  # written `current`, and the swap is one `mv`.
   local staging="${RELEASES_DIR}/.staging"
   rm -rf "${staging}"
   mkdir -p "${staging}"
