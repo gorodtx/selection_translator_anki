@@ -83,6 +83,11 @@ fi
 HELPER_BIN="${ROOT_DIR}/macos/AppleLangHelper/.build/release/apple-lang-helper"
 [[ -x "${HELPER_BIN}" ]] || fail "sidecar binary missing: ${HELPER_BIN}"
 cp "${HELPER_BIN}" "${RESOURCES}/bin/apple-lang-helper"
+# Activity Monitor names a process after the file that was executed, so the two helpers
+# showed up as "python3.13" and "apple-lang-helper" — neither of which tells the user
+# whose they are. Executing them through links named after the app fixes the name without
+# renaming the binaries, so every existing reference keeps working.
+ln -sf apple-lang-helper "${RESOURCES}/bin/TranslatorLookup"
 
 # The login agent runs this instead of the shell script: a script carries no signature,
 # so the system could not attribute the background item to this app and showed the user a
@@ -171,9 +176,10 @@ RES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="${RES}/app:${RES}/site-packages"
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONUNBUFFERED=1
-export TRANSLATOR_APPLE_HELPER="${RES}/bin/apple-lang-helper"
-exec "${RES}/python/bin/python3.13" -m desktop_app.platform.macos.daemon "$@"
+export TRANSLATOR_APPLE_HELPER="${RES}/bin/TranslatorLookup"
+exec "${RES}/bin/TranslatorEngine" -m desktop_app.platform.macos.daemon "$@"
 RUNNER
+ln -sf ../python/bin/python3.13 "${RESOURCES}/bin/TranslatorEngine"
 chmod +x "${RESOURCES}/bin/run-backend"
 
 cp "${ROOT_DIR}/scripts/db-bundle.lock.json" "${RESOURCES}/db-bundle.lock.json"

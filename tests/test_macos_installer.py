@@ -371,3 +371,38 @@ def test_agent_installer_still_reports_the_login_item_without_sfltool() -> None:
         line for line in body.splitlines() if not line.lstrip().startswith("#")
     )
     assert code.index("launchctl print") < code.index("sfltool")
+
+
+def test_background_processes_are_named_after_the_app() -> None:
+    """Activity Monitor names a process after the file that was executed.
+
+    The two helpers ran as "python3.13" and "apple-lang-helper", so a user who found
+    them in Activity Monitor had no way to tell whose they were or why they never
+    stopped. They are executed through links named after the app instead, which fixes
+    the name without renaming the binaries — every existing reference still resolves.
+    Measured: the three processes now report TranslatorEngine, Translator and
+    TranslatorLookup.
+    """
+    build = BUILDER.read_text(encoding="utf-8")
+
+    assert (
+        'ln -sf ../python/bin/python3.13 "${RESOURCES}/bin/TranslatorEngine"' in build
+    )
+    assert 'ln -sf apple-lang-helper "${RESOURCES}/bin/TranslatorLookup"' in build
+    # The links only matter if what starts the processes goes through them.
+    launcher = (
+        REPO_ROOT
+        / "macos"
+        / "Translator"
+        / "Sources"
+        / "TranslatorBackend"
+        / "main.swift"
+    ).read_text(encoding="utf-8")
+    assert "bin/TranslatorEngine" in launcher
+    assert "bin/TranslatorLookup" in launcher
+    assert "python/bin/python3.13" not in launcher, (
+        "executing python directly renames it back"
+    )
+    # And the fallback runner must agree, or the name depends on which one started it.
+    assert 'exec "${RES}/bin/TranslatorEngine"' in build
+    assert 'TRANSLATOR_APPLE_HELPER="${RES}/bin/TranslatorLookup"' in build

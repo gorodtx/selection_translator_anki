@@ -29,6 +29,7 @@ struct SettingsView: View {
                     enginesCard
                     ankiCard
                     databaseCard
+                    backgroundCard
                     HStack {
                         Spacer()
                         Button("Save settings") { Task { await model.saveSettings() } }
@@ -143,6 +144,36 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Three processes never stop, and until now they were called "python3.13" and
+    /// "apple-lang-helper" in Activity Monitor — a user who found them there had no way
+    /// to tell whose they were or why they were still running. Four lines, because that
+    /// is all it takes to answer both questions.
+    private var backgroundCard: some View {
+        Card("What keeps running") {
+            processRow("Translator", "This window, the shortcut and the popup.")
+            processRow("TranslatorEngine", "Holds the offline dictionaries open so a lookup answers in milliseconds. Starts at login and idles.")
+            processRow("TranslatorLookup", "Asks macOS for its own dictionary and offline translation.")
+            Text("Nothing leaves this Mac unless a network source above is switched on.")
+                .font(.captionText)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func processRow(_ name: String, _ detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(name)
+                .font(.captionText.monospaced())
+                .frame(width: 128, alignment: .leading)
+            Text(detail)
+                .font(.captionText)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     /// Which sources may answer a lookup.

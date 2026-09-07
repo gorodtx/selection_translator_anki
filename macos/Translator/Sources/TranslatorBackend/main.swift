@@ -24,15 +24,18 @@ func die(_ message: String, _ code: Int32) -> Never {
     exit(code)
 }
 
-let python = resources.appendingPathComponent("python/bin/python3.13")
+// Executed through a link named after the app: Activity Monitor names a process after
+// the file that was executed, and "python3.13" tells the user nothing about whose process
+// it is or why it never stops. The link points at the same interpreter.
+let python = resources.appendingPathComponent("bin/TranslatorEngine")
 guard FileManager.default.isExecutableFile(atPath: python.path) else {
-    die("no python runtime at \(python.path); the bundle is incomplete", 66)
+    die("no engine at \(python.path); the bundle is incomplete", 66)
 }
 
 setenv("PYTHONPATH", "\(resources.path)/app:\(resources.path)/site-packages", 1)
 setenv("PYTHONDONTWRITEBYTECODE", "1", 1)
 setenv("PYTHONUNBUFFERED", "1", 1)
-setenv("TRANSLATOR_APPLE_HELPER", resources.appendingPathComponent("bin/apple-lang-helper").path, 1)
+setenv("TRANSLATOR_APPLE_HELPER", resources.appendingPathComponent("bin/TranslatorLookup").path, 1)
 
 var argv: [UnsafeMutablePointer<CChar>?] = [
     strdup(python.path), strdup("-m"), strdup("desktop_app.platform.macos.daemon"),
