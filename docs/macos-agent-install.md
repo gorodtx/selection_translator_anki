@@ -42,6 +42,18 @@ It ends with a block an agent can parse, so nothing has to be inferred from pros
 
 `scripts/agent_install_macos.sh --report` re-reads the state without installing anything.
 
+**The smoke word has to be answerable offline.** The install ends by translating one word,
+and a fresh machine may have no network and no Apple language pair yet — a smoke that
+needed either would report a failed install over a working one. `serendipity` resolves
+from the offline bases alone; measured with the network sources switched off:
+
+```
+phase: final | translation: 'счастливая способность делать неожиданные открытия'
+```
+
+So if the word ever changes, check the replacement the same way — run a daemon with
+`google` and `cambridge` off in its config and confirm a non-empty `final` still arrives.
+
 ## Prompt for an agent
 
 Paste this as-is. It assumes nothing but a checkout.
