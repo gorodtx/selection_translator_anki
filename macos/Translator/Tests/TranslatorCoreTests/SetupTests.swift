@@ -31,7 +31,8 @@ private func readyPing(
     translation: Bool = true,
     translationStatus: String = "installed",
     dictionaries: [String] = ["Oxford Russian Dictionary", "Apple Dictionary"],
-    enabled: SourceSettings = SourceSettings()
+    enabled: SourceSettings = SourceSettings(),
+    pendingBytes: Int? = nil
 ) -> PingInfo {
     PingInfo(
         version: "0.3.0",
@@ -39,7 +40,7 @@ private func readyPing(
         platform: "darwin",
         db: PingInfo.Database(
             primary: primary, fallback: fallback, definitions: definitions,
-            dir: "/db"
+            dir: "/db", pendingBytes: pendingBytes
         ),
         engines: PingInfo.Engines(
             appleDictionary: dictionary,
@@ -116,6 +117,30 @@ private func step(_ plan: SetupPlan, _ id: SetupStepID) -> SetupStep {
         }
         let supported = plan(ping: readyPing(translation: false, translationStatus: "supported"))
         #expect(step(supported, .translationPair).action == .downloadLanguagePair)
+    }
+
+    /// The backend sums only the missing files, so the stage can say what this press
+    /// costs — 43 MB, not the 1.8 GB the full set weighs.
+    @Test func aKnownSizeIsNamedInTheStage() {
+        let result = plan(ping: readyPing(definitions: false, pendingBytes: 45_223_936))
+        let databases = step(result, .databases)
+        #expect(databases.detail.contains("Missing: definitions"))
+        #expect(databases.detail.contains("MB to download") || databases.detail.contains("МБ"))
+        #expect(!databases.detail.contains("1.8 GB"))
+    }
+
+    /// An unreadable lock is not "nothing to fetch". Both stay silent about cost, and
+    /// neither may turn the stage into something that looks finished.
+    @Test func anUnknownSizeClaimsNothingAndStillBlocks() {
+        for bytes in [nil, 0] as [Int?] {
+            let result = plan(ping: readyPing(definitions: false, pendingBytes: bytes))
+            let databases = step(result, .databases)
+            #expect(databases.state == .actionNeeded, "\(String(describing: bytes))")
+            #expect(databases.action == .downloadDatabases)
+            #expect(!databases.detail.contains("to download"))
+            #expect(!databases.detail.contains("0 bytes"))
+            #expect(!result.isReady)
+        }
     }
 
     @Test func missingDatabasesBlockAndNameThemselves() {

@@ -197,15 +197,27 @@ public enum SetupPlanner {
         return SetupStep(
             id: .databases,
             title: "Offline databases",
-            // No size here: the full set is about 1.8 GB, but one missing file can be
-            // forty megabytes, and a stage that overstates the cost by forty times is
-            // worse than one that says nothing. The progress line shows real bytes.
-            detail: "Missing: \(missing.joined(separator: ", ")).",
+            // The size comes from the backend, which sums only the missing files: the
+            // full set is about 1.8 GB but one absent file can be forty megabytes, and
+            // overstating the cost by forty times is worse than saying nothing. A nil
+            // means the backend cannot read its lock, so no number is claimed — never a
+            // zero, which would read as "nothing to fetch" beside a list of what is
+            // missing.
+            detail: pendingSize(db.pendingBytes).map {
+                "Missing: \(missing.joined(separator: ", ")). \($0) to download."
+            } ?? "Missing: \(missing.joined(separator: ", ")).",
             state: .actionNeeded,
             isOptional: false,
             action: .downloadDatabases,
             actionLabel: "Download…"
         )
+    }
+
+    /// A size worth showing, or nothing. Both an unreadable lock and a zero leave the
+    /// stage silent about cost rather than guessing at it.
+    private static func pendingSize(_ bytes: Int?) -> String? {
+        guard let bytes, bytes > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
     private static func accessibilityStep(trusted: Bool) -> SetupStep {

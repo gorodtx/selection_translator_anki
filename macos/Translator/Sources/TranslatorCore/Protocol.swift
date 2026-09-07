@@ -284,12 +284,23 @@ public struct PingInfo: Codable, Equatable, Sendable {
         public var fallback: Bool
         public var definitions: Bool
         public var dir: String
+        /// How much would travel if the download started now. Optional on purpose: nil
+        /// means the backend cannot read its lock file, which is not the same as nothing
+        /// to fetch, and the two must not render alike.
+        public var pendingBytes: Int?
 
-        public init(primary: Bool = false, fallback: Bool = false, definitions: Bool = false, dir: String = "") {
+        public init(
+            primary: Bool = false,
+            fallback: Bool = false,
+            definitions: Bool = false,
+            dir: String = "",
+            pendingBytes: Int? = nil
+        ) {
             self.primary = primary
             self.fallback = fallback
             self.definitions = definitions
             self.dir = dir
+            self.pendingBytes = pendingBytes
         }
 
         public init(from decoder: Decoder) throws {
@@ -298,6 +309,7 @@ public struct PingInfo: Codable, Equatable, Sendable {
             fallback = c.value(Bool.self, .fallback, default: false)
             definitions = c.value(Bool.self, .definitions, default: false)
             dir = c.value(String.self, .dir, default: "")
+            pendingBytes = c.optional(Int.self, .pendingBytes)
         }
     }
 
