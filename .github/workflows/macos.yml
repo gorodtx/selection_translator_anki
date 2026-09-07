@@ -247,6 +247,21 @@ jobs:
           uv run --frozen python -m desktop_app.platform.macos.client shutdown --timeout 10 || true
           wait "${backend_pid}" 2>/dev/null || true
 
+      - name: The toolchain must not write into a signed bundle
+        run: |
+          set -euo pipefail
+          # This regressed once: a shipped test helper got imported, a .pyc
+          # landed inside Resources/ and the code seal broke. The gate job
+          # runs the suite with no bundle present, so only here can it be
+          # caught. Run everything that touches the tree, then re-verify.
+          uv run --frozen python -m pytest -q
+          uv run --frozen ruff check .
+          uv run --frozen python -m mypy
+          codesign --verify --deep --strict dist/Translator.app
+          if find dist/Translator.app -name '*.pyc' -newer dist/Translator.app/Contents/Info.plist | grep -q .; then
+            echo "bytecode was written into the bundle after signing"; exit 1
+          fi
+
       - name: Package bundle
         run: |
           set -euo pipefail

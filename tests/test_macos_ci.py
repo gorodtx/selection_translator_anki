@@ -149,3 +149,22 @@ def test_notarize_job_is_tag_gated_and_secret_gated() -> None:
     assert "notarytool submit" in commands
     assert "stapler staple" in commands
     assert "options runtime" in commands
+
+
+def test_bundle_job_reruns_the_toolchain_against_the_built_app() -> None:
+    """The seal regression can only be caught where a bundle exists.
+
+    The gate job runs the suite with no bundle present, so
+    `test_built_bundle_seal_is_intact` skips there. Only the bundle job can
+    prove that running the toolchain leaves the signed app untouched.
+    """
+    commands = _commands("bundle")
+
+    names = [str(step.get("name", "")) for step in _steps("bundle")]
+    assert "The toolchain must not write into a signed bundle" in names
+    assert "codesign --verify --deep --strict dist/Translator.app" in commands
+    assert "bytecode was written into the bundle after signing" in commands
+    # All three tools that walk the tree, not just pytest.
+    assert "python -m pytest -q" in commands
+    assert "ruff check ." in commands
+    assert "python -m mypy" in commands
