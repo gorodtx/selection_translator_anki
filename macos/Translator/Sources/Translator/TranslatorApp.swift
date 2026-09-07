@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: AppModel
     private let client: IPCClient
     private let hotKeys = HotKeyManager()
+    private var announceDismissal: Task<Void, Never>?
     private lazy var popup = PopupPanelController(model: model)
     private var windows: [String: NSWindow] = [:]
     private var stateObserver: Task<Void, Never>?
@@ -65,12 +66,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Development hooks, so the UI can be driven without a real selection:
     /// `TRANSLATOR_DEBUG_TEXT` opens the popup on that text, `TRANSLATOR_DEBUG_WINDOW`
-    /// (`settings` | `history` | `anki`) opens one auxiliary window.
+    /// (`settings` | `history` | `anki`) opens one auxiliary window,
+    /// `TRANSLATOR_DEBUG_CAPTURE` runs the real capture path.
     private func openDebugTargets() {
         let environment = ProcessInfo.processInfo.environment
         if let text = environment["TRANSLATOR_DEBUG_TEXT"], !text.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                 self?.present(text: text)
+            }
+        }
+        // The capture path is the only one that raises the Accessibility request, and it
+        // normally needs a hot key press. Without this hook the grant cannot be asked for
+        // from a launch, which is exactly what an unattended check has to do.
+        if environment["TRANSLATOR_DEBUG_CAPTURE"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.translateSelection()
             }
         }
         switch environment["TRANSLATOR_DEBUG_WINDOW"] {
@@ -94,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.translateSelection() }
         }
         if !registered {
-            model.show(banner: "\(combo.displayString) is already taken by another app.", level: .warning)
+            announce("\(combo.displayString) is already taken by another app.", level: .warning)
         }
     }
 
@@ -102,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.refreshAccessibilityTrust()
         guard let text = SelectionCapture.currentSelection(), !text.isEmpty else {
             if model.accessibilityTrusted {
-                model.show(banner: "No text selected.", level: .info)
+                announce("No text selected.", level: .info)
             } else {
                 SelectionCapture.requestTrust()
                 showSettings()
@@ -111,6 +121,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         present(text: text)
+    }
+
+    /// Say something to the user when there is no popup on screen to say it in.
+    ///
+    /// Banners render inside the popup, so raising one from the hot key — nothing
+    /// selected, or a combination another app already owns — used to set state that
+    /// nobody displayed: the key did nothing and said nothing. The panel comes up with
+    /// the message and closes itself, since there is no translation to keep it open for.
+    private func announce(_ message: String, level: NotificationLevel) {
+        model.clearForAnnouncement()
+        showPopup()
+        model.show(banner: message, level: level)
+        announceDismissal?.cancel()
+        announceDismissal = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(level == .info ? 2.5 : 4))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.popup.hide() }
+        }
     }
 
     /// Services entry point (declared as `NSServices` in Info.plist): zero permissions.

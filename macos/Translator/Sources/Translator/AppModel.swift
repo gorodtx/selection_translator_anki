@@ -105,6 +105,13 @@ final class AppModel {
         }
     }
 
+    /// Drop whatever the popup was showing, so a bare message is not read as a result
+    /// belonging to the previous lookup.
+    func clearForAnnouncement() {
+        state = ViewState()
+        lastError = nil
+    }
+
     func show(banner text: String, level: NotificationLevel) {
         bannerDismissTask?.cancel()
         withAnimation(Motion.stateChange) { banner = BannerMessage(text: text, level: level) }

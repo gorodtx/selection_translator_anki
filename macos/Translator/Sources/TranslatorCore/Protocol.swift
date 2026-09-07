@@ -261,6 +261,14 @@ public struct ViewState: Codable, Equatable, Hashable, Sendable {
     }
 
     public var hasTranslation: Bool { !translationText.isEmpty }
+
+    /// Whether the scrolling part of the popup has anything to scroll. A bare message
+    /// (nothing selected, hot key taken) has not, and a scroll view given no content
+    /// still claims its full allowance once it is laid out in a window.
+    public var hasBodyContent: Bool {
+        loading || hasTranslation || !definitionsItems.isEmpty || !examples.isEmpty
+            || (apple?.hasContent ?? false)
+    }
     public var isEmpty: Bool { original.isEmpty && translationText.isEmpty }
 }
 

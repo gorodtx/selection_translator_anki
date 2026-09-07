@@ -20,17 +20,26 @@ struct TranslationPopupView: View {
                 // A dictionary card can run to dozens of sense blocks (looking up an
                 // inflected form pulls in the lemma's whole entry), so the body scrolls
                 // while the headword and the actions stay put.
-                ScrollView {
+                if model.state.hasBodyContent {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Layout.sectionGap) {
+                            body(for: model.state)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxHeight: bodyMaxHeight)
+                    .scrollBounceBehavior(.basedOnSize)
+                    // Content continues under the actions rather than stopping at a hard
+                    // edge, so there is something to see when there is more to read.
+                    .scrollEdgeEffectStyle(.soft, for: .vertical)
+                } else {
+                    // No scroll view at all: given nothing to hold it still takes its
+                    // whole allowance in a real window, and a one-line message came out
+                    // taller than a full dictionary card.
                     VStack(alignment: .leading, spacing: Layout.sectionGap) {
                         body(for: model.state)
                     }
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: bodyMaxHeight)
-                .scrollBounceBehavior(.basedOnSize)
-                // Content continues under the actions rather than stopping at a hard
-                // edge, so there is something to see when there is more to read.
-                .scrollEdgeEffectStyle(.soft, for: .vertical)
                 actionBar
             }
             .padding(Layout.gutter)
