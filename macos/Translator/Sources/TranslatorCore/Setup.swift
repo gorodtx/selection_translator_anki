@@ -31,6 +31,7 @@ public enum SetupState: Equatable, Sendable {
 /// What the one button on a step does. The view maps these to handlers; keeping them as
 /// values means the plan stays testable and the view stays dumb.
 public enum SetupAction: Equatable, Sendable {
+    case startBackend
     case grantAccessibility
     case openAccessibilitySettings
     case recordShortcut
@@ -140,16 +141,19 @@ public enum SetupPlanner {
                 isOptional: false
             )
         }
+        // The login agent is set to restart only after a crash, so a clean stop — a
+        // manual one, or a test — leaves it down until the next login. Offer to start it
+        // rather than telling the user to wait for something that will not happen.
         return SetupStep(
             id: .backend,
             title: "Backend",
             detail: connected
                 ? "Connected, waiting for its first answer."
-                : "Not reachable yet. It starts at login and takes a few seconds.",
+                : "Not running. It starts at login; start it now if it stopped.",
             state: .waiting,
             isOptional: false,
-            action: .recheck,
-            actionLabel: "Re-check"
+            action: connected ? .recheck : .startBackend,
+            actionLabel: connected ? "Re-check" : "Start"
         )
     }
 

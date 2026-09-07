@@ -302,6 +302,9 @@ final class AppModel {
 
     func refreshAccessibilityTrust() {
         accessibilityTrusted = SelectionCapture.isTrusted
+        // Written so scripts can read it: asking from a script answers for the script's
+        // own parent process, never for this app.
+        UserDefaults.standard.set(accessibilityTrusted, forKey: "accessibilityTrusted")
     }
 
     private func message(for error: Error) -> String {

@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSUpdateDynamicServices()
 
         model.loadStoredHotKey()
+        // Know our own permission state from the start: the setup stages read it, and it
+        // is recorded where the installer report can see it.
+        model.refreshAccessibilityTrust()
         applyHotKey(model.hotKey)
         openSetupIfUnfinished()
         model.start()

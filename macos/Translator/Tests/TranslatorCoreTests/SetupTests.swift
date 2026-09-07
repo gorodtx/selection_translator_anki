@@ -78,6 +78,8 @@ private func step(_ plan: SetupPlan, _ id: SetupStepID) -> SetupStep {
         let result = plan(connected: false, ping: nil)
         #expect(!result.isReady)
         #expect(step(result, .backend).state == .waiting)
+        // Its KeepAlive only covers a crash, so a clean stop needs a push, not patience.
+        #expect(step(result, .backend).action == .startBackend)
         #expect(step(result, .databases).state == .waiting)
         #expect(step(result, .dictionary).state == .waiting)
         #expect(step(result, .translationPair).state == .waiting)
