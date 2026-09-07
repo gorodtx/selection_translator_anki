@@ -39,6 +39,8 @@ public enum SetupAction: Equatable, Sendable {
     case openAccessibilitySettings
     case recordShortcut
     case downloadLanguagePair
+    case downloadDatabases
+    case cancelDatabaseDownload
     case openDictionarySettings
     case connectAnki
     case recheck
@@ -189,15 +191,20 @@ public enum SetupPlanner {
                 isOptional: false
             )
         }
-        // The app cannot fetch 1.8 GB itself; the installer verifies checksums and does.
+        // The backend fetches them, verifies each against the lock file and only then
+        // moves it into place, so this is a button rather than an instruction to go and
+        // run a shell script.
         return SetupStep(
             id: .databases,
             title: "Offline databases",
-            detail: "Missing: \(missing.joined(separator: ", ")). Run scripts/install_macos.sh to fetch them.",
+            // No size here: the full set is about 1.8 GB, but one missing file can be
+            // forty megabytes, and a stage that overstates the cost by forty times is
+            // worse than one that says nothing. The progress line shows real bytes.
+            detail: "Missing: \(missing.joined(separator: ", ")).",
             state: .actionNeeded,
             isOptional: false,
-            action: .recheck,
-            actionLabel: "Re-check"
+            action: .downloadDatabases,
+            actionLabel: "Download…"
         )
     }
 
@@ -318,7 +325,20 @@ public enum SetupPlanner {
                 isOptional: true
             )
         }
+        // Only "supported" means Apple will hand over the pair if asked. Every other
+        // answer — not offered here, the engine not reachable, no probe yet — is not
+        // something a Download button can fix, and offering one would waste the press.
         switch engines.translationStatus {
+        case "supported":
+            return SetupStep(
+                id: .translationPair,
+                title: "Offline translation",
+                detail: "Language pair not downloaded. Phrases go over the network until it is.",
+                state: .actionNeeded,
+                isOptional: true,
+                action: .downloadLanguagePair,
+                actionLabel: "Download…"
+            )
         case "unsupported":
             return SetupStep(
                 id: .translationPair,
@@ -331,11 +351,9 @@ public enum SetupPlanner {
             return SetupStep(
                 id: .translationPair,
                 title: "Offline translation",
-                detail: "Language pair not downloaded. Phrases go over the network until it is.",
-                state: .actionNeeded,
-                isOptional: true,
-                action: .downloadLanguagePair,
-                actionLabel: "Download…"
+                detail: "The translation engine is not answering. Phrases go over the network.",
+                state: .waiting,
+                isOptional: true
             )
         }
     }

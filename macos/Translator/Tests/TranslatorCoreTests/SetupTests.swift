@@ -91,6 +91,33 @@ private func step(_ plan: SetupPlan, _ id: SetupStepID) -> SetupStep {
         #expect(step(result, .shortcut).state == .done)
     }
 
+    /// The backend can fetch the databases now, so the stage is a button rather than an
+    /// instruction to go and run a shell script.
+    @Test func missingDatabasesOfferTheDownload() {
+        let result = plan(ping: readyPing(primary: false))
+        let databases = step(result, .databases)
+        #expect(databases.state == .actionNeeded)
+        #expect(databases.action == .downloadDatabases)
+        #expect(databases.detail.contains("primary"))
+        #expect(!databases.detail.contains("install_macos"), "no shell commands in the UI")
+        // One missing file can be forty megabytes; naming the full set's size here would
+        // overstate the cost by forty times.
+        #expect(!databases.detail.contains("1.8 GB"))
+    }
+
+    /// Only "supported" means Apple will hand the pair over if asked. Offering a download
+    /// for any other answer wastes the press and teaches the user the button does nothing.
+    @Test func onlyASupportedPairOffersADownload() {
+        for status in ["unknown", "unavailable", "something new"] {
+            let result = plan(ping: readyPing(translation: false, translationStatus: status))
+            let pair = step(result, .translationPair)
+            #expect(pair.action == nil, "\(status) must not offer a download")
+            #expect(pair.state == .waiting, "\(status)")
+        }
+        let supported = plan(ping: readyPing(translation: false, translationStatus: "supported"))
+        #expect(step(supported, .translationPair).action == .downloadLanguagePair)
+    }
+
     @Test func missingDatabasesBlockAndNameThemselves() {
         let result = plan(ping: readyPing(primary: false, definitions: false))
         let databases = step(result, .databases)
@@ -100,6 +127,7 @@ private func step(_ plan: SetupPlan, _ id: SetupStepID) -> SetupStep {
         #expect(databases.detail.contains("definitions"))
         #expect(!databases.detail.contains("fallback"))
         #expect(!result.isReady)
+        #expect(databases.action == .downloadDatabases)
     }
 
     @Test func missingPermissionBlocksAndOffersTheGrant() {
