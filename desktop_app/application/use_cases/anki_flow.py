@@ -615,7 +615,9 @@ def _values_from_result(
     if examples_override is not None:
         examples = _dedupe_list(list(examples_override))
     else:
-        examples = _dedupe_list([example.en for example in result.examples if example.en])
+        examples = _dedupe_list(
+            [example.en for example in result.examples if example.en]
+        )
     return AnkiUpsertValues(
         translations=tuple(translations),
         definitions_en=tuple(definitions),

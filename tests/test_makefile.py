@@ -58,6 +58,26 @@ def test_format_gate_is_scoped_to_changed_files() -> None:
     assert "ruff format --check ." not in text
 
 
+def test_format_gate_looks_at_the_working_tree_too() -> None:
+    """Committed history is not the same as what was edited.
+
+    With the list taken from `$(BASE)...HEAD` alone, `make verify` passed on an
+    uncommitted edit to a file the branch had not touched before, and CI — which
+    diffs against the previous push — failed on that exact file. Proved by
+    appending unformatted code to a file outside the branch diff: the scoped
+    list reported everything formatted, this one reports the file.
+    """
+    text = MAKEFILE.read_text(encoding="utf-8")
+    definition = text[text.index("CHANGED_PY") : text.index("bootstrap:")]
+
+    assert "git diff --name-only --diff-filter=ACMR HEAD" in definition, (
+        "staged and unstaged edits must be in the list"
+    )
+    assert "git ls-files --others --exclude-standard" in definition, (
+        "a new file is changed too"
+    )
+
+
 def test_verify_runs_lint_format_types_and_tests() -> None:
     line = next(
         line

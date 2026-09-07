@@ -4,8 +4,18 @@
 # The branch baseline. `fmt-check` only looks at files changed since then:
 # ~20 files inherited from the GNOME branch are not ruff-formatted, and
 # reformatting them would bury the real diff.
+#
+# The list has to include the working tree, not just committed history. Taking
+# it from `$(BASE)...HEAD` alone let `make verify` pass on an uncommitted edit
+# to a file the branch had not touched before — and CI, which diffs against the
+# previous push, then failed on exactly that file. A gate that inspects what git
+# recorded rather than what was actually edited is not a gate.
 BASE ?= origin/gnome
-CHANGED_PY = $(shell git diff --name-only --diff-filter=ACMR $(BASE)...HEAD -- '*.py')
+CHANGED_PY = $(shell { \
+        git diff --name-only --diff-filter=ACMR $(BASE)...HEAD -- '*.py'; \
+        git diff --name-only --diff-filter=ACMR HEAD -- '*.py'; \
+        git ls-files --others --exclude-standard -- '*.py'; \
+        } | sort -u)
 
 bootstrap:
 	uv sync --frozen --dev
