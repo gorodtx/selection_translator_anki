@@ -7,6 +7,7 @@ import TranslatorCore
 /// The permissions card is gone: it said the same thing as the setup stage above it, and
 /// two rows claiming the same state is how they drift apart.
 struct SettingsView: View {
+    @State private var fieldMappingOpen = false
     @Bindable var model: AppModel
     var onHotKeyChange: (KeyCombo) -> Void
 
@@ -63,6 +64,36 @@ struct SettingsView: View {
             Text("Also available from the Services menu on any selected text, with no permissions.")
                 .font(.captionText)
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var issues: [AnkiFieldIssue] { model.ankiFieldIssues }
+
+    /// What is known about the note type, said plainly. The three states are different
+    /// answers and must not read alike: names were read and compared, the question could
+    /// not be asked, or the answer was empty and settles nothing.
+    @ViewBuilder
+    private var fieldMappingFooter: some View {
+        if let error = model.ankiModelFieldsError {
+            Text(error)
+                .font(.captionText)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if model.ankiModelFields.isEmpty {
+            Text("Nothing to compare against yet — the note type may not exist. Create it above.")
+                .font(.captionText)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if issues.isEmpty {
+            Text("All five match the note type: \(model.ankiModelFields.joined(separator: ", ")).")
+                .font(.captionText)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text("The note type has: \(model.ankiModelFields.joined(separator: ", ")).")
+                .font(.captionText)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -189,17 +220,24 @@ struct SettingsView: View {
                 .font(.secondaryText)
             }
 
-            DisclosureGroup("Field mapping") {
+            DisclosureGroup("Field mapping", isExpanded: $fieldMappingOpen) {
                 VStack(spacing: 6) {
-                    FieldRow("Word", text: $model.settings.anki.fields.word)
-                    FieldRow("Translation", text: $model.settings.anki.fields.translation)
-                    FieldRow("Example", text: $model.settings.anki.fields.exampleEn)
-                    FieldRow("Definitions", text: $model.settings.anki.fields.definitionsEn)
-                    FieldRow("Image", text: $model.settings.anki.fields.image)
+                    FieldRow("Word", text: $model.settings.anki.fields.word, issues: issues)
+                    FieldRow("Translation", text: $model.settings.anki.fields.translation, issues: issues)
+                    FieldRow("Example", text: $model.settings.anki.fields.exampleEn, issues: issues)
+                    FieldRow("Definitions", text: $model.settings.anki.fields.definitionsEn, issues: issues)
+                    FieldRow("Image", text: $model.settings.anki.fields.image, issues: issues)
+                    fieldMappingFooter
                 }
                 .padding(.top, 6)
             }
             .font(.secondaryText)
+            // Asked when the section opens rather than on every settings visit: it is a
+            // question to another program, and nobody needs the answer while the section
+            // is closed.
+            .onChange(of: fieldMappingOpen) { _, open in
+                if open { Task { await model.loadModelFields() } }
+            }
         }
     }
 
@@ -271,16 +309,42 @@ struct StatusRow: View {
 private struct FieldRow: View {
     let label: String
     @Binding var text: String
+    let issues: [AnkiFieldIssue]
 
-    init(_ label: String, text: Binding<String>) {
+    init(_ label: String, text: Binding<String>, issues: [AnkiFieldIssue] = []) {
         self.label = label
         self._text = text
+        self.issues = issues
+    }
+
+    /// Set only when the note type was read and does not have this name — never while
+    /// the answer is unknown.
+    private var issue: AnkiFieldIssue? {
+        issues.first { $0.configured == text }
     }
 
     var body: some View {
-        HStack {
-            Text(label).font(.captionText).foregroundStyle(.secondary).frame(width: 90, alignment: .leading)
-            TextField(label, text: $text).textFieldStyle(.roundedBorder).font(.captionText)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label).font(.captionText).foregroundStyle(.secondary).frame(width: 90, alignment: .leading)
+                TextField(label, text: $text).textFieldStyle(.roundedBorder).font(.captionText)
+                if issue != nil {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.orange)
+                        .font(.captionText)
+                        .accessibilityLabel("Not a field of the note type")
+                }
+            }
+            if let issue {
+                // Naming the near miss turns a hunt into a correction, and a plain
+                // "no such field" into something actionable.
+                Text(issue.suggestion.map { "The note type has no \"\(issue.configured)\". Did you mean \"\($0)\"?" }
+                    ?? "The note type has no \"\(issue.configured)\". A card would fail to add.")
+                    .font(.captionText)
+                    .foregroundStyle(Color.orange)
+                    .padding(.leading, 98)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
