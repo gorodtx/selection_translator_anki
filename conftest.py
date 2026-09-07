@@ -26,6 +26,10 @@ def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool:
         ".venv-desktop",
         "__pycache__",
         "dev/tests",
+        # Build output. A signed .app must never be imported from: writing a
+        # single .pyc inside it breaks the code seal.
+        "dist",
+        "out",
     }
     path_str = collection_path.as_posix()
     if "dev/tests" in path_str:

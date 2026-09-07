@@ -141,7 +141,18 @@ mkdir -p "${RESOURCES}/site-packages"
 uv pip install --quiet --python "${BUNDLED_PY}" --target "${RESOURCES}/site-packages" \
   -r "${ROOT_DIR}/scripts/runtime-requirements.txt"
 find "${RESOURCES}/site-packages" -name '__pycache__' -type d -prune -exec rm -rf {} +
-find "${RESOURCES}/site-packages" -type d -name 'tests' -prune -exec rm -rf {} +
+find "${RESOURCES}/site-packages" -type d \( -name 'tests' -o -name 'test' \) -prune -exec rm -rf {} +
+# Test helpers are useless at runtime and actively harmful in a signed bundle:
+# a tool that imports one writes a .pyc beside it and breaks the code seal.
+find "${RESOURCES}/site-packages" -type f \
+  \( -name 'test_*.py' -o -name '*_test.py' -o -name 'pytest_plugin.py' -o -name 'conftest.py' \) \
+  -delete
+# The earlier globs only matched lib/tcl*, so versioned Tcl packages survived.
+find "${RESOURCES}/python/lib" -maxdepth 1 -type d \
+  \( -name 'tcl*' -o -name 'tk*' -o -name 'itcl*' -o -name 'thread*' -o -name 'sqlite3.*' \) \
+  -prune -exec rm -rf {} +
+find "${RESOURCES}/python/lib" -maxdepth 1 -type f -name 'libtcl*' -delete
+find "${RESOURCES}/python/lib" -maxdepth 1 -type f -name 'libtk*' -delete
 
 log "byte-compiling backend"
 "${BUNDLED_PY}" -m compileall -q -j 0 "${RESOURCES}/app" "${RESOURCES}/site-packages" >/dev/null
@@ -206,4 +217,13 @@ codesign --force --sign "${SIGN_IDENTITY}" "${RESOURCES}/bin/apple-lang-helper"
 codesign --force --sign "${SIGN_IDENTITY}" --identifier "${BUNDLE_ID}" "${APP_DIR}"
 
 rm -rf "${STAGE}"
+
+# A bundle with a broken seal is worse than an unsigned one: Gatekeeper rejects
+# it and notarisation fails, both far from here. Catch it at the source.
+log "verifying the seal"
+if ! codesign --verify --deep --strict "${APP_DIR}" 2>&1 | tee "${OUT_DIR}/.codesign.log" >&2; then
+  fail "the bundle signature is invalid (see ${OUT_DIR}/.codesign.log)"
+fi
+codesign --verify --deep --strict "${APP_DIR}" || fail "the bundle signature is invalid"
+
 log "done: $(du -sh "${APP_DIR}" | cut -f1) at ${APP_DIR}"
