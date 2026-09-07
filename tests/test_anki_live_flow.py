@@ -453,3 +453,38 @@ def test_field_list_json_keeps_the_two_keys_a_client_reads() -> None:
 
     failed = field_list_to_json(AnkiListResult(items=[], error="AnkiConnect error: x"))
     assert failed == {"fields": [], "error": "AnkiConnect error: x"}
+
+
+def test_available_fields_is_what_the_sheet_offers_not_what_anki_has(
+    anki: tuple[FakeAnkiConnect, AnkiFlow],
+) -> None:
+    """A configured name absent from the note type belongs in this list.
+
+    The name invites the opposite reading, and reading it as the note type's
+    fields is how it misleads: it is the union of what this app would write and
+    what the matched note already carries. Turning it into a model-derived list
+    would empty the sheet of the very row a misconfigured name needs.
+    """
+    server, flow = anki
+    server.state.models[DEFAULT_MODEL_NAME] = list(DEFAULT_MODEL_FIELDS)
+    server.state.notes[1000] = Note(
+        1000, DEFAULT_MODEL_NAME, "English", {"word": "cat", "translation": "кот"}
+    )
+    misconfigured = AnkiFieldMap(
+        word="Woord",
+        translation="translation",
+        example_en="example_en",
+        definitions_en="definitions_en",
+        image="image",
+    )
+    config = AnkiConfig(
+        deck="English", model=DEFAULT_MODEL_NAME, fields=misconfigured
+    )
+
+    preview = _wait(flow.prepare_upsert(config, "cat", _result())).preview
+
+    assert preview is not None
+    assert "Woord" in preview.available_fields, "the sheet must show what it writes"
+    assert "word" in preview.available_fields, "and what the note already has"
+    # The note type itself never said "Woord"; anki.model_fields is for that.
+    assert "Woord" not in server.state.models[DEFAULT_MODEL_NAME]

@@ -201,6 +201,14 @@ class AnkiFlow:
                     if details_result.error is not None:
                         _finish(_fallback_preview())
                         return
+                    # What the upsert sheet should offer: the fields this app
+                    # is configured to write, plus whatever the matched note
+                    # already carries. It is deliberately not the note type's
+                    # field list — a name configured but absent from the model
+                    # still belongs here, because the app would write to it and
+                    # the sheet has to show that row. Read it as "what the
+                    # sheet offers", never as "what Anki has": for the latter
+                    # ask anki.model_fields, which reads the model itself.
                     available_fields = _merge_available_fields(
                         expected_fields,
                         _collect_available_fields(details_result.items),

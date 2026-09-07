@@ -120,6 +120,20 @@ with no fields. So an empty list means **"nothing to compare against"**, never
 "every name is wrong" — with no names in hand a client must mark nothing as
 missing, whether or not there is an `error`.
 
+`anki.prepare_upsert` also answers `available_fields`, and the name is
+misleading enough to be worth stating: it is **what the sheet should offer** —
+the names this app is configured to write, plus whatever the matched note
+already carries — not the note type's field list. A name that is configured but
+absent from the model appears there on purpose, because the app would write to
+it. Measured with `word` misconfigured as `Woord` against a note holding `word`
+and `translation`:
+
+```
+available_fields: ['Woord', 'translation', 'example_en', 'definitions_en', 'image', 'word']
+```
+
+For what Anki actually has, ask `anki.model_fields`.
+
 ### Downloading the offline bases
 
 `db.download` starts the missing files from `scripts/db-bundle.lock.json` and
