@@ -169,6 +169,28 @@ def test_bundle_identifier_matches_the_project_identity() -> None:
 
     assert 'BUNDLE_ID="com.translator.desktop"' in text
     assert 'BUNDLE_ID="com.translator.desktop"' in installer
+    # The SwiftPM bundle used during development has to claim the same identity, or a
+    # grant given to the dev build does not carry over to the installed one.
+    dev_script = REPO_ROOT / "macos" / "Translator" / "scripts" / "build_app.sh"
+    dev_plist = REPO_ROOT / "macos" / "Translator" / "Resources" / "Info.plist"
+    assert 'BUNDLE_ID="com.translator.desktop"' in dev_script.read_text(
+        encoding="utf-8"
+    )
+    assert "<string>com.translator.desktop</string>" in dev_plist.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_dev_plist_declares_the_service_without_a_context_filter() -> None:
+    # NSRequiredContext narrows where the Service appears; the app translates words,
+    # phrases and sentences alike, so both bundles declare send types and nothing else.
+    dev_plist = REPO_ROOT / "macos" / "Translator" / "Resources" / "Info.plist"
+    text = dev_plist.read_text(encoding="utf-8")
+
+    assert "NSServices" in text
+    assert "NSStringPboardType" in text
+    assert "NSRequiredContext" not in text
+    assert "NSTextContent" not in text
 
 
 @pytest.mark.skipif(

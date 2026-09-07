@@ -10,7 +10,11 @@ cd "$(dirname "$0")/.."
 
 CONFIG="${1:-release}"
 APP_NAME="Translator"
-BUNDLE_ID="com.gorodtx.translator"
+# The one identity the project uses: the launchd Label in install_macos.sh, the
+# D-Bus name on Linux and the bundle built by scripts/build_macos_app.sh all say
+# this. Two identifiers would mean two separate Accessibility grants, so a user
+# would authorise the dev build and be asked again by the installed app.
+BUNDLE_ID="com.translator.desktop"
 OUT=".build/${APP_NAME}.app"
 
 swift build -c "$CONFIG"

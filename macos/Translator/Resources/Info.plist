@@ -7,7 +7,7 @@
 	<key>CFBundleExecutable</key>
 	<string>Translator</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.gorodtx.translator</string>
+	<string>com.translator.desktop</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -42,11 +42,6 @@
 			<string>translateSelection</string>
 			<key>NSPortName</key>
 			<string>Translator</string>
-			<key>NSRequiredContext</key>
-			<dict>
-				<key>NSTextContent</key>
-				<string>Text</string>
-			</dict>
 			<key>NSSendTypes</key>
 			<array>
 				<string>NSStringPboardType</string>
