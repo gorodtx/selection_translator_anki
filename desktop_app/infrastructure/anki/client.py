@@ -250,19 +250,21 @@ def _should_retry_delete_model(error: str) -> bool:
 def _coerce_list_response(response: AnkiResponse) -> AnkiListResult:
     if response.error is not None:
         return AnkiListResult(items=[], error=response.error)
-    items = _coerce_str_list(response.result)
-    if not items and response.result is not None:
+    # An empty list is a legitimate answer: a profile with no decks, or a
+    # `findNotes` that matched nothing — which is the normal case for a word
+    # being added for the first time. Only a result that is not a list at all
+    # means the response was malformed.
+    if response.result is not None and _coerce_list(response.result) is None:
         return AnkiListResult(items=[], error="Invalid AnkiConnect response")
-    return AnkiListResult(items=items, error=None)
+    return AnkiListResult(items=_coerce_str_list(response.result), error=None)
 
 
 def _coerce_id_list_response(response: AnkiResponse) -> AnkiIdListResult:
     if response.error is not None:
         return AnkiIdListResult(items=[], error=response.error)
-    items = _coerce_int_list(response.result)
-    if not items and response.result is not None:
+    if response.result is not None and _coerce_list(response.result) is None:
         return AnkiIdListResult(items=[], error="Invalid AnkiConnect response")
-    return AnkiIdListResult(items=items, error=None)
+    return AnkiIdListResult(items=_coerce_int_list(response.result), error=None)
 
 
 def _coerce_note_info(response: AnkiResponse) -> AnkiNoteInfoResult:
