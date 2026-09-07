@@ -378,3 +378,34 @@ private func step(_ plan: SetupPlan, _ id: SetupStepID) -> SetupStep {
     }
 }
 
+
+/// How the switch in Settings reads each state. Waiting for approval is the one worth
+/// pinning: the app is registered and the user asked for it, so showing the switch as off
+/// would invite them to turn on what is already on.
+@Suite struct LoginItemSwitchTests {
+    @Test func approvalPendingReadsAsOn() {
+        #expect(LoginItemState.requiresApproval.isOn)
+        #expect(LoginItemState.enabled.isOn)
+        #expect(!LoginItemState.notRegistered.isOn)
+        #expect(!LoginItemState.unavailable.isOn)
+    }
+
+    /// The stage and the switch must agree, or the same window says two things.
+    @Test func theStageAgreesWithTheSwitch() {
+        for state in [LoginItemState.enabled, .requiresApproval, .notRegistered, .unavailable] {
+            let stage = SetupPlanner.plan(
+                connected: true,
+                ping: nil,
+                accessibilityTrusted: true,
+                shortcutRegistered: true,
+                shortcut: "⌥⌘T",
+                loginItem: state,
+                anki: AnkiStatus()
+            ).steps.first { $0.id == .loginItem }
+            #expect(stage != nil)
+            // Done means on; anything the switch shows as off must not read as done.
+            #expect((stage?.state == .done) == (state == .enabled), "\(state)")
+            if !state.isOn { #expect(stage?.state != .done, "\(state)") }
+        }
+    }
+}

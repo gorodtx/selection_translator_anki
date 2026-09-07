@@ -30,6 +30,19 @@ public enum LoginItemState: Equatable, Sendable {
     /// A state this build does not know. Nothing a button here can fix, and guessing
     /// would be worse than saying so.
     case unavailable
+
+    /// How a switch should read.
+    ///
+    /// Waiting for approval counts as on: the app is registered and the user asked for
+    /// it, and showing the switch as off would invite them to turn on something that is
+    /// already turned on. What is missing is a click in System Settings, which the row
+    /// says in words instead.
+    public var isOn: Bool {
+        switch self {
+        case .enabled, .requiresApproval: return true
+        case .notRegistered, .unavailable: return false
+        }
+    }
 }
 
 public enum SetupState: Equatable, Sendable {

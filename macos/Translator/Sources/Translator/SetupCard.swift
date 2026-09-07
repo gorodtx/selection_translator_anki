@@ -23,7 +23,7 @@ struct SetupCard: View {
             accessibilityTrusted: model.accessibilityTrusted,
             shortcutRegistered: model.shortcutRegistered,
             shortcut: model.hotKey.displayString,
-            loginItem: LoginItem.state,
+            loginItem: model.loginItem,
             anki: model.ankiStatus
         )
     }
@@ -244,17 +244,8 @@ struct SetupCard: View {
                 target: Locale.Language(identifier: model.settings.languages.target)
             )
         case .enableLoginItem:
-            do {
-                try LoginItem.enable()
-                // Registering can leave macOS waiting for approval, so the row is
-                // re-read rather than assumed to be done.
-                Task { await model.refreshAll() }
-            } catch {
-                model.show(
-                    banner: "Could not turn that on: \(error.localizedDescription)",
-                    level: .error
-                )
-            }
+            // The same path as the switch below, so the two cannot disagree.
+            model.setLoginItem(true)
         case .openLoginItemsSettings:
             LoginItem.openSettings()
         case .downloadDatabases:

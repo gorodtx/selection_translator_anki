@@ -44,6 +44,9 @@ struct SettingsView: View {
         .frame(minWidth: 480, minHeight: 520)
         .task {
             model.refreshAccessibilityTrust()
+            // Read from the system, not from memory: the user can turn this off in
+            // System Settings and the app is never told.
+            model.refreshLoginItem()
             await model.refreshAll()
         }
     }
@@ -64,10 +67,55 @@ struct SettingsView: View {
             Text("Also available from the Services menu on any selected text, with no permissions.")
                 .font(.captionText)
                 .foregroundStyle(.tertiary)
+
+            Divider().opacity(0.4)
+            loginItemRow
+        }
+    }
+
+    /// The shortcut belongs to this process, so it is gone whenever the app is not
+    /// running. The backend's own login agent covers only the backend, which is what made
+    /// this easy to miss: after a restart the daemon answers and nothing else does. The
+    /// switch lives next to the shortcut for that reason, and reads from the system every
+    /// time — the user can change it in System Settings without the app hearing.
+    @ViewBuilder
+    private var loginItemRow: some View {
+        Toggle(isOn: Binding(
+            get: { model.loginItem.isOn },
+            set: { model.setLoginItem($0) }
+        )) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Open at login").font(.controlLabel)
+                Text("Without it the shortcut works only after the app is opened by hand.")
+                    .font(.captionText)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .accessibilityLabel("Open at login")
+        .accessibilityHint("Registers the app to start itself when you log in.")
+
+        if model.loginItem == .requiresApproval {
+            // Registered already; the one remaining click is the user's to make.
+            HStack(spacing: 8) {
+                Text("Waiting for your approval in System Settings.")
+                    .font(.captionText)
+                    .foregroundStyle(Color.orange)
+                Button("Open…") { LoginItem.openSettings() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Spacer()
+            }
+        } else if model.loginItem == .unavailable {
+            Text("The system reported a state this version does not understand.")
+                .font(.captionText)
+                .foregroundStyle(.secondary)
         }
     }
 
     private var issues: [AnkiFieldIssue] { model.ankiFieldIssues }
+
 
     /// What is known about the note type, said plainly. The three states are different
     /// answers and must not read alike: names were read and compared, the question could

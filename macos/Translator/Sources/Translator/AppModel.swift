@@ -20,6 +20,9 @@ final class AppModel {
 
     // Ambient
     var banner: BannerMessage?
+    /// Whether the app opens itself at login. Read from the system, never remembered:
+    /// the user can change it in System Settings without the app hearing about it.
+    var loginItem: LoginItemState = .notRegistered
     /// The note type's real field names, and why they could not be read. Empty with no
     /// error means nothing can be concluded, which is not the same as a mismatch.
     var ankiModelFields: [String] = []
@@ -187,6 +190,29 @@ final class AppModel {
             ],
             modelFields: ankiModelFields
         )
+    }
+
+    // MARK: - Open at login
+
+    func refreshLoginItem() {
+        loginItem = LoginItem.state
+    }
+
+    /// Turning it on asks the system for the registration; macOS may then want the user
+    /// to approve it, which is a different state and not a failure.
+    func setLoginItem(_ on: Bool) {
+        do {
+            if on { try LoginItem.enable() } else { try LoginItem.disable() }
+        } catch {
+            show(
+                banner: on
+                    ? "Could not turn on opening at login: \(error.localizedDescription)"
+                    : "Could not turn off opening at login: \(error.localizedDescription)",
+                level: .error
+            )
+        }
+        // Ask the system what it now thinks rather than assuming the call decided it.
+        refreshLoginItem()
     }
 
     // MARK: - Offline databases
