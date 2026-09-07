@@ -377,7 +377,7 @@ because `CGEventPost` is gated on it too. Measured on an untrusted process:
 
 ```
 AXIsProcessTrusted()                 false
-kAXFocusedUIElement                  status -25204
+kAXFocusedUIElement                  status -25204 (kAXErrorCannotComplete)
 CGEvent ⌘C created (down/up = true), posted to .cghidEventTap
 NSPasteboard.changeCount             733 -> 733   (never moved)
 ```

@@ -241,7 +241,15 @@ jobs:
           import json
           data = json.load(open("ping.json"))["result"]
           assert data["protocol"] == 1, data
-          assert data["db"] == {"primary": False, "fallback": False, "definitions": False, "dir": data["db"]["dir"]}, data["db"]
+          db = data["db"]
+          # Field by field, not whole-dict equality: the report grows over time
+          # and an exact match turns every addition into a CI failure.
+          assert db["primary"] is False, db
+          assert db["fallback"] is False, db
+          assert db["definitions"] is False, db
+          assert db["dir"], db
+          # No base is present here, so none may claim a source directory.
+          assert all(value is None for value in db["sources"].values()), db
           print("bundle backend OK:", data["version"])
           PY
           uv run --frozen python -m desktop_app.platform.macos.client shutdown --timeout 10 || true
