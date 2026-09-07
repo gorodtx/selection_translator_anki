@@ -38,8 +38,8 @@ JSON object per line, UTF-8.
 Methods: `ping`, `translate`, `cancel`, `close`, `history.list`,
 `history.select`, `examples.refresh`, `copy_all`, `anki.status`, `anki.decks`,
 `anki.select_deck`, `anki.create_model`, `anki.prepare_upsert`,
-`anki.apply_upsert`, `engines.refresh`, `db.download`, `db.cancel`,
-`settings.get`, `settings.save`, `shutdown`.
+`anki.apply_upsert`, `anki.model_fields`, `engines.refresh`, `db.download`,
+`db.cancel`, `settings.get`, `settings.save`, `shutdown`.
 
 Events: `translation.state` (phases `begin`/`partial`/`final`/`error`/`examples`),
 `notification`, `anki.availability`, `db.progress`.
@@ -94,6 +94,31 @@ rather than have every source silently switched back on.
 Turning all six off is allowed. Translation then stops with an explanatory
 notification instead of an empty popup, which is indistinguishable from a
 broken app.
+
+### Anki field names
+
+`anki.model_fields` answers `{"fields": [...], "error": null|"..."}` for the
+configured note type. It exists so a mistyped field name is visible where it is
+typed rather than when a card is added: the app can show the names Anki really
+has and mark the ones that do not exist.
+
+It is deliberately **not** folded into `settings.save`. Anki is another program
+and may simply be closed; validating on save would make the settings unsavable
+whenever it is.
+
+Measured against the fake AnkiConnect, all four states:
+
+```
+anki reachable   -> {"fields": ["Word","Translation","Example","Definition","Image"], "error": null}
+unknown model    -> {"fields": [], "error": null}
+no note type     -> {"fields": [], "error": "No note type is configured."}
+anki unreachable -> {"fields": [], "error": "AnkiConnect error: Cannot connect to host …"}
+```
+
+Note the second line: a note type that does not exist answers exactly like one
+with no fields. So an empty list means **"nothing to compare against"**, never
+"every name is wrong" — with no names in hand a client must mark nothing as
+missing, whether or not there is an `error`.
 
 ### Downloading the offline bases
 

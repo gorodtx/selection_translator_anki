@@ -62,6 +62,7 @@ class SettingsFlow:
         self._model_names_future: Future[AnkiListResult] | None = None
         self._create_model_future: Future[AnkiCreateModelResult] | None = None
         self._deck_names_future: Future[AnkiListResult] | None = None
+        self._model_fields_future: Future[AnkiListResult] | None = None
         self._status_waiters: list[Callable[[AnkiStatus], None]] = []
         self._refresh_model_status()
 
@@ -114,6 +115,54 @@ class SettingsFlow:
         self._deck_names_future.add_done_callback(
             lambda done: self._dispatch(lambda: self._on_deck_names_ready(done, reply))
         )
+
+    def list_model_fields(self, reply: Callable[[AnkiListResult], None]) -> None:
+        """The field names Anki really has, so a typo is visible where it is made.
+
+        Deliberately not folded into saving: Anki is another program and may
+        simply be closed, and settings must stay savable when it is. The caller
+        gets the names or the reason there are none, and decides what to show.
+        """
+        model = self._current_model()
+        if not model:
+            reply(AnkiListResult(items=[], error="No note type is configured."))
+            return
+        if not self._runtime_ready():
+            reply(AnkiListResult(items=[], error="Anki runtime is not ready."))
+            return
+        if (
+            self._model_fields_future is not None
+            and not self._model_fields_future.done()
+        ):
+            reply(AnkiListResult(items=[], error="Field list is already in progress."))
+            return
+        try:
+            self._model_fields_future = self._anki_flow.model_fields(model)
+        except Exception:
+            reply(AnkiListResult(items=[], error="Failed to load Anki field names."))
+            return
+        self._model_fields_future.add_done_callback(
+            lambda done: self._dispatch(
+                lambda: self._on_model_fields_ready(done, reply)
+            )
+        )
+
+    def _on_model_fields_ready(
+        self,
+        future: Future[AnkiListResult],
+        reply: Callable[[AnkiListResult], None],
+    ) -> None:
+        if future.cancelled():
+            reply(AnkiListResult(items=[], error="Field list was cancelled."))
+            return
+        try:
+            result = future.result()
+        except Exception:
+            self._report_reachability(False)
+            reply(AnkiListResult(items=[], error="Failed to load Anki field names."))
+            return
+        self._report_reachability(result.error is None)
+        reply(result)
 
     def select_deck(
         self,
@@ -355,6 +404,10 @@ class SettingsFlow:
             fields=_DEFAULT_FIELD_MAP,
         )
         self._persist_anki(self._pending_anki)
+
+    def _current_model(self) -> str:
+        pending = self._pending_anki
+        return pending.model if pending is not None else self._config.anki.model
 
     def _current_deck(self) -> str:
         if self._pending_anki is not None and self._pending_anki.deck:

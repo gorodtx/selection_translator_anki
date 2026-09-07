@@ -81,6 +81,9 @@ class AnkiFlow:
     def model_names(self) -> Future[AnkiListResult]:
         return self.service.model_names()
 
+    def model_fields(self, model: str) -> Future[AnkiListResult]:
+        return self.service.model_field_names(model)
+
     def is_config_ready(self, config: AnkiConfig) -> bool:
         fields = config.fields
         return all(

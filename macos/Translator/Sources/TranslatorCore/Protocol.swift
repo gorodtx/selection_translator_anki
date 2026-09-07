@@ -15,6 +15,7 @@ public enum IPCMethod {
     public static let copyAll = "copy_all"
     public static let ankiStatus = "anki.status"
     public static let ankiDecks = "anki.decks"
+    public static let ankiModelFields = "anki.model_fields"
     public static let ankiSelectDeck = "anki.select_deck"
     public static let ankiCreateModel = "anki.create_model"
     public static let ankiPrepareUpsert = "anki.prepare_upsert"

@@ -402,6 +402,9 @@ class BackendSession:
     def anki_decks(self, reply: Callable[[AnkiListResult], None]) -> None:
         self._settings.list_decks(reply)
 
+    def anki_model_fields(self, reply: Callable[[AnkiListResult], None]) -> None:
+        self._settings.list_model_fields(reply)
+
     def anki_select_deck(
         self, deck: str, reply: Callable[[AnkiActionResult], None]
     ) -> None:

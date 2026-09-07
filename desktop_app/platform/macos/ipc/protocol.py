@@ -46,6 +46,7 @@ class Method(StrEnum):
     COPY_ALL = "copy_all"
     ANKI_STATUS = "anki.status"
     ANKI_DECKS = "anki.decks"
+    ANKI_MODEL_FIELDS = "anki.model_fields"
     ANKI_SELECT_DECK = "anki.select_deck"
     ANKI_CREATE_MODEL = "anki.create_model"
     ANKI_PREPARE_UPSERT = "anki.prepare_upsert"
@@ -306,6 +307,19 @@ def action_result_to_json(result: AnkiActionResult) -> JsonObject:
 
 def deck_list_to_json(result: AnkiListResult) -> JsonObject:
     return {"decks": list(result.items), "error": result.error}
+
+
+def field_list_to_json(result: AnkiListResult) -> JsonObject:
+    """An empty list is "nothing to compare against", never "all names wrong".
+
+    `error` says nobody could be asked — Anki closed, no note type configured —
+    and a client that ignores it will report a mismatch when Anki is merely not
+    running. But an empty list without an error is not proof of a fieldless
+    note type either: against the fake, a note type that does not exist answers
+    exactly like one with no fields. So the rule for the client is the same in
+    both cases: with no names in hand, mark nothing as missing.
+    """
+    return {"fields": list(result.items), "error": result.error}
 
 
 def anki_preview_to_json(preview: AnkiUpsertPreview) -> JsonObject:

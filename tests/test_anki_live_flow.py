@@ -14,6 +14,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import time
 import urllib.request
 import zlib
 
@@ -25,7 +26,8 @@ from desktop_app.application.use_cases.anki_upsert import (
     AnkiImageAction,
     AnkiUpsertDecision,
 )
-from desktop_app.config import AnkiConfig, AnkiFieldMap
+from desktop_app.application.use_cases.settings_flow import SettingsFlow
+from desktop_app.config import AnkiConfig, AnkiFieldMap, AppConfig, LanguageConfig
 from desktop_app.infrastructure.anki import DEFAULT_TIMEOUT_SECONDS, AnkiListResult
 from desktop_app.infrastructure.anki.service import AnkiService
 from desktop_app.infrastructure.anki.templates import (
@@ -347,3 +349,44 @@ def test_merge_keeps_what_was_on_the_note(
     assert applied.outcome is AnkiOutcome.UPDATED, applied.message
     merged = server.state.notes[1000].fields["translation"]
     assert merged == "старый перевод; берег"
+
+
+def test_model_fields_come_from_anki_and_say_when_they_cannot(
+    anki: tuple[FakeAnkiConnect, AnkiFlow],
+) -> None:
+    """A mistyped field name should be visible where it is typed.
+
+    The capability existed on the service and nothing called it: saving
+    answered "Settings saved." and the typo surfaced later, when a card was
+    added. This is the read that lets a client compare.
+    """
+    server, flow = anki
+    server.state.models["Translator"] = ["Word", "Translation", "Example"]
+
+    def ask(model: str, *, use: AnkiFlow = flow) -> AnkiListResult:
+        config = AnkiConfig(deck="English", model=model, fields=FIELDS)
+        settings = SettingsFlow(
+            config=AppConfig(
+                languages=LanguageConfig(source="en", target="ru"), anki=config
+            ),
+            runtime=use.service.runtime,
+            anki_flow=use,
+            on_save=lambda _: None,
+        )
+        received: list[AnkiListResult] = []
+        settings.list_model_fields(received.append)
+        deadline = time.monotonic() + DEFAULT_TIMEOUT_SECONDS + 5
+        while not received and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert received, "list_model_fields never answered"
+        return received[0]
+
+    named = ask("Translator")
+    assert named.items == ["Word", "Translation", "Example"]
+    assert named.error is None
+
+    # No note type configured: nobody to ask, and the caller must be told so
+    # rather than shown an empty list it might read as "no fields".
+    unset = ask("")
+    assert unset.items == []
+    assert unset.error == "No note type is configured."

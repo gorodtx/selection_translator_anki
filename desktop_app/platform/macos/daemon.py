@@ -41,6 +41,7 @@ from desktop_app.platform.macos.ipc.protocol import (
     config_to_json,
     db_progress_to_json,
     deck_list_to_json,
+    field_list_to_json,
     get_int,
     get_object,
     get_str,
@@ -219,6 +220,9 @@ class BackendApi:
         if method is Method.ANKI_DECKS:
             decks = await self._await_reply(session.anki_decks, _ANKI_TIMEOUT_S)
             return deck_list_to_json(decks)
+        if method is Method.ANKI_MODEL_FIELDS:
+            fields = await self._await_reply(session.anki_model_fields, _ANKI_TIMEOUT_S)
+            return field_list_to_json(fields)
         if method is Method.ANKI_SELECT_DECK:
             deck = get_str(params, "deck")
 
