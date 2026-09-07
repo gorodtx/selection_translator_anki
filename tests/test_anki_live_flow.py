@@ -36,7 +36,7 @@ from desktop_app.infrastructure.anki.templates import (
     DEFAULT_MODEL_NAME,
 )
 from desktop_app.infrastructure.services.runtime import AsyncRuntime
-from tests.fakes.anki_connect import FakeAnkiConnect, FakeAnkiState
+from tests.fakes.anki_connect import FakeAnkiConnect, FakeAnkiState, Note
 from translate_logic.models import Example, FieldValue, TranslationResult
 
 FIELDS = AnkiFieldMap(
@@ -277,3 +277,73 @@ def test_the_stand_in_can_be_served_standalone() -> None:
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+
+
+def test_only_notes_in_the_apps_own_field_shape_are_matched(
+    anki: tuple[FakeAnkiConnect, AnkiFlow],
+) -> None:
+    """Matching keys on the configured field name, so a hand-made note is missed.
+
+    That is the right call — the app cannot know that a field called `Word`
+    holds the headword — but it has a consequence worth stating: pointed at an
+    existing hand-made deck, the app adds new notes instead of updating the
+    ones already there.
+    """
+    server, flow = anki
+    server.state.models[DEFAULT_MODEL_NAME] = list(DEFAULT_MODEL_FIELDS)
+    server.state.notes[999] = Note(
+        999, DEFAULT_MODEL_NAME, "English", {"Word": "bank", "Translation": "берег"}
+    )
+    server.state.notes[1000] = Note(
+        1000, DEFAULT_MODEL_NAME, "English", {"word": "bank", "translation": "старый"}
+    )
+    config = AnkiConfig(deck="English", model=DEFAULT_MODEL_NAME, fields=FIELDS)
+
+    preview = _wait(flow.prepare_upsert(config, "bank", _result())).preview
+
+    assert preview is not None
+    assert [match.note_id for match in preview.matches] == [1000]
+    # Both notes were fetched, but the field list dedupes case-insensitively,
+    # so the sheet offers `word` once instead of `word` and `Word` as two.
+    assert preview.available_fields == tuple(DEFAULT_MODEL_FIELDS)
+    assert "Word" not in preview.available_fields
+
+
+def test_merge_keeps_what_was_on_the_note(
+    anki: tuple[FakeAnkiConnect, AnkiFlow],
+) -> None:
+    server, flow = anki
+    server.state.models[DEFAULT_MODEL_NAME] = list(DEFAULT_MODEL_FIELDS)
+    server.state.notes[1000] = Note(
+        1000,
+        DEFAULT_MODEL_NAME,
+        "English",
+        {"word": "bank", "translation": "старый перевод"},
+    )
+    config = AnkiConfig(deck="English", model=DEFAULT_MODEL_NAME, fields=FIELDS)
+    preview = _wait(flow.prepare_upsert(config, "bank", _result())).preview
+    assert preview is not None
+
+    applied = _wait(
+        flow.apply_upsert(
+            config=config,
+            original_text="bank",
+            preview=preview,
+            decision=AnkiUpsertDecision(
+                create_new=False,
+                target_note_ids=(1000,),
+                translation_action=AnkiFieldAction.MERGE_UNIQUE_SELECTED,
+                definitions_action=AnkiFieldAction.KEEP_EXISTING,
+                examples_action=AnkiFieldAction.KEEP_EXISTING,
+                image_action=AnkiImageAction.KEEP_EXISTING,
+                selected_translations=("берег",),
+                selected_definitions_en=(),
+                selected_examples_en=(),
+                image_path=None,
+            ),
+        )
+    )
+
+    assert applied.outcome is AnkiOutcome.UPDATED, applied.message
+    merged = server.state.notes[1000].fields["translation"]
+    assert merged == "старый перевод; берег"

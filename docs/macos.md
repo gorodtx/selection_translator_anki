@@ -304,6 +304,20 @@ definitions_en: <i>a financial institution</i>
 example_en: Most <mark class="hl">banks</mark> are reluctant.
 ```
 
+### What it does not do
+
+Matching keys on the configured field name, so only notes already in the app's
+own shape are found. A note whose fields are called `Word` and `Translation`
+is fetched but never matched — the app cannot know that `Word` holds the
+headword. The consequence is worth stating plainly: **pointed at an existing
+hand-made deck, the app adds new notes rather than updating the ones already
+there.** Upsert works on decks the app itself has filled.
+
+Two related behaviours, both deliberate: `create_model` owns the field mapping
+and overwrites whatever `settings.save` stored, because its own model has its
+own field names; and the field list offered in the sheet dedupes
+case-insensitively, so `word` and `Word` never appear as two separate fields.
+
 Writing that harness found a real defect. `findNotes` returning `[]` — the
 normal answer for a word being added for the first time — was reported as
 "Invalid AnkiConnect response", because the guard meant to catch a malformed
