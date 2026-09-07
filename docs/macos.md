@@ -279,6 +279,37 @@ for the interface here. It proves layer, size and that a window exists at all.
 It says nothing about colour, typography, legibility on glass, or the Reduce
 Transparency path — those need a person.
 
+## Anki
+
+Anki cannot be installed on a build machine, so the add / update / merge / image
+path is covered by an in-process AnkiConnect stand-in that serves the real wire
+protocol over a local socket (`tests/fakes/anki_connect.py`). It implements only
+the actions the client calls; anything else answers with an error, the way a
+version mismatch would.
+
+Driven through the daemon over its own socket, with `ANKI_CONNECT_URL` pointed
+at the stand-in, the observed action sequence is:
+
+```
+modelNames  deckNames  findNotes  addNote  findNotes  notesInfo
+```
+
+and the note that lands carries the mapped fields, the query term highlighted
+and definitions in italics:
+
+```
+word: bank
+translation: банк; берег
+definitions_en: <i>a financial institution</i>
+example_en: Most <mark class="hl">banks</mark> are reluctant.
+```
+
+Writing that harness found a real defect. `findNotes` returning `[]` — the
+normal answer for a word being added for the first time — was reported as
+"Invalid AnkiConnect response", because the guard meant to catch a malformed
+payload also fired on a legitimate empty list. The same held for a profile with
+no models, which is exactly the state `createModel` exists to fix.
+
 ## Permissions
 
 | Path | Permission | If denied |
