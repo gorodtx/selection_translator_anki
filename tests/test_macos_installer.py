@@ -88,7 +88,8 @@ def test_installer_registers_launch_agent_for_the_backend() -> None:
     # What launchd runs is what the user sees in Login Items, and a shell script carries
     # no signature: the system could not attribute one to this app and announced a bare
     # "run-backend" from an unidentified developer. It must be the signed executable.
-    assert "Contents/MacOS/TranslatorBackend" in text
+    assert 'BACKEND_LAUNCHER="TranslatorBackend"' in text
+    assert "Contents/MacOS/${BACKEND_LAUNCHER}" in text
     assert "Contents/Resources/bin/run-backend" not in text
     assert "launchctl bootstrap" in text and "launchctl bootout" in text
     assert "<key>KeepAlive</key>" in text
@@ -195,6 +196,23 @@ def test_installing_a_bundle_built_from_other_sources_is_refused() -> None:
         else True
     )
 
+
+def test_installer_refuses_a_plist_pointing_at_a_missing_launcher() -> None:
+    """The staleness gate compares *.py and cannot see this one.
+
+    The commit that moved launchd onto a signed Mach-O touched no Python, so a
+    bundle built one commit earlier passes the gate as fresh while lacking the
+    executable — and launchd would then point at nothing. Measured: with the
+    launcher absent the function exits 1 and writes no plist; with it present
+    the plist is written.
+    """
+    text = _text()
+    block = text[text.index("write_launch_agent()") : text.index("<key>Label</key>")]
+
+    assert "BACKEND_LAUNCHER" in block
+    assert 'fail "bundle has no' in block
+
+
 def test_build_signs_the_backend_launcher_before_sealing_the_bundle() -> None:
     text = BUILDER.read_text(encoding="utf-8")
 
@@ -202,6 +220,8 @@ def test_build_signs_the_backend_launcher_before_sealing_the_bundle() -> None:
     # A second Mach-O in Contents/MacOS is nested code, not a sealed resource, so an
     # unsigned one leaves the bundle seal broken and the login item unattributable.
     signing = text.index("TranslatorBackend" + '"', text.index("codesign"))
-    sealing = text.index('codesign "${SIGN_FLAGS[@]}" --identifier "${BUNDLE_ID}" "${APP_DIR}"')
+    sealing = text.index(
+        'codesign "${SIGN_FLAGS[@]}" --identifier "${BUNDLE_ID}" "${APP_DIR}"'
+    )
     assert signing < sealing, "the launcher must be signed before the bundle is sealed"
     assert '--identifier "${BUNDLE_ID}.backend"' in text

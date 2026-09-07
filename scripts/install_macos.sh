@@ -28,6 +28,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB_BUNDLE_LOCK_PATH="${TRANSLATOR_DB_BUNDLE_LOCK_PATH:-${ROOT_DIR}/scripts/db-bundle.lock.json}"
 SOURCE_APP="${TRANSLATOR_APP_PATH:-${ROOT_DIR}/dist/${APP_NAME}.app}"
 DB_FILES=("primary.sqlite3" "fallback.sqlite3" "definitions_pack.sqlite3")
+# The signed Mach-O launchd starts; a shell script cannot carry a signature.
+BACKEND_LAUNCHER="TranslatorBackend"
 # Long enough for a cold daemon that waits on the first engine probe (capped at 5s).
 PING_TIMEOUT_S="${TRANSLATOR_PING_TIMEOUT_S:-8}"
 
@@ -87,6 +89,13 @@ ensure_databases() {
 }
 
 write_launch_agent() {
+  # The plist names a binary inside the bundle, so a bundle without it leaves
+  # launchd pointing at nothing and the app never starts. The staleness gate
+  # cannot see this: it compares *.py, and the commit that introduced the
+  # launcher touched no Python at all — a bundle built one commit earlier passes
+  # as fresh and still lacks the executable.
+  local program="${RELEASES_DIR}/current/${APP_NAME}.app/Contents/MacOS/${BACKEND_LAUNCHER}"
+  [[ -x "${program}" ]] || fail "bundle has no ${BACKEND_LAUNCHER}: rebuild it (make macos-app) — ${program}"
   mkdir -p "$(dirname "${AGENT_PLIST}")" "${LOG_DIR}"
   cat > "${AGENT_PLIST}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -96,7 +105,7 @@ write_launch_agent() {
   <key>Label</key><string>${BUNDLE_ID}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${RELEASES_DIR}/current/${APP_NAME}.app/Contents/MacOS/TranslatorBackend</string>
+    <string>${RELEASES_DIR}/current/${APP_NAME}.app/Contents/MacOS/${BACKEND_LAUNCHER}</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
