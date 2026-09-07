@@ -60,7 +60,7 @@ struct HistoryView: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 26, weight: .light))
+                .font(.system(.largeTitle).weight(.light))
                 .foregroundStyle(.tertiary)
             Text(model.history.isEmpty ? "Nothing translated yet." : "No matches.")
                 .font(.secondaryText)
@@ -80,7 +80,7 @@ private struct HistoryRow: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.text)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.bodyText.weight(.medium))
                     .lineLimit(1)
                 Text(item.translation.isEmpty ? "—" : item.translation)
                     .font(.secondaryText)

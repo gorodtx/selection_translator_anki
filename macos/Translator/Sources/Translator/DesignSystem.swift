@@ -43,13 +43,42 @@ enum Layout {
 }
 
 extension Font {
-    /// Tracking is size-specific: tighter as text grows, near zero for body.
-    static let popupHeadword = Font.system(size: 22, weight: .semibold, design: .rounded)
-    static let popupTranslation = Font.system(size: 17, weight: .medium)
-    static let sectionLabel = Font.system(size: 11, weight: .semibold).width(.expanded)
-    static let bodyText = Font.system(size: 13)
-    static let secondaryText = Font.system(size: 12)
-    static let monoIPA = Font.system(size: 12, weight: .regular, design: .monospaced)
+    /// Tokens name their role through a text style instead of a point size. At the
+    /// default setting the styles measure exactly what the fixed sizes used to be here —
+    /// title 22, title2 17, title3 15, body 13, callout 12, subheadline 11, footnote 10 —
+    /// so this changed nothing on screen.
+    ///
+    /// It does not buy Dynamic Type: measured on macOS 26, `dynamicTypeSize` and
+    /// `ScaledMetric` are inert and `NSFont.preferredFont(forTextStyle:)` returns fixed
+    /// sizes, because macOS has no system text-size control. What it buys is that the
+    /// hierarchy is stated rather than encoded in numbers, and that the sizes come from
+    /// the platform instead of from us.
+    ///
+    /// Tracking stays size-specific: tighter as text grows, near zero for body.
+    static let popupHeadword = Font.system(.title, design: .rounded).weight(.semibold)
+    static let popupTranslation = Font.system(.title2).weight(.medium)
+    static let sectionLabel = Font.system(.subheadline).weight(.semibold).width(.expanded)
+    static let bodyText = Font.system(.body)
+    static let secondaryText = Font.system(.callout)
+    static let monoIPA = Font.system(.callout, design: .monospaced)
+
+    /// Sheet and window titles, one step below the popup headword.
+    static let sheetTitle = Font.system(.title2).weight(.semibold)
+    /// Buttons and segmented labels.
+    static let controlLabel = Font.system(.callout).weight(.medium)
+    /// Field labels, captions and secondary rows.
+    static let captionText = Font.system(.subheadline)
+    static let captionEmphasis = Font.system(.subheadline).weight(.semibold)
+    /// Counters and badges that sit inside a chip.
+    static let badgeText = Font.system(.footnote, design: .rounded).weight(.bold)
+    static let badgePlain = Font.system(.footnote)
+    /// Paths and other monospaced detail.
+    static let monoDetail = Font.system(.footnote, design: .monospaced)
+    /// The smallest tag we use, the BrE/AmE marker beside a transcription. There is no
+    /// 9 pt text style, so it takes the smallest one: one point larger than before.
+    static let dialectTag = Font.system(.caption2).weight(.bold)
+    /// Prominent action label, e.g. the primary button in Settings.
+    static let actionLabel = Font.system(.body, design: .rounded).weight(.medium)
 }
 
 /// A translucent surface. Liquid Glass when the system offers it and the user allows

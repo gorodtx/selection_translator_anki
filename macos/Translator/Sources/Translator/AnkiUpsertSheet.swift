@@ -54,13 +54,13 @@ struct AnkiUpsertSheet: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Add to Anki").font(.system(size: 17, weight: .semibold))
+                Text("Add to Anki").font(.sheetTitle)
                 Text(model.state.originalText).font(.secondaryText).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             if !model.ankiStatus.deckName.isEmpty {
                 Text(model.ankiStatus.deckName)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.captionText.weight(.medium))
                     .padding(.horizontal, 9).padding(.vertical, 5)
                     .glassSurface(radius: 8)
             }
@@ -91,7 +91,7 @@ struct AnkiUpsertSheet: View {
 
             if preview.matches.isEmpty {
                 Text("No existing note matches this word.")
-                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+                    .font(.captionText).foregroundStyle(.tertiary)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(preview.matches) { match in
@@ -130,7 +130,7 @@ struct AnkiUpsertSheet: View {
             .controlSize(.small)
             if let imagePath {
                 Text((imagePath as NSString).lastPathComponent)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.monoDetail)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if !createNew {
@@ -138,7 +138,7 @@ struct AnkiUpsertSheet: View {
                         ForEach(ImageAction.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.menu)
-                    .font(.system(size: 11))
+                    .font(.captionText)
                 }
             }
         }
@@ -221,13 +221,13 @@ private struct CheckboxList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Text(title).font(.captionEmphasis).foregroundStyle(.secondary)
                 Spacer()
                 Button(selection.count == items.count ? "None" : "All") {
                     selection = selection.count == items.count ? [] : Set(items)
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 10))
+                .font(.badgePlain)
                 .foregroundStyle(.tertiary)
             }
             ForEach(items, id: \.self) { item in
@@ -235,7 +235,7 @@ private struct CheckboxList: View {
                     get: { selection.contains(item) },
                     set: { on in if on { selection.insert(item) } else { selection.remove(item) } }
                 )) {
-                    Text(item).font(.system(size: 12)).lineLimit(2)
+                    Text(item).font(.secondaryText).lineLimit(2)
                 }
                 .toggleStyle(.checkbox)
             }
@@ -255,14 +255,14 @@ private struct MatchRow: View {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(match.word).font(.system(size: 12, weight: .medium))
+                    Text(match.word).font(.controlLabel)
                     if !match.translation.isEmpty {
-                        Text(match.translation).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+                        Text(match.translation).font(.captionText).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
                 Spacer(minLength: 0)
                 if match.image?.isEmpty == false {
-                    Image(systemName: "photo").font(.system(size: 10)).foregroundStyle(.tertiary)
+                    Image(systemName: "photo").font(.badgePlain).foregroundStyle(.tertiary)
                 }
             }
             .padding(.horizontal, 10)
@@ -284,7 +284,7 @@ private struct ActionPicker: View {
 
     var body: some View {
         HStack {
-            Text(title).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 92, alignment: .leading)
+            Text(title).font(.captionText).foregroundStyle(.secondary).frame(width: 92, alignment: .leading)
             Picker("", selection: $selection) {
                 ForEach(FieldAction.allCases, id: \.self) { Text($0.title).tag($0) }
             }

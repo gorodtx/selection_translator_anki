@@ -48,7 +48,7 @@ struct SettingsView: View {
                 }
             }
             Text("Also available from the Services menu on any selected text, with no permissions.")
-                .font(.system(size: 11))
+                .font(.captionText)
                 .foregroundStyle(.tertiary)
         }
     }
@@ -158,7 +158,7 @@ struct SettingsView: View {
                 StatusRow(title: "primary.sqlite3", detail: db.primary ? "Present" : "Missing", ok: db.primary)
                 StatusRow(title: "fallback.sqlite3", detail: db.fallback ? "Present" : "Missing", ok: db.fallback)
                 StatusRow(title: "definitions_pack.sqlite3", detail: db.definitions ? "Present" : "Missing", ok: db.definitions)
-                Text(db.dir).font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary).textSelection(.enabled)
+                Text(db.dir).font(.monoDetail).foregroundStyle(.tertiary).textSelection(.enabled)
             } else {
                 Text(model.connectionSummary).font(.secondaryText).foregroundStyle(.secondary)
             }
@@ -207,10 +207,10 @@ struct StatusRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle")
                 .foregroundStyle(ok ? Color.green : Color.orange)
-                .font(.system(size: 12))
+                .font(.secondaryText)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 12, weight: .medium))
-                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(title).font(.controlLabel)
+                Text(detail).font(.captionText).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }
@@ -228,8 +228,8 @@ private struct FieldRow: View {
 
     var body: some View {
         HStack {
-            Text(label).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 90, alignment: .leading)
-            TextField(label, text: $text).textFieldStyle(.roundedBorder).font(.system(size: 11))
+            Text(label).font(.captionText).foregroundStyle(.secondary).frame(width: 90, alignment: .leading)
+            TextField(label, text: $text).textFieldStyle(.roundedBorder).font(.captionText)
         }
     }
 }
@@ -247,7 +247,7 @@ struct HotKeyRecorder: View {
             isRecording ? stop() : start()
         } label: {
             Text(isRecording ? "Press keys…" : combo.displayString)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .font(.actionLabel)
                 .frame(minWidth: 92)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
@@ -312,7 +312,7 @@ struct LanguagePairDownloadButton: View {
             .disabled(isWorking)
 
             if let message {
-                Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(message).font(.captionText).foregroundStyle(.secondary)
             }
         }
         .translationTask(configuration) { session in

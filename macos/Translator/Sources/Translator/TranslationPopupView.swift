@@ -86,7 +86,7 @@ struct TranslationPopupView: View {
             Spacer(minLength: 8)
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.captionEmphasis)
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
@@ -98,7 +98,7 @@ struct TranslationPopupView: View {
 
     private func ipaBadge(_ dialect: String, _ value: String) -> some View {
         HStack(spacing: 4) {
-            Text(dialect).font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+            Text(dialect).font(.dialectTag).foregroundStyle(.tertiary)
             Text(value).font(.monoIPA).foregroundStyle(.secondary)
         }
     }
@@ -137,7 +137,7 @@ struct TranslationPopupView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     if !entry.pos.isEmpty {
                         Text(entry.pos)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.captionEmphasis)
                             .foregroundStyle(.secondary)
                     }
                     ForEach(Array(entry.senses.enumerated()), id: \.offset) { _, sense in
@@ -155,23 +155,23 @@ struct TranslationPopupView: View {
     private func senseRow(_ sense: AppleSense) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("\(sense.index)")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .font(.badgeText)
                 .foregroundStyle(.tertiary)
                 .frame(minWidth: 12, alignment: .trailing)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     if !sense.label.isEmpty {
                         Text("(\(sense.label))")
-                            .font(.system(size: 11))
+                            .font(.captionText)
                             .foregroundStyle(.tertiary)
                     }
                     Text(sense.translation).font(.bodyText).textSelection(.enabled)
                 }
                 ForEach(Array(sense.examples.prefix(2).enumerated()), id: \.offset) { _, pair in
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(pair.en).font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(pair.en).font(.captionText).foregroundStyle(.secondary)
                         if !pair.ru.isEmpty {
-                            Text(pair.ru).font(.system(size: 11)).foregroundStyle(.tertiary)
+                            Text(pair.ru).font(.captionText).foregroundStyle(.tertiary)
                         }
                     }
                 }
@@ -187,7 +187,7 @@ struct TranslationPopupView: View {
                 ForEach(Array(model.state.definitionsItems.enumerated()), id: \.offset) { index, item in
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text("\(index + 1)")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .font(.badgeText)
                             .foregroundStyle(.tertiary)
                             .frame(minWidth: 12, alignment: .trailing)
                         Text(item)
@@ -214,7 +214,7 @@ struct TranslationPopupView: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(model.state.examples.enumerated()), id: \.offset) { _, example in
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text("▸").font(.system(size: 10)).foregroundStyle(.tertiary)
+                        Text("▸").font(.badgePlain).foregroundStyle(.tertiary)
                         Text(example.en)
                             .font(.bodyText)
                             .textSelection(.enabled)
@@ -283,8 +283,8 @@ struct PopupAction: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
-                Text(title).font(.system(size: 12, weight: .medium))
+                Image(systemName: symbol).font(.captionEmphasis)
+                Text(title).font(.controlLabel)
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
