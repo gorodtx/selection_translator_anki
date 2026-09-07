@@ -82,21 +82,29 @@ extension Font {
 }
 
 /// A translucent surface. Liquid Glass when the system offers it and the user allows
-/// transparency; an opaque material otherwise, so Reduce Transparency stays legible.
+/// both transparency and normal contrast; an opaque material with a defined border
+/// otherwise, so Reduce Transparency and Increase Contrast both stay legible.
 struct GlassSurface: ViewModifier {
     var radius: CGFloat = Layout.cardRadius
     var interactive = false
     var tint: Color?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content: Content) -> some View {
-        if reduceTransparency {
+        // Which look applies is decided by SurfaceStyleResolver, where it is under test:
+        // the two environment keys are read-only, so the branch cannot be checked here.
+        let style = SurfaceStyleResolver.panel(
+            reduceTransparency: reduceTransparency,
+            increasedContrast: contrast == .increased
+        )
+        if case let .opaque(border) = style {
             content
                 .background(.background, in: .rect(cornerRadius: radius))
                 .overlay(
                     RoundedRectangle(cornerRadius: radius)
-                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                        .strokeBorder(Color.primary.opacity(border), lineWidth: 1)
                 )
         } else {
             content.glassEffect(glass, in: .rect(cornerRadius: radius))
@@ -111,16 +119,37 @@ struct GlassSurface: ViewModifier {
     }
 }
 
+/// Inner surface for a section inside a glass panel. Never a second translucent layer:
+/// on glass it is a low-opacity fill, which keeps text legible.
+///
+/// A 5.5% fill is deliberately near-invisible, which is right until the user asks for
+/// more contrast — then the section has to be told apart from the panel it sits on, so
+/// the fill deepens and gains a defined border.
+struct InnerSurface: ViewModifier {
+    @Environment(\.colorSchemeContrast) private var contrast
+    var radius: CGFloat = Layout.innerRadius
+
+    func body(content: Content) -> some View {
+        let style = SurfaceStyleResolver.inner(increasedContrast: contrast == .increased)
+        content
+            .background(Color.primary.opacity(style.fill), in: .rect(cornerRadius: radius))
+            .overlay {
+                if let border = style.border {
+                    RoundedRectangle(cornerRadius: radius)
+                        .strokeBorder(Color.primary.opacity(border), lineWidth: 1)
+                }
+            }
+    }
+}
+
 extension View {
     /// Primary glass surface (panels, cards).
     func glassSurface(radius: CGFloat = Layout.cardRadius, interactive: Bool = false, tint: Color? = nil) -> some View {
         modifier(GlassSurface(radius: radius, interactive: interactive, tint: tint))
     }
 
-    /// Inner surface for a section inside a glass panel. Never a second translucent layer:
-    /// on glass it is a low-opacity fill, which keeps text legible.
     func innerSurface(radius: CGFloat = Layout.innerRadius) -> some View {
-        background(Color.primary.opacity(0.055), in: .rect(cornerRadius: radius))
+        modifier(InnerSurface(radius: radius))
     }
 }
 

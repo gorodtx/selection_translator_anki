@@ -172,3 +172,40 @@ import Testing
         #expect(message.contains("/tmp/x.sock"))
     }
 }
+
+@Suite struct SurfaceStyleTests {
+    @Test func defaultSettingsGetGlass() {
+        #expect(SurfaceStyleResolver.panel(reduceTransparency: false, increasedContrast: false) == .glass)
+    }
+
+    /// Reduce Transparency means no translucency, so the panel goes opaque.
+    @Test func reducedTransparencyGoesOpaque() {
+        #expect(
+            SurfaceStyleResolver.panel(reduceTransparency: true, increasedContrast: false)
+                == .opaque(border: 0.18)
+        )
+    }
+
+    /// Increase Contrast also goes opaque, with an edge that is actually visible: glass
+    /// over arbitrary content cannot promise the contrast that was asked for.
+    @Test func increasedContrastGoesOpaqueWithAStrongerEdge() {
+        #expect(
+            SurfaceStyleResolver.panel(reduceTransparency: false, increasedContrast: true)
+                == .opaque(border: 0.45)
+        )
+        #expect(
+            SurfaceStyleResolver.panel(reduceTransparency: true, increasedContrast: true)
+                == .opaque(border: 0.45)
+        )
+    }
+
+    @Test func innerSectionStaysFaintUntilContrastIsAskedFor() {
+        let normal = SurfaceStyleResolver.inner(increasedContrast: false)
+        #expect(normal.fill == 0.055)
+        #expect(normal.border == nil)
+
+        let increased = SurfaceStyleResolver.inner(increasedContrast: true)
+        #expect(increased.fill > normal.fill)
+        #expect(increased.border == 0.45)
+    }
+}
