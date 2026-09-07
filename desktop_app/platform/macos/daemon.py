@@ -20,6 +20,7 @@ import sys
 from typing import Final
 
 from desktop_app.application.anki_status import AnkiActionResult
+from translate_logic.models import SourceToggles
 from desktop_app.application.use_cases.anki_upsert import AnkiUpsertPreview
 from desktop_app.config import AppConfig, load_config, save_config
 from desktop_app.infrastructure.services.container import AppServices
@@ -70,8 +71,24 @@ _DB_FILES: Final[dict[str, str]] = {
 logger = logging.getLogger(__name__)
 
 
-def engine_status() -> JsonObject:
-    return apple.engine_status()
+def engine_status(sources: SourceToggles | None = None) -> JsonObject:
+    """Availability and consent are different answers.
+
+    Onboarding must not show a source the user switched off as if it were
+    broken, so each engine reports whether it is installed *and* whether it is
+    allowed.
+    """
+    status = apple.engine_status()
+    toggles = sources or SourceToggles()
+    status["enabled"] = {
+        "apple_dictionary": toggles.apple_dictionary,
+        "apple_translation": toggles.apple_translation,
+        "google": toggles.google,
+        "cambridge": toggles.cambridge,
+        "offline_examples": toggles.offline_examples,
+        "definitions_pack": toggles.definitions_pack,
+    }
+    return status
 
 
 def db_status() -> JsonObject:
@@ -104,14 +121,14 @@ class BackendApi:
         loop: asyncio.AbstractEventLoop,
         socket_path: Path,
         request_shutdown: Callable[[], None],
-        engines: Callable[[], JsonObject] = engine_status,
+        engines: Callable[[], JsonObject] | None = None,
         refresh_engines: Callable[[], None] | None = None,
     ) -> None:
         self._session = session
         self._loop = loop
         self._socket_path = socket_path
         self._request_shutdown = request_shutdown
-        self._engines = engines
+        self._engines = engines or (lambda: engine_status(self._session.config.sources))
         self._refresh_engines = refresh_engines
 
     async def handle(self, request: Request) -> JsonObject:
@@ -264,9 +281,9 @@ class Daemon:
     async def run(self) -> None:
         loop = asyncio.get_running_loop()
         self._stop_event = asyncio.Event()
-        services = AppServices.create()
-        services.start()
         config: AppConfig = load_config()
+        services = AppServices.create(sources=config.sources)
+        services.start()
 
         def dispatch(callback: Callable[[], None]) -> None:
             loop.call_soon_threadsafe(callback)

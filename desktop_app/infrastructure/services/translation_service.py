@@ -34,7 +34,12 @@ from translate_logic.infrastructure.language_base.provider import (
     LanguageBaseProvider,
     default_fallback_language_base_path,
 )
-from translate_logic.models import Example, TranslationResult, TranslationStatus
+from translate_logic.models import (
+    Example,
+    SourceToggles,
+    TranslationResult,
+    TranslationStatus,
+)
 from translate_logic.shared.text import normalize_text
 
 
@@ -54,6 +59,7 @@ def _thread_lock() -> threading.Lock:
 class TranslationService:
     runtime: AsyncRuntime
     result_cache: ResultCache
+    sources: SourceToggles = SourceToggles()
 
     _session: aiohttp.ClientSession | None = None
     _fetcher: AsyncFetcher | None = None
@@ -135,8 +141,16 @@ class TranslationService:
             if _should_warmup_language_base():
                 resources_future = asyncio.run_coroutine_threadsafe(
                     warmup_pipeline_resources(
-                        language_base=self._language_base,
-                        definitions_base=self._definitions_base,
+                        language_base=(
+                            self._language_base
+                            if self.sources.offline_examples
+                            else None
+                        ),
+                        definitions_base=(
+                            self._definitions_base
+                            if self.sources.definitions_pack
+                            else None
+                        ),
                     ),
                     self.runtime.loop,
                 )
@@ -187,15 +201,27 @@ class TranslationService:
             target_lang,
             lookup_text=lookup_text,
             fetcher=fetcher,
-            language_base=self._language_base,
-            definitions_base=self._definitions_base,
+            language_base=self._language_base
+            if self.sources.offline_examples
+            else None,
+            definitions_base=(
+                self._definitions_base if self.sources.definitions_pack else None
+            ),
             on_partial=handle_partial,
+            sources=self.sources,
         )
         if not self._is_generation_active(generation):
             raise asyncio.CancelledError()
         if result.status is TranslationStatus.SUCCESS:
             self.result_cache.set(cache_key, result)
         return result
+
+    def update_sources(self, sources: SourceToggles) -> None:
+        """A toggle change must not be answered from the old cache."""
+        if sources == self.sources:
+            return
+        self.sources = sources
+        self.result_cache.clear()
 
     async def _refresh_examples_async(
         self,
@@ -204,7 +230,12 @@ class TranslationService:
         limit: int,
     ) -> tuple[Example, ...]:
         normalized = normalize_text(lookup_text)
-        if not normalized or limit <= 0 or not self._language_base.is_available:
+        if (
+            not normalized
+            or limit <= 0
+            or not self.sources.offline_examples
+            or not self._language_base.is_available
+        ):
             return ()
         loop = asyncio.get_running_loop()
         examples = await loop.run_in_executor(

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Final
 
 from desktop_app.platform.paths import CONFIG_DIR_ENV, config_dir, is_macos
+from translate_logic.models import SourceToggles
 
 CONFIG_DIR_NAME: Final[str] = "translator"
 CONFIG_FILE_NAME: Final[str] = "desktop_config.json"
@@ -44,6 +45,7 @@ class AnkiConfig:
 class AppConfig:
     languages: LanguageConfig
     anki: AnkiConfig
+    sources: SourceToggles = SourceToggles()
 
 
 def config_path() -> Path:
@@ -114,6 +116,7 @@ def _default_config() -> AppConfig:
                 image="image",
             ),
         ),
+        sources=SourceToggles(),
     )
 
 
@@ -150,7 +153,46 @@ def _parse_config(payload: JsonValue) -> AppConfig:
     return AppConfig(
         languages=languages,
         anki=anki,
+        sources=_parse_sources(payload_dict.get("sources")),
     )
+
+
+def _parse_sources(payload: JsonValue | None) -> SourceToggles:
+    """Unknown or missing keys keep the default, which is "on".
+
+    A config written by an older build must not silently disable a source.
+    """
+    data = _get_dict(payload)
+    if data is None:
+        return SourceToggles()
+    defaults = SourceToggles()
+    return SourceToggles(
+        apple_dictionary=_get_bool(
+            data.get("apple_dictionary"), defaults.apple_dictionary
+        ),
+        apple_translation=_get_bool(
+            data.get("apple_translation"), defaults.apple_translation
+        ),
+        google=_get_bool(data.get("google"), defaults.google),
+        cambridge=_get_bool(data.get("cambridge"), defaults.cambridge),
+        offline_examples=_get_bool(
+            data.get("offline_examples"), defaults.offline_examples
+        ),
+        definitions_pack=_get_bool(
+            data.get("definitions_pack"), defaults.definitions_pack
+        ),
+    )
+
+
+def _sources_to_dict(sources: SourceToggles) -> dict[str, JsonValue]:
+    return {
+        "apple_dictionary": sources.apple_dictionary,
+        "apple_translation": sources.apple_translation,
+        "google": sources.google,
+        "cambridge": sources.cambridge,
+        "offline_examples": sources.offline_examples,
+        "definitions_pack": sources.definitions_pack,
+    }
 
 
 def _apply_env_overrides(config: AppConfig) -> AppConfig:
@@ -176,6 +218,7 @@ def _config_to_dict(config: AppConfig) -> dict[str, JsonValue]:
                 "image": config.anki.fields.image,
             },
         },
+        "sources": _sources_to_dict(config.sources),
     }
 
 
@@ -183,6 +226,12 @@ def _get_dict(value: JsonValue | None) -> dict[str, JsonValue] | None:
     if isinstance(value, dict):
         return value
     return None
+
+
+def _get_bool(value: JsonValue | None, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    return default
 
 
 def _get_str(value: JsonValue | None, default: str) -> str:

@@ -12,8 +12,12 @@ from desktop_app.infrastructure.anki.service import AnkiService
 from desktop_app.infrastructure.services.history import HistoryStore
 from desktop_app.infrastructure.services.result_cache import ResultCache
 from desktop_app.infrastructure.services.runtime import AsyncRuntime
-from desktop_app.infrastructure.services.selection_cache import SelectionCache, selection_cache_path
+from desktop_app.infrastructure.services.selection_cache import (
+    SelectionCache,
+    selection_cache_path,
+)
 from desktop_app.infrastructure.services.translation_service import TranslationService
+from translate_logic.models import SourceToggles
 
 
 @dataclass(slots=True)
@@ -27,10 +31,12 @@ class AppServices:
     selection_cache: SelectionCache
 
     @classmethod
-    def create(cls) -> "AppServices":
+    def create(cls, sources: SourceToggles | None = None) -> "AppServices":
         runtime = AsyncRuntime()
         result_cache = ResultCache()
-        translator = TranslationService(runtime, result_cache)
+        translator = TranslationService(
+            runtime, result_cache, sources=sources or SourceToggles()
+        )
         anki_url = detect_anki_connect_url() or "http://127.0.0.1:8765"
         anki = AnkiService(
             runtime,

@@ -37,6 +37,10 @@ class ResultCache:
             while len(self._items) > self.max_entries:
                 self._items.popitem(last=False)
 
+    def clear(self) -> None:
+        with self._lock:
+            self._items.clear()
+
     def delete(self, key: str) -> None:
         with self._lock:
             if key in self._items:

@@ -41,6 +41,30 @@ class FieldValue:
         return self.status is FieldStatus.PRESENT
 
 
+@dataclass(frozen=True, slots=True)
+class SourceToggles:
+    """Which translation sources the user allows.
+
+    Lives in the domain because the pipeline honours them; the desktop config
+    stores the same shape so a toggle in the UI reaches the engine unchanged.
+    """
+
+    apple_dictionary: bool = True
+    apple_translation: bool = True
+    google: bool = True
+    cambridge: bool = True
+    offline_examples: bool = True
+    definitions_pack: bool = True
+
+    @property
+    def any_network(self) -> bool:
+        return self.google or self.cambridge
+
+    @property
+    def any_apple(self) -> bool:
+        return self.apple_dictionary or self.apple_translation
+
+
 class TranslationStatus(Enum):
     SUCCESS = "success"
     EMPTY = "empty"

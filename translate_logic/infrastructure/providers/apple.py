@@ -422,23 +422,33 @@ async def lookup(
     target_lang: str,
     define_timeout: float = DEFAULT_DEFINE_TIMEOUT_S,
     translate_timeout: float = DEFAULT_TRANSLATE_TIMEOUT_S,
+    allow_dictionary: bool = True,
+    allow_translation: bool = True,
 ) -> AppleLookup:
+    """A disabled engine is not asked at all, not asked and discarded."""
     helper = get_helper()
-    if helper is None:
+    if helper is None or not (allow_dictionary or allow_translation):
         return AppleLookup(definition=None, machine_translation=None)
-    define_task = asyncio.create_task(
-        _safe_define(helper, lookup_text, timeout=define_timeout)
+    define_task = (
+        asyncio.create_task(_safe_define(helper, lookup_text, timeout=define_timeout))
+        if allow_dictionary
+        else None
     )
-    translate_task = asyncio.create_task(
-        _safe_translate(
-            helper,
-            text,
-            source=source_lang,
-            target=target_lang,
-            timeout=translate_timeout,
+    translate_task = (
+        asyncio.create_task(
+            _safe_translate(
+                helper,
+                text,
+                source=source_lang,
+                target=target_lang,
+                timeout=translate_timeout,
+            )
         )
+        if allow_translation
+        else None
     )
-    definition, translation = await asyncio.gather(define_task, translate_task)
+    definition = await define_task if define_task is not None else None
+    translation = await translate_task if translate_task is not None else None
     return AppleLookup(definition=definition, machine_translation=translation)
 
 

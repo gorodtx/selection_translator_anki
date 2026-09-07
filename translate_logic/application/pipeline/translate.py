@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
@@ -31,6 +32,7 @@ from translate_logic.models import (
     Example,
     FieldValue,
     LexicalInfo,
+    SourceToggles,
     TranslationLimit,
     TranslationResult,
 )
@@ -107,6 +109,16 @@ _CAMBRIDGE_FALLBACK_MAX_WORDS: Final[int] = 5
 _APPLE_FINAL_WAIT_S: Final[float] = 0.35
 _APPLE_PARTIAL_CANDIDATES: Final[int] = 3
 _CYRILLIC_RE: Final[re.Pattern[str]] = re.compile(r"[А-Яа-яЁё]")
+# Which sources this request may use. A context variable rather than a
+# parameter because nine call sites reach the providers, and the toggles are
+# per-request state that asyncio already scopes per task.
+_ACTIVE_SOURCES: ContextVar[SourceToggles] = ContextVar(
+    "translate_active_sources", default=SourceToggles()
+)
+
+
+def active_sources() -> SourceToggles:
+    return _ACTIVE_SOURCES.get()
 
 
 def build_latency_fetcher(
@@ -134,7 +146,10 @@ async def translate_async(
     language_base: LanguageBase | None = None,
     definitions_base: DefinitionsBase | None = None,
     on_partial: Callable[[TranslationResult], None] | None = None,
+    sources: SourceToggles | None = None,
 ) -> TranslationResult:
+    if sources is not None:
+        _ACTIVE_SOURCES.set(sources)
     if fetcher is not None:
         return await _translate_with_fetcher_async(
             text,
@@ -180,7 +195,13 @@ async def _translate_with_fetcher_async(
     resolved_lookup_text = (
         normalize_lookup_text(lookup_text or network_text) if network_text else ""
     )
-    if not network_text or not resolved_lookup_text or not apple.is_available():
+    toggles = _ACTIVE_SOURCES.get()
+    if (
+        not network_text
+        or not resolved_lookup_text
+        or not toggles.any_apple
+        or not apple.is_available()
+    ):
         return await _translate_network_async(
             text,
             source_lang,
@@ -197,6 +218,8 @@ async def _translate_with_fetcher_async(
             lookup_text=resolved_lookup_text,
             source_lang=source_lang,
             target_lang=target_lang,
+            allow_dictionary=toggles.apple_dictionary,
+            allow_translation=toggles.apple_translation,
         )
     )
     partial_emitted = False
@@ -934,6 +957,10 @@ async def _run_cambridge_with_budget(
     text: str,
     fetcher: AsyncFetcher,
 ) -> CambridgeResult:
+    if not _ACTIVE_SOURCES.get().cambridge:
+        return CambridgeResult(
+            found=False, translations=[], examples=[], definitions_en=[]
+        )
     started = time.perf_counter()
     timed_out = False
     try:
@@ -966,6 +993,8 @@ async def _run_google_with_budget(
     target_lang: str,
     fetcher: AsyncFetcher,
 ) -> GoogleResult:
+    if not _ACTIVE_SOURCES.get().google:
+        return GoogleResult(translations=[], definitions_en=[])
     started = time.perf_counter()
     timed_out = False
     try:
@@ -995,7 +1024,10 @@ async def _recover_empty_translation_async(
     timeout_s: float = _GOOGLE_RECOVERY_TIMEOUT_S,
     attempt_id: int = 2,
 ) -> str | None:
-    if current_translation or not allow_retry:
+    # The recovery path talks to Google directly rather than through the
+    # budgeted wrapper, so it needs its own gate: without one, switching the
+    # source off still let an empty translation reach out to the network.
+    if current_translation or not allow_retry or not _ACTIVE_SOURCES.get().google:
         return current_translation
     started = time.perf_counter()
     timed_out = False

@@ -503,6 +503,9 @@ class BackendSession:
     def _on_settings_saved(self, config: AppConfig) -> None:
         self._config = config
         self._executor.update_config(config)
+        # A source the user just switched off must stop being consulted, and
+        # results produced while it was on must not be served from the cache.
+        self._services.translator.update_sources(config.sources)
         self._save_config(config)
 
     # --- internals -------------------------------------------------------------
