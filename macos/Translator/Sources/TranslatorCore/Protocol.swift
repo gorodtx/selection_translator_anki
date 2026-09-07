@@ -765,19 +765,75 @@ public struct AnkiSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Which sources the pipeline may use. All on by default; the backend honours each one.
+public struct SourceSettings: Codable, Equatable, Sendable {
+    public var appleDictionary: Bool
+    public var appleTranslation: Bool
+    public var google: Bool
+    public var cambridge: Bool
+    public var offlineExamples: Bool
+    public var definitionsPack: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case appleDictionary = "apple_dictionary"
+        case appleTranslation = "apple_translation"
+        case google
+        case cambridge
+        case offlineExamples = "offline_examples"
+        case definitionsPack = "definitions_pack"
+    }
+
+    public init(
+        appleDictionary: Bool = true,
+        appleTranslation: Bool = true,
+        google: Bool = true,
+        cambridge: Bool = true,
+        offlineExamples: Bool = true,
+        definitionsPack: Bool = true
+    ) {
+        self.appleDictionary = appleDictionary
+        self.appleTranslation = appleTranslation
+        self.google = google
+        self.cambridge = cambridge
+        self.offlineExamples = offlineExamples
+        self.definitionsPack = definitionsPack
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // A source the backend has not heard of stays on: a missing key must not read as
+        // "the user switched this off".
+        appleDictionary = c.value(Bool.self, .appleDictionary, default: true)
+        appleTranslation = c.value(Bool.self, .appleTranslation, default: true)
+        google = c.value(Bool.self, .google, default: true)
+        cambridge = c.value(Bool.self, .cambridge, default: true)
+        offlineExamples = c.value(Bool.self, .offlineExamples, default: true)
+        definitionsPack = c.value(Bool.self, .definitionsPack, default: true)
+    }
+}
+
 public struct BackendSettings: Codable, Equatable, Sendable {
     public var languages: LanguageSettings
     public var anki: AnkiSettings
+    public var sources: SourceSettings
     /// Keys we do not model are preserved verbatim so `settings.save` never drops them.
     public var extra: [String: JSONValue]
 
     enum CodingKeys: String, CodingKey {
-        case languages, anki
+        case languages, anki, sources
     }
 
-    public init(languages: LanguageSettings = LanguageSettings(), anki: AnkiSettings = AnkiSettings(), extra: [String: JSONValue] = [:]) {
+    private static let modelledKeys: Set<String> = ["languages", "anki", "sources"]
+
+    public init(
+        languages: LanguageSettings = LanguageSettings(),
+        anki: AnkiSettings = AnkiSettings(),
+        sources: SourceSettings = SourceSettings(),
+        extra: [String: JSONValue] = [:]
+    ) {
         self.languages = languages
         self.anki = anki
+        self.sources = sources
         self.extra = extra
     }
 
@@ -785,9 +841,10 @@ public struct BackendSettings: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         languages = c.value(LanguageSettings.self, .languages, default: LanguageSettings())
         anki = c.value(AnkiSettings.self, .anki, default: AnkiSettings())
+        sources = c.value(SourceSettings.self, .sources, default: SourceSettings())
         let all = try decoder.container(keyedBy: JSONValue.DynamicKey.self)
         var extra: [String: JSONValue] = [:]
-        for key in all.allKeys where key.stringValue != "languages" && key.stringValue != "anki" {
+        for key in all.allKeys where !Self.modelledKeys.contains(key.stringValue) {
             if let value = try? all.decode(JSONValue.self, forKey: key) {
                 extra[key.stringValue] = value
             }
@@ -799,6 +856,7 @@ public struct BackendSettings: Codable, Equatable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(languages, forKey: .languages)
         try c.encode(anki, forKey: .anki)
+        try c.encode(sources, forKey: .sources)
         var dynamic = encoder.container(keyedBy: JSONValue.DynamicKey.self)
         for (key, value) in extra {
             try dynamic.encode(value, forKey: JSONValue.DynamicKey(stringValue: key))
