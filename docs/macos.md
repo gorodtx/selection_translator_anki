@@ -24,6 +24,29 @@ The shell owns input, presentation and the pasteboard. The daemon owns the
 translation pipeline, history, cache and Anki. Nothing under
 `desktop_app/presentation` (GTK) is imported by the daemon.
 
+### What the user sees in Activity Monitor
+
+Three processes stay running, and their names are chosen so that someone
+looking at what runs on their machine can tell whose they are:
+
+| Process | What it is | Parent |
+| --- | --- | --- |
+| `Translator` | the shell: hot key, popup, Settings | launchd (login item) |
+| `TranslatorEngine` | the backend daemon, embedded CPython | launchd (LaunchAgent) |
+| `TranslatorLookup` | the Swift sidecar for Dictionary Services | `TranslatorEngine` |
+
+The last two are **symlinks inside the bundle**, not renamed binaries:
+`Resources/bin/TranslatorEngine -> ../python/bin/python3.13` and
+`Resources/bin/TranslatorLookup -> apple-lang-helper`. Activity Monitor names a
+process after the file that was executed, so launching through the links is
+what changes the name; the binaries keep theirs, and every existing reference
+to `apple-lang-helper` — `Package.swift`, the smoke script, the tests — still
+resolves. Both the Swift launcher and `run-backend` exec through the links, so
+the name does not depend on who started the daemon. Measured after an install:
+`TranslatorEngine` and `Translator` with ppid 1, `TranslatorLookup` as a child
+of the engine, and `codesign --verify --deep --strict` still exits 0 — the
+symlinks do not break the seal.
+
 ### Who starts what
 
 The two halves start by different mechanisms, and confusing them costs the user
