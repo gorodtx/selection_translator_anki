@@ -186,8 +186,9 @@ Everything below was produced by running it here, on macOS 26.5.2 (arm64,
 Command Line Tools only, no Xcode).
 
 - `RegisterEventHotKey` (Carbon) returns `noErr` with no TCC permission.
-- `AXIsProcessTrusted()` is false until the user grants Accessibility, so
-  selection capture must degrade to a Services item and the hotkey.
+- `AXIsProcessTrusted()` is false until the user grants Accessibility, and the
+  synthesized-⌘C fallback needs the same grant, so selection capture has to go
+  through the Services item until it is given (see Permissions).
 - `DCSCopyTextDefinition` works from an unsigned CLI binary, about a
   millisecond warm, and returns the Oxford Russian Dictionary entry with IPA
   and `▸` example pairs.
@@ -324,14 +325,56 @@ normal answer for a word being added for the first time — was reported as
 payload also fired on a legitimate empty list. The same held for a profile with
 no models, which is exactly the state `createModel` exists to fix.
 
+## Typography, and one plan item that could not be met
+
+The original plan listed Dynamic Type as mandatory for every screen. It is not
+achievable here: **macOS has no Dynamic Type control.** There is no system
+text-size setting for it to follow, `dynamicTypeSize` and `ScaledMetric` are
+inert, and the text styles resolve to fixed points regardless:
+
+```
+NSFont.preferredFont(.body)    13.0 pt        defaults NSPreferredTextSize   unset
+NSFont.preferredFont(.callout) 12.0 pt        universalaccess text-size key  absent
+NSFont.preferredFont(.title1)  22.0 pt
+card height under NSHostingView: 146 pt at xSmall and at accessibility5 alike
+```
+
+So that item was closed as not applicable rather than left open. The type
+tokens were still moved onto text styles, for a different and smaller reason:
+the hierarchy had been living in forty literal point sizes spread across four
+views. Naming them by role removed that. The sizes map one to one onto the
+system styles, so nothing moved on screen — the popup measures 480×670 before
+and after — with the single exception of the BrE/AmE tag, which had no style at
+9 pt and became 10.
+
 ## Permissions
 
 | Path | Permission | If denied |
 | --- | --- | --- |
 | Services menu item | none | always available |
 | Global shortcut (`RegisterEventHotKey`) | none | always available |
-| Reading the selection via Accessibility | Accessibility | falls back to a synthesized ⌘C |
+| Reading the selection via Accessibility | Accessibility | nothing to fall back to — see below |
 | Downloading the en→ru pair | none, but needs SwiftUI | machine translation stays off |
+
+**The Services item is not a third-choice fallback; it is the only way to get
+the selected text with no permission at all.** The synthesized ⌘C was written
+as a fallback for when Accessibility is refused, but it needs the same grant,
+because `CGEventPost` is gated on it too. Measured on an untrusted process:
+
+```
+AXIsProcessTrusted()                 false
+kAXFocusedUIElement                  status -25204
+CGEvent ⌘C created (down/up = true), posted to .cghidEventTap
+NSPasteboard.changeCount             733 -> 733   (never moved)
+```
+
+So the two reading paths do not degrade one into the other: without the grant
+both are dead, and only the Services item and the global shortcut still work.
+The shortcut on its own cannot read a selection, so an ungranted install is
+usable through the Services menu — which is why that path carries more weight
+than its position in the code suggests. The app does say so rather than
+failing quietly: an untrusted `translateSelection` asks for trust, opens the
+settings pane and warns.
 
 Screenshots and window inspection from a terminal additionally need Screen
 Recording and Accessibility for that terminal; without them `screencapture`
