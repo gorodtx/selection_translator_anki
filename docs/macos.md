@@ -38,10 +38,69 @@ JSON object per line, UTF-8.
 Methods: `ping`, `translate`, `cancel`, `close`, `history.list`,
 `history.select`, `examples.refresh`, `copy_all`, `anki.status`, `anki.decks`,
 `anki.select_deck`, `anki.create_model`, `anki.prepare_upsert`,
-`anki.apply_upsert`, `settings.get`, `settings.save`, `shutdown`.
+`anki.apply_upsert`, `engines.refresh`, `db.download`, `db.cancel`,
+`settings.get`, `settings.save`, `shutdown`.
 
 Events: `translation.state` (phases `begin`/`partial`/`final`/`error`/`examples`),
-`notification`, `anki.availability`.
+`notification`, `anki.availability`, `db.progress`.
+
+### What `ping` reports about the engines
+
+`engines` separates three things a client keeps confusing:
+
+- `apple_dictionary` / `apple_translation` — what this Mac **can** do, probed
+  through the sidecar. Plus `translation_status`
+  (`installed`/`supported`/`unsupported`/`unavailable`), `dictionaries`, and
+  the resolved `helper` path.
+- `enabled` — what the **user** left switched on: the six keys of the `sources`
+  block, straight from the config. Available and enabled are independent, and
+  onboarding needs both: "no dictionary on this Mac" and "you turned the
+  dictionary off" are different stages with different buttons.
+- `stale` — the cached probe aged past its TTL. `ping` answers from cache and
+  refreshes behind the reply, so the *next* `ping` is fresh; `engines.refresh`
+  waits for the probe and returns the new snapshot.
+
+A snapshot that was never taken is not the same as an aged one. The startup
+probe is fire-and-forget and the socket opens right behind it, so a fast client
+used to read `translation_status: "unknown"` with both engines `false` — which
+the shell latches into `appleTranslationReady`, painting the Apple onboarding
+stages as unavailable on a healthy Mac. `ping` now waits for that first probe
+(capped at 5 s, well inside the shell's 30 s request timeout) and only the aged
+path stays lock-free. **So `unknown` never reaches a client that asked once.**
+
+`db` reports `primary`/`fallback`/`definitions` as booleans plus a `sources`
+map naming the directory each file actually came from — one shared `dir` lied
+whenever the bases were split across directories.
+
+### Sources, and how a client turns one off
+
+`settings.get` / `settings.save` carry a `sources` object with exactly six
+boolean keys: `apple_dictionary`, `apple_translation`, `google`, `cambridge`,
+`offline_examples`, `definitions_pack`. The pipeline reads them through a
+`ContextVar` scoped to the request, so a toggle takes effect on the next
+translation without a restart.
+
+`settings.save` is **stricter than reading the config file**, deliberately. An
+unknown key, a non-boolean value, or a `sources` that is not an object fails
+with `invalid_params` and changes nothing on disk. Loading stays lenient so an
+older config keeps working, but a client that sends nonsense must hear about it
+rather than have every source silently switched back on.
+
+Turning all six off is allowed. Translation then stops with an explanatory
+notification instead of an empty popup, which is indistinguishable from a
+broken app.
+
+### Downloading the offline bases
+
+`db.download` starts the missing files from `scripts/db-bundle.lock.json` and
+answers `{"started": bool, "files": [...]}`; on a full store it starts nothing.
+Progress arrives as `db.progress` events (`file`, `state`, `received`, `total`,
+`error`), throttled to 250 ms. `db.cancel` stops the run.
+
+The download is idempotent and resumable: a file whose sha256 already matches
+is skipped, a partial file continues with a `Range` request, and a file whose
+digest does not match is deleted rather than kept — a wrong 1.8 GB base that
+looks present is worse than an absent one.
 
 The view state carries both `translation` (hard-wrapped for the GTK label, kept
 for parity) and `translation_raw` (unwrapped — native clients should use this),

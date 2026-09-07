@@ -29,6 +29,7 @@ from desktop_app.platform.macos.ipc.protocol import (
     ErrorCode,
     Event,
     JsonObject,
+    Method,
     Phase,
     ProtocolDecodeError,
     Request,
@@ -543,3 +544,19 @@ def test_backend_api_ping_waits_for_the_first_engine_probe(tmp_path: Path) -> No
         assert awaited == 1, "an aged snapshot must not await the probe"
 
     asyncio.run(scenario())
+
+
+def test_docs_list_every_method_and_event() -> None:
+    """The docs are the first thing a new client reads, so they must be complete.
+
+    This list had silently fallen three methods behind the enum; nothing caught
+    it, because nothing was watching.
+    """
+    docs = Path(__file__).resolve().parents[1] / "docs" / "macos.md"
+    text = docs.read_text(encoding="utf-8")
+
+    missing_methods = sorted(m.value for m in Method if f"`{m.value}`" not in text)
+    missing_events = sorted(e.value for e in Event if f"`{e.value}`" not in text)
+
+    assert not missing_methods, f"undocumented methods: {missing_methods}"
+    assert not missing_events, f"undocumented events: {missing_events}"
