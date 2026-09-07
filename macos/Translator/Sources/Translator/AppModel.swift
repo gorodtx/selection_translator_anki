@@ -20,6 +20,10 @@ final class AppModel {
 
     // Ambient
     var banner: BannerMessage?
+    /// The note type's real field names, and why they could not be read. Empty with no
+    /// error means nothing can be concluded, which is not the same as a mismatch.
+    var ankiModelFields: [String] = []
+    var ankiModelFieldsError: String?
     /// Progress per database file while a download runs; empty when none is.
     var databaseDownloads: [String: DatabaseProgressEvent] = [:]
     var history: [HistoryItem] = []
@@ -154,6 +158,35 @@ final class AppModel {
         ) else { return }
         ping?.engines = engines
         appleTranslationReady = engines.appleTranslation
+    }
+
+    /// Read the note type's fields, so a name that Anki does not have can be shown as
+    /// wrong while the user is still looking at it, rather than failing at the moment a
+    /// card is added.
+    func loadModelFields() async {
+        guard let answer = try? await client.send(
+            IPCMethod.ankiModelFields, as: AnkiModelFields.self
+        ) else {
+            ankiModelFields = []
+            ankiModelFieldsError = "The backend did not answer."
+            return
+        }
+        ankiModelFields = answer.fields
+        ankiModelFieldsError = answer.error
+    }
+
+    /// Configured names the note type does not have. Empty while nothing is known.
+    var ankiFieldIssues: [AnkiFieldIssue] {
+        AnkiFieldCheck.issues(
+            configured: [
+                settings.anki.fields.word,
+                settings.anki.fields.translation,
+                settings.anki.fields.exampleEn,
+                settings.anki.fields.definitionsEn,
+                settings.anki.fields.image,
+            ],
+            modelFields: ankiModelFields
+        )
     }
 
     // MARK: - Offline databases

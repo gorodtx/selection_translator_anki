@@ -966,6 +966,18 @@ public struct AnkiAvailabilityEvent: Codable, Equatable, Sendable {
     public init(available: Bool) { self.available = available }
 }
 
+/// The note type's real field names. An empty list with no error is indistinguishable
+/// from a note type that does not exist, so it means "nothing to compare against".
+public struct AnkiModelFields: Codable, Equatable, Sendable {
+    public var fields: [String]
+    public var error: String?
+
+    public init(fields: [String] = [], error: String? = nil) {
+        self.fields = fields
+        self.error = error
+    }
+}
+
 /// The answer to `db.download`. `files` names only what is missing, so an empty list with
 /// `started: false` means the store is already complete rather than that nothing worked.
 public struct DatabaseDownloadStart: Codable, Equatable, Sendable {
