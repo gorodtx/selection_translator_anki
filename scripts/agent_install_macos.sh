@@ -205,15 +205,39 @@ run_with_deadline() {
 }
 
 login_item_state() {
+  # Two sources, because they answer different questions and one of them stops
+  # answering. `sfltool dumpbtm` is the only way to see the name macOS shows the user,
+  # and it hangs — indefinitely, with nothing on either stream, and once it is stuck
+  # every later call queues behind it. `launchctl print` costs nine milliseconds and
+  # never hung here, but it knows nothing about how the item is presented. So the
+  # reliable fact comes from launchctl and the presentation is a bonus when available;
+  # "unknown" is reserved for genuinely knowing nothing, not for a tool that hung.
+  local service program=""
+  service="$(run_with_deadline 5 launchctl print "gui/$(id -u)/${AGENT_LABEL:-com.translator.desktop}" || true)"
+  if [[ -n "${service}" ]]; then
+    program="$(printf '%s' "${service}" | /usr/bin/sed -n 's/^[[:space:]]*program = //p' | head -1)"
+  fi
+
   local dump
   dump="$(run_with_deadline "${SFLTOOL_TIMEOUT_S}" sfltool dumpbtm || true)"
-  [[ -n "${dump}" ]] || { echo "unknown"; return; }
-  if printf '%s' "${dump}" | /usr/bin/grep -q 'Executable Path:.*TranslatorBackend'; then
-    echo "registered as Translator"
-  elif printf '%s' "${dump}" | /usr/bin/grep -q 'com.translator.desktop'; then
-    echo "registered, not attributed to the app"
+  if [[ -n "${dump}" ]]; then
+    if printf '%s' "${dump}" | /usr/bin/grep -q 'Executable Path:.*TranslatorBackend'; then
+      echo "registered as Translator"
+    elif printf '%s' "${dump}" | /usr/bin/grep -q 'com.translator.desktop'; then
+      echo "registered, not attributed to the app"
+    else
+      echo "absent"
+    fi
+    return
+  fi
+
+  # No dump. Say what launchd knows rather than nothing.
+  if [[ -z "${program}" ]]; then
+    echo "unknown"
+  elif [[ "${program}" == *"/Contents/MacOS/TranslatorBackend" ]]; then
+    echo "agent registered on the signed launcher; presentation unread"
   else
-    echo "absent"
+    echo "agent registered on ${program##*/}; presentation unread"
   fi
 }
 

@@ -257,3 +257,27 @@ def test_agent_installer_never_waits_on_sfltool_without_a_deadline() -> None:
             assert "run_with_deadline" in line, f"bare sfltool call: {line.strip()}"
     # A check that could not answer is "unknown", never "absent".
     assert 'echo "unknown"' in text
+
+
+def test_agent_installer_still_reports_the_login_item_without_sfltool() -> None:
+    """A tool that hangs must not cost the report its answer.
+
+    `sfltool dumpbtm` is the only source for the name macOS shows the user, and it
+    stopped answering mid-session: the binary itself still prints its usage, only the
+    dump wedges. `launchctl print` costs nine milliseconds and knows what the agent
+    runs, so the reliable half of the answer survives and "unknown" stays reserved for
+    genuinely knowing nothing.
+    """
+    text = AGENT_INSTALLER.read_text(encoding="utf-8")
+    body = text.split("login_item_state()", 1)[1].split("\n}", 1)[0]
+
+    assert "launchctl print" in body
+    # The fallback has to be able to name the launcher, or it reports nothing useful.
+    assert "TranslatorBackend" in body
+    # Order matters — reaching for launchctl only after the dump would let the hang cost
+    # the answer anyway — and it has to be read from the code, not from a comment that
+    # happens to mention the tool first.
+    code = "\n".join(
+        line for line in body.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert code.index("launchctl print") < code.index("sfltool")
