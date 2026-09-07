@@ -2,17 +2,28 @@ import SwiftUI
 import Translation
 import TranslatorCore
 
-/// Settings: shortcut, permissions, engines, Anki, database status.
+/// Settings: setup stages first, then shortcut, engines, Anki and database detail.
+///
+/// The permissions card is gone: it said the same thing as the setup stage above it, and
+/// two rows claiming the same state is how they drift apart.
 struct SettingsView: View {
     @Bindable var model: AppModel
     var onHotKeyChange: (KeyCombo) -> Void
 
+    private static let shortcutAnchor = "shortcut-card"
+
     var body: some View {
         GlassEffectContainer(spacing: 12) {
+            ScrollViewReader { scroller in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    shortcutCard
-                    permissionsCard
+                    // What a fresh install still has to do, before the detail below.
+                    SetupCard(model: model) {
+                        // The recorder lives further down this window, so the stage hands
+                        // the user to it instead of opening a second place to do it.
+                        withAnimation(Motion.stateChange) { scroller.scrollTo(Self.shortcutAnchor, anchor: .top) }
+                    }
+                    shortcutCard.id(Self.shortcutAnchor)
                     enginesCard
                     ankiCard
                     databaseCard
@@ -26,6 +37,7 @@ struct SettingsView: View {
                 .padding(Layout.gutter)
             }
             .scrollContentBackground(.hidden)
+            }
         }
         .frame(minWidth: 480, minHeight: 520)
         .task {
@@ -50,27 +62,6 @@ struct SettingsView: View {
             Text("Also available from the Services menu on any selected text, with no permissions.")
                 .font(.captionText)
                 .foregroundStyle(.tertiary)
-        }
-    }
-
-    private var permissionsCard: some View {
-        Card("Permissions") {
-            StatusRow(
-                title: "Accessibility",
-                detail: model.accessibilityTrusted
-                    ? "Granted — the shortcut can read the selection anywhere."
-                    : "Not granted — the shortcut falls back to the Services menu.",
-                ok: model.accessibilityTrusted
-            )
-            if !model.accessibilityTrusted {
-                HStack(spacing: 8) {
-                    Button("Request access") { SelectionCapture.requestTrust() }
-                    Button("Open Accessibility Settings") { SelectionCapture.openAccessibilitySettings() }
-                    Button("Re-check") { model.refreshAccessibilityTrust() }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
         }
     }
 

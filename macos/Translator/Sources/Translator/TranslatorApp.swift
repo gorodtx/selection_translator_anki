@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         model.loadStoredHotKey()
         applyHotKey(model.hotKey)
+        openSetupIfUnfinished()
         model.start()
         observePopupResize()
         openDebugTargets()
@@ -103,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let registered = hotKeys.register(combo) { [weak self] in
             MainActor.assumeIsolated { self?.translateSelection() }
         }
+        model.shortcutRegistered = registered
         if !registered {
             announce("\(combo.displayString) is already taken by another app.", level: .warning)
         }
@@ -122,6 +124,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         present(text: text)
     }
+
+    /// Show Settings on a launch where setup is not finished.
+    ///
+    /// A menu bar app with nothing on screen gives a new user nowhere to start, and the
+    /// steps that make it work — a permission, a language pair, Anki — are all in
+    /// Settings. Once the required steps are done it stops appearing, so it never
+    /// becomes a nag; the flag remembers that across launches.
+    private func openSetupIfUnfinished() {
+        guard !UserDefaults.standard.bool(forKey: Self.setupSeenKey) else { return }
+        Task { @MainActor in
+            // Give the backend its retry burst, so the stages show real state and not
+            // "unknown" for everything.
+            try? await Task.sleep(for: .seconds(2))
+            model.refreshAccessibilityTrust()
+            await model.refreshAll()
+            let plan = SetupPlanner.plan(
+                connected: model.isConnected,
+                ping: model.ping,
+                accessibilityTrusted: model.accessibilityTrusted,
+                shortcutRegistered: model.shortcutRegistered,
+                shortcut: model.hotKey.displayString,
+                anki: model.ankiStatus
+            )
+            if plan.isReady {
+                UserDefaults.standard.set(true, forKey: Self.setupSeenKey)
+            } else {
+                showSettings()
+            }
+        }
+    }
+
+    static let setupSeenKey = "setupCompleted"
 
     /// Say something to the user when there is no popup on screen to say it in.
     ///

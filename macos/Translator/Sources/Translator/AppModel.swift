@@ -26,6 +26,8 @@ final class AppModel {
     var settings = BackendSettings()
     var hotKey: KeyCombo = KeyCombo.defaultCombo
     var accessibilityTrusted: Bool = SelectionCapture.isTrusted
+    /// Whether the current combination actually registered; another app may own it.
+    var shortcutRegistered = true
     var appleTranslationReady = false
 
     // Anki sheet
