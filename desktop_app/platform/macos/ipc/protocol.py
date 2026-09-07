@@ -50,6 +50,8 @@ class Method(StrEnum):
     ANKI_CREATE_MODEL = "anki.create_model"
     ANKI_PREPARE_UPSERT = "anki.prepare_upsert"
     ANKI_APPLY_UPSERT = "anki.apply_upsert"
+    DB_DOWNLOAD = "db.download"
+    DB_CANCEL = "db.cancel"
     SETTINGS_GET = "settings.get"
     SETTINGS_SAVE = "settings.save"
     SHUTDOWN = "shutdown"
@@ -59,6 +61,7 @@ class Event(StrEnum):
     TRANSLATION_STATE = "translation.state"
     NOTIFICATION = "notification"
     ANKI_AVAILABILITY = "anki.availability"
+    DB_PROGRESS = "db.progress"
 
 
 class Phase(StrEnum):
@@ -325,6 +328,18 @@ def anki_preview_to_json(preview: AnkiUpsertPreview) -> JsonObject:
             for match in preview.matches
         ],
         "available_fields": list(preview.available_fields),
+    }
+
+
+def db_progress_to_json(
+    *, file: str, state: str, received: int, total: int, error: str | None
+) -> JsonObject:
+    return {
+        "file": file,
+        "state": state,
+        "received": received,
+        "total": total,
+        "error": error,
     }
 
 

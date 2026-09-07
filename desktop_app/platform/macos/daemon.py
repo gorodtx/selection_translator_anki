@@ -39,12 +39,19 @@ from desktop_app.platform.macos.ipc.protocol import (
     anki_status_to_json,
     config_from_json,
     config_to_json,
+    db_progress_to_json,
     deck_list_to_json,
     get_int,
     get_object,
     get_str,
     history_item_to_json,
     view_state_to_json,
+)
+from desktop_app.platform.macos.db_download import (
+    DatabaseDownloader,
+    LockError,
+    Progress,
+    resolve_lock_path,
 )
 from desktop_app.platform.macos.ipc.server import IpcServer
 from desktop_app.platform.macos.session import (
@@ -123,6 +130,7 @@ class BackendApi:
         request_shutdown: Callable[[], None],
         engines: Callable[[], JsonObject] | None = None,
         refresh_engines: Callable[[], None] | None = None,
+        downloader: DatabaseDownloader | None = None,
     ) -> None:
         self._session = session
         self._loop = loop
@@ -130,6 +138,7 @@ class BackendApi:
         self._request_shutdown = request_shutdown
         self._engines = engines or (lambda: engine_status(self._session.config.sources))
         self._refresh_engines = refresh_engines
+        self._downloader = downloader
 
     async def handle(self, request: Request) -> JsonObject:
         try:
@@ -213,6 +222,21 @@ class BackendApi:
 
             outcome = await self._await_reply(start_apply, _ANKI_TIMEOUT_S)
             return {"outcome": outcome.outcome, "message": outcome.message}
+        if method is Method.DB_DOWNLOAD:
+            if self._downloader is None:
+                raise ProtocolDecodeError(
+                    ErrorCode.NOT_READY, "downloads are not available here"
+                )
+            try:
+                pending = self._downloader.start()
+            except LockError as exc:
+                raise ProtocolDecodeError(ErrorCode.INTERNAL, str(exc)) from exc
+            return {"started": self._downloader.is_running, "files": list(pending)}
+        if method is Method.DB_CANCEL:
+            cancelled = (
+                self._downloader.cancel() if self._downloader is not None else False
+            )
+            return {"cancelled": cancelled}
         if method is Method.SETTINGS_GET:
             return config_to_json(session.config)
         if method is Method.SETTINGS_SAVE:
@@ -309,12 +333,30 @@ class Daemon:
             )
             future.add_done_callback(_log_engine_refresh)
 
+        def on_progress(progress: Progress) -> None:
+            emit(
+                Event.DB_PROGRESS,
+                db_progress_to_json(
+                    file=progress.file,
+                    state=str(progress.state),
+                    received=progress.received,
+                    total=progress.total,
+                    error=progress.error,
+                ),
+            )
+
+        downloader = DatabaseDownloader(
+            lock_path=resolve_lock_path(),
+            target_dir=paths.db_dir(),
+            emit=on_progress,
+        )
         api = BackendApi(
             session=session,
             loop=loop,
             socket_path=self._socket_path,
             request_shutdown=self.request_stop,
             refresh_engines=refresh_engines,
+            downloader=downloader,
         )
         if apple.is_available():
             refresh_engines()
