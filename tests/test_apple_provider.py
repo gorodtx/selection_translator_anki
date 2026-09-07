@@ -434,10 +434,26 @@ def test_helper_client_reads_entries_larger_than_the_default_stream_limit(
 
 
 def test_lookup_runs_define_and_translate_together(fake_helper: Path) -> None:
+    """Both legs run; the point is that they run, not how fast a fake replies.
+
+    `lookup()` defaults to the production budgets — 0.6s for define, 1.5s for
+    translate — and this failed once with a translation but no definition,
+    right after a bundle build, an rsync and an app launch had loaded the
+    machine. A fake helper is a process that has to spawn: gating a behavioural
+    assertion on a latency budget makes it fail for a reason it is not testing.
+    The direct `helper.define` calls in this file were already given
+    TEST_TIMEOUT_S for exactly this; the `lookup()` path was missed.
+    """
+
     async def scenario() -> apple.AppleLookup:
         try:
             return await apple.lookup(
-                text="ok:bank", lookup_text="bank", source_lang="en", target_lang="ru"
+                text="ok:bank",
+                lookup_text="bank",
+                source_lang="en",
+                target_lang="ru",
+                define_timeout=TEST_TIMEOUT_S,
+                translate_timeout=TEST_TIMEOUT_S,
             )
         finally:
             await apple.close_helper()
