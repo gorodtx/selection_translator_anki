@@ -14,9 +14,22 @@ public enum SetupStepID: String, Sendable, CaseIterable {
     case databases
     case accessibility
     case shortcut
+    case loginItem
     case dictionary
     case translationPair
     case anki
+}
+
+/// Whether the app opens itself at login. Kept as a value so the plan stays pure: the
+/// framework that answers this lives in the app layer.
+public enum LoginItemState: Equatable, Sendable {
+    case enabled
+    /// Registered, but macOS is waiting for the user to allow it in System Settings.
+    case requiresApproval
+    case notRegistered
+    /// A state this build does not know. Nothing a button here can fix, and guessing
+    /// would be worse than saying so.
+    case unavailable
 }
 
 public enum SetupState: Equatable, Sendable {
@@ -38,6 +51,8 @@ public enum SetupAction: Equatable, Sendable {
     case grantAccessibility
     case openAccessibilitySettings
     case recordShortcut
+    case enableLoginItem
+    case openLoginItemsSettings
     case downloadLanguagePair
     case downloadDatabases
     case cancelDatabaseDownload
@@ -126,6 +141,7 @@ public enum SetupPlanner {
         accessibilityTrusted: Bool,
         shortcutRegistered: Bool,
         shortcut: String,
+        loginItem: LoginItemState,
         anki: AnkiStatus
     ) -> SetupPlan {
         var steps: [SetupStep] = []
@@ -134,6 +150,7 @@ public enum SetupPlanner {
         steps.append(databaseStep(ping: ping, connected: connected))
         steps.append(accessibilityStep(trusted: accessibilityTrusted))
         steps.append(shortcutStep(registered: shortcutRegistered, shortcut: shortcut))
+        steps.append(loginItemStep(state: loginItem))
         steps.append(dictionaryStep(ping: ping, connected: connected))
         steps.append(translationStep(ping: ping, connected: connected))
         steps.append(ankiStep(anki: anki))
@@ -262,6 +279,51 @@ public enum SetupPlanner {
             action: .recordShortcut,
             actionLabel: "Change…"
         )
+    }
+
+    /// The backend's own agent covers only the backend. Without this the app is gone
+    /// after a restart while the daemon still answers — which is why the gap read as a
+    /// working install.
+    private static func loginItemStep(state: LoginItemState) -> SetupStep {
+        switch state {
+        case .enabled:
+            return SetupStep(
+                id: .loginItem,
+                title: "Open at login",
+                detail: "The app is there after a restart, so the shortcut works straight away.",
+                state: .done,
+                isOptional: true
+            )
+        case .requiresApproval:
+            // Registered already; the remaining click is one only the user can make.
+            return SetupStep(
+                id: .loginItem,
+                title: "Open at login",
+                detail: "Waiting for your approval in System Settings > General > Login Items.",
+                state: .actionNeeded,
+                isOptional: true,
+                action: .openLoginItemsSettings,
+                actionLabel: "Open…"
+            )
+        case .notRegistered:
+            return SetupStep(
+                id: .loginItem,
+                title: "Open at login",
+                detail: "Off. The shortcut only works once the app is open, so it has to be started by hand after a restart.",
+                state: .actionNeeded,
+                isOptional: true,
+                action: .enableLoginItem,
+                actionLabel: "Turn on"
+            )
+        case .unavailable:
+            return SetupStep(
+                id: .loginItem,
+                title: "Open at login",
+                detail: "The system reported a state this version does not understand.",
+                state: .waiting,
+                isOptional: true
+            )
+        }
     }
 
     private static func dictionaryStep(ping: PingInfo?, connected: Bool) -> SetupStep {

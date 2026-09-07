@@ -11,6 +11,7 @@ private func plan(
     trusted: Bool = true,
     shortcutRegistered: Bool = true,
     shortcut: String = "⌥⌘T",
+    loginItem: LoginItemState = .enabled,
     anki: AnkiStatus = readyAnki()
 ) -> SetupPlan {
     SetupPlanner.plan(
@@ -19,6 +20,7 @@ private func plan(
         accessibilityTrusted: trusted,
         shortcutRegistered: shortcutRegistered,
         shortcut: shortcut,
+        loginItem: loginItem,
         anki: anki
     )
 }
@@ -94,6 +96,40 @@ private func step(_ plan: SetupPlan, _ id: SetupStepID) -> SetupStep {
 
     /// The backend can fetch the databases now, so the stage is a button rather than an
     /// instruction to go and run a shell script.
+    /// The backend's launchd agent covers only the backend. After a restart the daemon
+    /// answered and the databases were open while the shortcut, the popup and Settings
+    /// did not exist — which is why the gap read as a working install.
+    @Test func openAtLoginIsAStageWithItsOwnStates() {
+        let off = plan(loginItem: .notRegistered)
+        #expect(step(off, .loginItem).state == .actionNeeded)
+        #expect(step(off, .loginItem).action == .enableLoginItem)
+        #expect(step(off, .loginItem).detail.contains("by hand"))
+        // The app still works when opened by hand, so declining must not nag forever.
+        #expect(off.isReady)
+
+        let on = plan(loginItem: .enabled)
+        #expect(step(on, .loginItem).state == .done)
+        #expect(step(on, .loginItem).action == nil)
+        #expect(on.suggested.isEmpty)
+    }
+
+    /// Registered but not yet allowed is a third answer: the remaining click is one only
+    /// the user can make, so the button leads there instead of registering again.
+    @Test func awaitingApprovalLeadsToSystemSettings() {
+        let result = plan(loginItem: .requiresApproval)
+        let stage = step(result, .loginItem)
+        #expect(stage.state == .actionNeeded)
+        #expect(stage.action == .openLoginItemsSettings)
+        #expect(stage.detail.contains("Login Items"))
+    }
+
+    /// A copy the system cannot register is not something a button fixes.
+    @Test func anUnregistrableCopyOffersNoAction() {
+        let stage = step(plan(loginItem: .unavailable), .loginItem)
+        #expect(stage.state == .waiting)
+        #expect(stage.action == nil)
+    }
+
     @Test func missingDatabasesOfferTheDownload() {
         let result = plan(ping: readyPing(primary: false))
         let databases = step(result, .databases)
